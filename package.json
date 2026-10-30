@@ -1,0 +1,21 @@
+{
+  "name": "ringsymphony",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node tests/world.test.mjs && node tests/controller.test.mjs"
+  },
+  "dependencies": {
+    "three": "^0.170.0",
+    "tone": "^15.1.22"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}
