@@ -1,32 +1,43 @@
 import * as THREE from "three"
 
 // All scenery, people, instruments and UI geometry are original procedural assets.
-const GOLD = 0xffd68a
-const COOL = 0x87d9ff
-const material = (color, roughness = 0.65, metalness = 0, emissive = 0x000000) => new THREE.MeshStandardMaterial({ color, roughness, metalness, emissive })
-const black = material(0x161a23)
-const shoe = material(0x090c12, 0.3)
-const white = material(0xf5eee0)
-const brass = material(0xbb9353, 0.35, 0.7)
-const silver = material(0xc5d8df, 0.24, 0.8)
-const oak = material(0x743d1d, 0.4)
-const bowWood = material(0xe0a85a, 0.38, 0.05, 0x3a240c)
+// Candy music-box palette: each section owns one pastel, shared by suits, halos and notes.
+const PINK = 0xd9898f
+const MINT = 0x86bfa3
+const LILAC = 0x8e9ccf
+const BUTTER = 0xe3b45e
+const SKY = 0x86b9d6
+const GOLD = BUTTER
+const COOL = SKY
+export const SECTION_COLOR = { violin: PINK, cello: LILAC, flute: MINT, piano: BUTTER }
+const toonRamp = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 215, 215, 215, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat)
+toonRamp.minFilter = THREE.NearestFilter
+toonRamp.magFilter = THREE.NearestFilter
+toonRamp.needsUpdate = true
+const material = (color, _roughness, _metalness, emissive = 0x000000) => new THREE.MeshToonMaterial({ color, emissive, gradientMap: toonRamp })
+const shade = (hex, k) => new THREE.Color(hex).multiplyScalar(k).getHex()
+const black = material(0x4a4d5e)
+const shoe = material(0x33364a)
+const white = material(0xfffaf2)
+const brass = material(BUTTER)
+const silver = material(0xe3eef7)
+const oak = material(0xd98b52)
+const bowWood = material(0xf2b56b)
 const glow = (color, opacity = 1) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide })
-// Ink-and-gilt orchestra: one metal accent per section, graphic hair, tailored black.
-const ink = material(0x1a1e28, 0.55, 0.06)
-const inkDeep = material(0x10131a, 0.7)
-const ivory = material(0xf4efe4, 0.68)
-const gilt = material(0xe6c98a, 0.28, 0.8, 0x4a3210)
-const lip = material(0x8a4b48, 0.55)
-const eyeInk = material(0x140e0c, 0.35)
-const skins = [0xd7a784, 0xa36d4d, 0xf0c7a6, 0xc48b62].map((color) => material(color, 0.8))
-const hairColors = [0x1b140f, 0x6a432c, 0xb7aea4, 0x241816, 0x3a2418].map((color) => material(color, 0.5, 0.08))
-const sectionMat = {
-  violin: gilt,
-  cello: material(0x7a2436, 0.5, 0.25, 0x2a0c12),
-  flute: material(0xc5dde4, 0.25, 0.75, 0x1c3038),
-  piano: gilt,
-}
+const ivory = material(0xfffaf2)
+const gilt = material(BUTTER, 0, 0, 0x3a2a00)
+const lip = material(0xa8585f)
+const eyeInk = material(0x2b2d3a)
+const blush = glow(0xe39a96, 0.3)
+const skins = [0xf3cdb3, 0xd9a47f, 0xf7dcc8, 0xc58d68].map((color) => material(color))
+const hairColors = [0x3a2a26, 0x6e4a34, 0xc9a46a, 0x2b2a35, 0x8f5a3e].map((color) => material(color))
+const suits = Object.fromEntries(Object.entries(SECTION_COLOR).map(([part, color]) => [part, {
+  color: new THREE.Color(color),
+  coat: material(color),
+  deep: material(shade(color, 0.8)),
+  pants: material(0x3a3d4f),
+}]))
+const sectionMat = { violin: ivory, cello: ivory, flute: ivory, piano: ivory }
 
 function mesh(parent, geometry, mat, x = 0, y = 0, z = 0) {
   const item = new THREE.Mesh(geometry, mat)
@@ -110,11 +121,12 @@ function texture(draw, width = 512, height = 512) {
   return map
 }
 const scoreMap = () => texture((g, w, h) => {
-  g.fillStyle = '#f1e6cc'; g.fillRect(0, 0, w, h)
-  g.fillStyle = '#302a23'; g.font = '24px Georgia'; g.textAlign = 'center'; g.fillText('ÉTUDE  ·  I', w / 2, 45)
+  g.fillStyle = '#f7f1e6'; g.fillRect(0, 0, w, h)
+  g.fillStyle = '#4a4d5e'; g.font = 'bold 26px "Arial Rounded MT Bold", sans-serif'; g.textAlign = 'center'; g.fillText('♪ ÉTUDE · I ♪', w / 2, 45)
+  g.fillStyle = '#3d4050'
   for (let staff = 0; staff < 5; staff++) {
     const y = 85 + staff * 80
-    g.strokeStyle = '#686052'; g.lineWidth = 1.5
+    g.strokeStyle = '#a9a39a'; g.lineWidth = 1.5
     for (let i = 0; i < 5; i++) { g.beginPath(); g.moveTo(32, y + i * 9); g.lineTo(w - 32, y + i * 9); g.stroke() }
     for (let n = 0; n < 12; n++) {
       const x = 52 + n * 35, ny = y + ((n * 7 + staff * 3) % 9) * 4.5
@@ -138,7 +150,7 @@ function stand(parent, x, z, scale = 1) {
   return group
 }
 function chair(parent, accent) {
-  const seatMat = material(0x44212a, 0.9)
+  const seatMat = material(0x8a5a44)
   box(parent, [0.43, 0.09, 0.43], seatMat, 0, 0.46)
   const back = box(parent, [0.43, 0.35, 0.07], seatMat, 0, 0.77, -0.2); back.rotation.x = -0.1
   for (const x of [-0.17, 0.17]) for (const z of [-0.17, 0.17]) rod(parent, [x, 0.45, z], [x * 1.2, 0.02, z * 1.2], 0.018, black)
@@ -149,7 +161,7 @@ function chair(parent, accent) {
   }
 }
 function bench(parent) {
-  box(parent, [0.72, 0.07, 0.34], material(0x3a2428, 0.85), 0, 0.48)
+  box(parent, [0.72, 0.07, 0.34], material(0x8a5a44), 0, 0.48)
   for (const x of [-0.28, 0.28]) for (const z of [-0.12, 0.12]) rod(parent, [x, 0.45, z], [x, 0.03, z], 0.02, black)
 }
 function stringInstrument(parent, cello) {
@@ -202,14 +214,12 @@ function buildHead(head, skin, hair, index, part) {
   hairStyle(head, hair, index)
   for (const s of [-1, 1]) {
     oval(head, [0.018, 0.032, 0.014], skin, s * 0.104, -0.008, 0)
-    const eye = box(head, [0.042, 0.014, 0.008], eyeInk, s * 0.036, 0.02, 0.092)
-    eye.rotation.z = s * -0.08
-    oval(head, [0.008, 0.008, 0.005], glow(0xfff8ee), s * 0.046, 0.024, 0.098)
-    const brow = box(head, [0.046, 0.008, 0.006], hair, s * 0.036, 0.052, 0.088)
-    brow.rotation.z = s * -0.16
+    oval(head, [0.017, 0.021, 0.008], eyeInk, s * 0.038, 0.012, 0.09)
+    oval(head, [0.0065, 0.0065, 0.004], glow(0xffffff), s * 0.038 + 0.006, 0.02, 0.098)
+    oval(head, [0.024, 0.012, 0.006], blush, s * 0.064, -0.026, 0.082)
   }
-  oval(head, [0.012, 0.024, 0.016], skin, 0, -0.004, 0.096)
-  box(head, [0.03, 0.005, 0.005], lip, 0, -0.052, 0.084)
+  const smile = mesh(head, new THREE.TorusGeometry(0.014, 0.0032, 6, 14, Math.PI), lip, 0, -0.036, 0.091)
+  smile.rotation.z = Math.PI
   if (part === "piano") {
     for (const s of [-1, 1]) {
       const rim = mesh(head, new THREE.TorusGeometry(0.026, 0.003, 6, 14), gilt, s * 0.038, 0.018, 0.09)
@@ -220,6 +230,8 @@ function buildHead(head, skin, hair, index, part) {
 }
 function buildTorso(body, part, accent, skin, index) {
   const flute = part === "flute"
+  const ink = suits[part].coat
+  const inkDeep = suits[part].deep
   oval(body, [0.15, 0.07, 0.11], ink, 0, 0.64, 0.02)
   const torso = mesh(body, new THREE.CylinderGeometry(0.15, 0.12, 0.4, 12), ink, 0, 0.9, 0)
   torso.scale.z = 0.68
@@ -247,7 +259,8 @@ function buildTorso(body, part, accent, skin, index) {
     if (index === 9) oval(body, [0.016, 0.016, 0.01], gilt, 0.1, 1.02, 0.14)
   }
 }
-function buildLegs(group) {
+function buildLegs(group, part) {
+  const ink = suits[part].pants
   for (const s of [-1, 1]) {
     rod(group, [s * 0.09, 0.58, 0.02], [s * 0.15, 0.3, 0.24], 0.062, ink)
     rod(group, [s * 0.15, 0.3, 0.24], [s * 0.17, 0.08, 0.36], 0.05, ink)
@@ -302,12 +315,13 @@ function musician(part, x, z, index) {
   const skin = skins[index % skins.length]
   const hair = hairColors[index % hairColors.length]
   const accent = sectionMat[part]
+  const ink = suits[part].coat
   if (part === "piano") bench(group)
-  else chair(group, accent)
-  if (part !== "flute") buildLegs(group)
+  else chair(group, ink)
+  if (part !== "flute") buildLegs(group, part)
   const body = new THREE.Group(); group.add(body)
   buildTorso(body, part, accent, skin, index)
-  const head = new THREE.Group(); head.position.y = 1.31; body.add(head)
+  const head = new THREE.Group(); head.position.y = 1.36; head.scale.setScalar(1.25); body.add(head)
   buildHead(head, skin, hair, index, part)
   const rig = {}
   let moving = null
@@ -360,9 +374,23 @@ function addFinger(group, skin, x, length, curl) {
   finger.userData.mid = mid
   return finger
 }
+function starGeometry(outer, inner, depth) {
+  const s = new THREE.Shape()
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 ? inner : outer
+    const a = Math.PI / 2 + i * Math.PI / 5
+    if (i === 0) s.moveTo(Math.cos(a) * r, Math.sin(a) * r)
+    else s.lineTo(Math.cos(a) * r, Math.sin(a) * r)
+  }
+  s.closePath()
+  const geometry = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelSize: depth * 0.6, bevelThickness: depth * 0.6, bevelSegments: 2 })
+  geometry.center()
+  return geometry
+}
 function hand(right) {
   const group = new THREE.Group()
-  const skin = material(0xb8744e, 0.78)
+  const skin = material(0xf0c8ad)
+  const ink = material(0x3a3f58)
   rod(group, [0, -0.32, 0.16], [0, -0.07, 0.02], 0.052, ink, 0.04)
   rod(group, [0, -0.075, 0.028], [0, -0.04, 0.012], 0.046, ivory, 0.042)
   oval(group, [0.011, 0.011, 0.007], gilt, right ? 0.03 : -0.03, -0.045, 0.03)
@@ -386,8 +414,10 @@ function hand(right) {
     batonLag = new THREE.Group()
     group.add(batonLag)
     rod(batonLag, [0.02, -0.01, -0.04], [-0.01, 0.08, -0.1], 0.014, oak, 0.011)
-    rod(batonLag, [-0.01, 0.08, -0.1], [-0.13, 0.46, -0.4], 0.005, ivory, 0.002)
-    tip = oval(batonLag, [0.012, 0.012, 0.012], glow(GOLD), -0.13, 0.46, -0.4)
+    rod(batonLag, [-0.01, 0.08, -0.1], [-0.12, 0.43, -0.38], 0.007, material(0xf3ece0), 0.005)
+    tip = mesh(batonLag, starGeometry(0.04, 0.018, 0.008), material(BUTTER, 0, 0, 0x8a5a00), -0.125, 0.45, -0.39)
+    tip.rotation.x = -0.5
+    oval(batonLag, [0.065, 0.065, 0.065], glow(0xfff1b8, 0.25), -0.125, 0.45, -0.39)
   }
   group.userData = { fingers, thumb, batonLag, tip }
   group.renderOrder = 6
@@ -398,7 +428,7 @@ const smooth = (t) => { const x = clamp01(t); return x * x * (3 - 2 * x) }
 function ictus(u) {
   return Math.sin(Math.pow(clamp01(u), 0.36) * Math.PI)
 }
-function animatePlayers(players, seconds, playing) {
+function animatePlayers(players, seconds, playing, sections, wall) {
   const hz = 96 / 60
   for (const person of players) {
     const { part, body, head, keys, index, rig } = person.userData
@@ -411,7 +441,10 @@ function animatePlayers(players, seconds, playing) {
     const breath = Math.sin(seconds * Math.PI * 2 * 0.42 + index * 0.7)
     const phase = seconds * Math.PI * 2 * hz / (part === "cello" ? 2 : 1) + index * 0.05
     const along = Math.sin(phase) * (active ? 1 : 0)
-    body.position.y = breath * (active ? 0.01 : 0.004)
+    // Waiting players hop in their seats; the entrance itself is a little bounce.
+    const eager = sections.pending.has(part) ? Math.abs(Math.sin(wall * 9 + index)) * 0.05 : 0
+    const bounce = active ? entrance * Math.abs(Math.sin(since * 14)) * 0.06 : 0
+    body.position.y = breath * (active ? 0.01 : 0.004) + eager + bounce
     body.rotation.set(
       (active ? 0.035 : 0.012) + breath * 0.008 + entrance * 0.07,
       active ? along * 0.045 : 0,
@@ -473,77 +506,140 @@ function arrowShape() {
   return new THREE.ShapeGeometry(s)
 }
 
+// Vertical colour bands instead of canvas gradients, so textures also build headless.
+function bands(g, w, h, stops) {
+  const steps = 64
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1)
+    const k = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)))
+    const local = t * (stops.length - 1) - k
+    g.fillStyle = '#' + new THREE.Color(stops[k]).lerp(new THREE.Color(stops[k + 1]), local).getHexString()
+    g.fillRect(0, Math.floor(i * h / steps), w, Math.ceil(h / steps) + 1)
+  }
+}
+function noteTexture(color, glyph) {
+  return texture((g, w, h) => {
+    g.font = `bold ${w * 0.78}px "Arial Rounded MT Bold", "Apple Symbols", sans-serif`
+    g.textAlign = 'center'; g.textBaseline = 'middle'
+    g.lineJoin = 'round'; g.lineWidth = w * 0.1; g.strokeStyle = '#ffffff'
+    g.strokeText(glyph, w / 2, h * 0.54)
+    g.fillStyle = '#' + new THREE.Color(color).getHexString()
+    g.fillText(glyph, w / 2, h * 0.54)
+  }, 128, 128)
+}
+// Candy bubble with a white rim, a glossy highlight and a chunky arrow drawn upright per direction.
+function bubbleTexture(color, direction) {
+  return texture((g, w, h) => {
+    const c = new THREE.Color(color)
+    const r = w * 0.4
+    g.fillStyle = '#' + c.clone().multiplyScalar(0.75).getHexString()
+    g.beginPath(); g.arc(w / 2, h / 2 + w * 0.035, r, 0, Math.PI * 2); g.fill()
+    g.fillStyle = '#' + c.getHexString()
+    g.beginPath(); g.arc(w / 2, h / 2, r, 0, Math.PI * 2); g.fill()
+    g.lineWidth = w * 0.055; g.strokeStyle = '#ffffff'
+    g.beginPath(); g.arc(w / 2, h / 2, r, 0, Math.PI * 2); g.stroke()
+    g.fillStyle = 'rgba(255,255,255,0.55)'
+    g.beginPath(); g.ellipse(w * 0.36, h * 0.3, w * 0.11, w * 0.06, -0.6, 0, Math.PI * 2); g.fill()
+    g.save(); g.translate(w / 2, h / 2)
+    g.rotate({ up: 0, right: Math.PI / 2, down: Math.PI, left: -Math.PI / 2 }[direction])
+    g.fillStyle = '#ffffff'; g.lineJoin = 'round'; g.lineWidth = w * 0.04; g.strokeStyle = '#ffffff'
+    g.beginPath()
+    g.moveTo(0, -w * 0.24); g.lineTo(w * 0.19, -w * 0.02); g.lineTo(w * 0.07, -w * 0.02)
+    g.lineTo(w * 0.07, w * 0.2); g.lineTo(-w * 0.07, w * 0.2); g.lineTo(-w * 0.07, -w * 0.02)
+    g.lineTo(-w * 0.19, -w * 0.02); g.closePath(); g.fill(); g.stroke()
+    g.restore()
+  }, 256, 256)
+}
+const BEAT_COLOR = { down: PINK, left: MINT, right: LILAC, up: BUTTER }
+
 export function createWorld(canvas) {
   paper = scoreMap()
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.35
+  renderer.toneMapping = THREE.NoToneMapping
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x080b12)
-  scene.fog = new THREE.FogExp2(0x0c0e16, 0.036)
+  scene.background = texture((g, w, h) => bands(g, w, h, [0xdcdbe8, 0xefe4dc, 0xf4ebe0]), 4, 256)
+  scene.fog = new THREE.FogExp2(0xefe6de, 0.022)
   const camera = new THREE.PerspectiveCamera(53, 1, 0.05, 60)
   camera.position.set(0, 2.2, 4.7)
   camera.lookAt(0, 1.25, -3)
   scene.add(camera)
-  scene.add(new THREE.HemisphereLight(0xd9e6ff, 0x6d4224, 1.65))
-  const key = new THREE.DirectionalLight(0xffdfad, 3.3); key.position.set(-3, 7, 4)
+  scene.add(new THREE.HemisphereLight(0xfbf7f2, 0xd8c3b0, 1.5))
+  const key = new THREE.DirectionalLight(0xfff3e6, 1.9); key.position.set(-3, 7, 4)
   key.castShadow = true; key.shadow.mapSize.set(2048, 2048)
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 25 })
   key.shadow.bias = -0.001; scene.add(key)
-  const rim = new THREE.DirectionalLight(0x8baaff, 1.8); rim.position.set(4, 4, -7); scene.add(rim)
+  const rim = new THREE.DirectionalLight(0xc9d4ff, 0.8); rim.position.set(4, 4, -7); scene.add(rim)
   for (const x of [-4, 0, 4]) {
-    const spot = new THREE.SpotLight(0xffd3a0, 45, 18, 0.51, 0.8, 1.5)
+    const spot = new THREE.SpotLight(0xfff0dc, 14, 18, 0.55, 0.9, 1.5)
     spot.position.set(x, 6, -1); spot.target.position.set(x * 0.7, 0, -3)
     scene.add(spot, spot.target)
-    oval(scene, [0.09, 0.045, 0.09], glow(0xffe9bd), x, 5.8, -1)
+    oval(scene, [0.09, 0.045, 0.09], glow(0xfff6d8), x, 5.8, -1)
   }
   const floorMap = texture((g, w, h) => {
-    g.fillStyle = '#84502e'; g.fillRect(0, 0, w, h)
+    g.fillStyle = '#d9b38c'; g.fillRect(0, 0, w, h)
     let seed = 42
     const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
     for (let row = 0; row < 8; row++) {
-      g.fillStyle = `hsl(29 38% ${32 + rand() * 11}%)`; g.fillRect(0, row * 64, w, 63)
-      g.fillStyle = '#372519'; g.fillRect(0, row * 64, w, 2)
-      for (let n = 0; n < 45; n++) {
-        g.strokeStyle = `rgba(32,18,9,${rand() * 0.15})`; g.beginPath()
+      g.fillStyle = `hsl(${27 + rand() * 5} 42% ${64 + rand() * 7}%)`; g.fillRect(0, row * 64, w, 63)
+      g.fillStyle = '#b28761'; g.fillRect(0, row * 64, w, 3)
+      for (let n = 0; n < 18; n++) {
+        g.strokeStyle = `rgba(140,92,58,${rand() * 0.16})`; g.beginPath()
         const y = row * 64 + rand() * 64
         g.moveTo(0, y); g.bezierCurveTo(150, y + rand() * 7, 340, y - rand() * 7, w, y); g.stroke()
       }
-      g.fillStyle = '#46301f'; g.fillRect(row % 2 ? 120 : 360, row * 64, 2, 64)
+      g.fillStyle = '#b28761'; g.fillRect(row % 2 ? 120 : 360, row * 64, 3, 64)
     }
   })
   floorMap.wrapS = floorMap.wrapT = THREE.RepeatWrapping; floorMap.repeat.set(4, 5); floorMap.anisotropy = renderer.capabilities.getMaxAnisotropy()
-  const floor = mesh(scene, new THREE.PlaneGeometry(19, 23, 19, 23), new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.48 }), 0, -0.01, -3)
+  const floor = mesh(scene, new THREE.PlaneGeometry(19, 23, 19, 23), new THREE.MeshToonMaterial({ map: floorMap, gradientMap: toonRamp }), 0, -0.01, -3)
   floor.rotation.x = -Math.PI / 2
-  box(scene, [19, 0.35, 20], material(0x38251c), 0, -0.2, -4)
-  // Layered concert hall: timber shell, organ pipes, fluted curtains, side balconies.
-  box(scene, [18, 7, 0.3], material(0x241c1a), 0, 3.4, -10)
+  box(scene, [19, 0.35, 20], material(0xa9805e), 0, -0.2, -4)
+  // Warm timber hall: light wood panels, brass organ pipes, dusty-rose curtains, a strand of bunting.
+  box(scene, [18, 7, 0.3], material(0xe4d6c6), 0, 3.4, -10)
   for (let i = -8; i <= 8; i++) {
-    box(scene, [0.79, 5.4, 0.15], material(i % 2 ? 0x4e3426 : 0x5e3e2c), i * 0.96, 2.8, -9.75)
-    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.023, brass)
+    box(scene, [0.79, 5.4, 0.15], material(i % 2 ? 0xd9bf9f : 0xcdae8b), i * 0.96, 2.8, -9.75)
+    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.03, brass)
   }
+  const pipeColors = [0xd8bd86, 0xc7a874]
   for (let i = -10; i <= 10; i++) {
     const h = 2.3 + (1 - Math.abs(i) / 11) * 1.9
-    rod(scene, [i * 0.17, 1.5, -9.35], [i * 0.17, 1.5 + h, -9.35], 0.064, material(0xa99c7c, 0.37, 0.65))
+    const pipeMat = material(pipeColors[(i + 10) % pipeColors.length])
+    rod(scene, [i * 0.17, 1.5, -9.35], [i * 0.17, 1.5 + h, -9.35], 0.064, pipeMat)
+    oval(scene, [0.07, 0.035, 0.07], white, i * 0.17, 1.5 + h, -9.35)
   }
   for (const s of [-1, 1]) {
     for (let i = 0; i < 18; i++) {
-      const curtain = mesh(scene, new THREE.CylinderGeometry(0.22, 0.24, 7.5, 12), material(i % 2 ? 0x401624 : 0x591e2d), s * (6.3 + i * 0.16), 3.5, -7.6 + Math.sin(i) * 0.12)
+      const curtain = mesh(scene, new THREE.CylinderGeometry(0.22, 0.24, 7.5, 12), material(i % 2 ? 0xa65a63 : 0x96505a), s * (6.3 + i * 0.16), 3.5, -7.6 + Math.sin(i) * 0.12)
       curtain.scale.z = 0.8
     }
-    box(scene, [0.6, 6, 15], material(0x171620), s * 9, 3, -2)
+    box(scene, [0.6, 6, 15], material(0xd8d2dc), s * 9, 3, -2)
     for (const y of [2.9, 5.1]) {
-      box(scene, [0.7, 0.2, 14], oak, s * 8.4, y, -2.5)
-      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.035, brass)
-      for (let z = -9; z < 4; z += 0.5) rod(scene, [s * 8, y, z], [s * 8, y + 0.55, z], 0.014, brass)
+      box(scene, [0.7, 0.2, 14], material(0xc9a27c), s * 8.4, y, -2.5)
+      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.04, brass)
+      for (let z = -9; z < 4; z += 0.5) rod(scene, [s * 8, y, z], [s * 8, y + 0.55, z], 0.016, white)
     }
   }
-  const podium = box(scene, [2.8, 0.19, 4.2], oak, 0, 0.095, 3.3)
-  box(podium, [2.64, 0.018, 4.03], material(0x5f2630), 0, 0.105, 0)
+  const flagColors = [PINK, BUTTER, MINT, SKY, LILAC]
+  const flag = new THREE.Shape(); flag.moveTo(-0.17, 0); flag.lineTo(0.17, 0); flag.lineTo(0, -0.36); flag.closePath()
+  const flagGeo = new THREE.ShapeGeometry(flag)
+  for (const [z, top, sag] of [[-7.6, 5.4, 0.45]]) {
+    const points = []
+    for (let i = 0; i <= 26; i++) {
+      const t = i / 26, x = -6.5 + t * 13
+      points.push(new THREE.Vector3(x, top - Math.sin(t * Math.PI) * sag, z))
+    }
+    mesh(scene, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 64, 0.012, 4, false), white)
+    points.forEach((p, i) => {
+      const piece = mesh(scene, flagGeo, new THREE.MeshToonMaterial({ color: flagColors[i % flagColors.length], gradientMap: toonRamp, side: THREE.DoubleSide }), p.x, p.y, p.z)
+      piece.castShadow = false
+    })
+  }
+  const podium = box(scene, [2.8, 0.19, 4.2], material(0xb88a62), 0, 0.095, 3.3)
+  box(podium, [2.64, 0.018, 4.03], material(0x9c5560), 0, 0.105, 0)
   for (const x of [-1.35, 1.35]) box(scene, [0.025, 0.012, 4.15], brass, x, 0.2, 3.3)
   box(scene, [2.72, 0.012, 0.025], brass, 0, 0.2, 1.23)
   const desk = stand(scene, 0, 2.6, 1.18)
@@ -556,8 +652,15 @@ export function createWorld(canvas) {
     ['violin', -3.1, -1.9], ['violin', -1.9, -1.25], ['violin', -0.7, -1.05],
     ['violin', 0.7, -1.05], ['violin', 1.9, -1.25], ['violin', 3.1, -1.9],
   ]
+  // Stepped risers keep the back rows' big heads visible over the cellos.
+  const RISER = { violin: 0, cello: 0.2, flute: 0.45, piano: 0.45 }
+  for (const [height, z, depth, width, color] of [[0.45, -5.8, 1.7, 9, 0xc8a885], [0.2, -3.75, 1.4, 5.6, 0xd2b593]]) {
+    const riser = box(scene, [width, height, depth], material(color), 0, height / 2, z)
+    box(riser, [width + 0.02, 0.03, 0.04], white, 0, height / 2 - 0.01, depth / 2)
+  }
   layout.forEach(([part, x, z], i) => {
     const person = musician(part, x, z, i)
+    person.position.y = RISER[part]
     person.rotation.y = part === "piano" ? -0.95 : Math.atan2(-x, 4.7 - z) * 0.65
     scene.add(person); players.push(person)
   })
@@ -566,16 +669,39 @@ export function createWorld(canvas) {
   left.position.copy(rests[0]); right.position.copy(rests[1]); camera.add(left, right)
   const handStates = [{ until: 0, pose: 'rest' }, { until: 0, pose: 'rest' }]
 
+  // Section halos on the floor: bright while selected, blinking while an entry/exit is queued.
+  const halos = players.map((person) => {
+    const color = SECTION_COLOR[person.userData.part]
+    const disc = mesh(scene, new THREE.CircleGeometry(0.5, 40), glow(color, 0), person.position.x, person.position.y + 0.025, person.position.z)
+    disc.rotation.x = -Math.PI / 2; disc.castShadow = false; disc.receiveShadow = false
+    const ring = mesh(disc, new THREE.RingGeometry(0.5, 0.58, 48), glow(0xffffff, 0))
+    ring.castShadow = false; ring.receiveShadow = false
+    disc.userData = { halo: true, part: null, of: person.userData.part, ring }
+    disc.renderOrder = 1
+    return disc
+  })
+  const noteMaps = Object.fromEntries(Object.entries(SECTION_COLOR).map(([part, color]) => [part, ['♪', '♫', '♩'].map((glyph) => noteTexture(color, glyph))]))
+  const notes = []
+  const noteGeo = new THREE.PlaneGeometry(0.26, 0.26)
+  let lastFrame = performance.now() / 1000
+
   // Camera-space approach keeps EVERY direction crossing the same horizontal hit line.
   const lane = new THREE.Group(); camera.add(lane)
   const lineY = 0.035, lineZ = -1.65
-  box(lane, [1.53, 0.006, 0.003], glow(GOLD, 0.9), 0.08, lineY, lineZ)
-  box(lane, [1.53, 0.025, 0.002], glow(GOLD, 0.07), 0.08, lineY, lineZ + 0.001)
-  for (const x of [-0.68, 0.84]) {
-    const diamond = box(lane, [0.018, 0.018, 0.004], glow(GOLD), x, lineY, lineZ); diamond.rotation.z = Math.PI / 4
+  box(lane, [1.53, 0.016, 0.002], glow(0xffffff, 0.75), 0.08, lineY, lineZ + 0.001)
+  const dotGeo = new THREE.CircleGeometry(0.0085, 20)
+  for (let i = 0; i <= 30; i++) {
+    const dot = mesh(lane, dotGeo, glow([PINK, BUTTER, MINT, SKY, LILAC][i % 5]), -0.68 + i * (1.52 / 30), lineY, lineZ + 0.002)
+    dot.castShadow = false
+  }
+  for (const x of [-0.7, 0.86]) {
+    const star = mesh(lane, starGeometry(0.026, 0.012, 0.002), glow(BUTTER), x, lineY, lineZ + 0.003)
+    star.castShadow = false
   }
   const live = [], cueRings = []
   const arrowGeo = arrowShape()
+  const bubbleGeo = new THREE.PlaneGeometry(0.17, 0.17)
+  const bubbleMaps = Object.fromEntries(Object.entries(BEAT_COLOR).map(([direction, color]) => [direction, bubbleTexture(color, direction)]))
   function resize() {
     const rect = canvas.getBoundingClientRect()
     if (!rect.width || !rect.height) return
@@ -590,9 +716,10 @@ export function createWorld(canvas) {
     if (cue.kind === 'cue') {
       const people = players.filter(p => p.userData.part === cue.part)
       const rings = people.map(person => {
-        const ring = mesh(scene, new THREE.RingGeometry(0.21, 0.235, 64), glow(cue.part === 'flute' ? COOL : GOLD))
+        const ring = mesh(scene, new THREE.RingGeometry(0.19, 0.24, 64), glow(SECTION_COLOR[cue.part]))
+        mesh(ring, new THREE.RingGeometry(0.245, 0.262, 64), glow(0xffffff, 0.9))
         const center = new THREE.Vector3(); person.getWorldPosition(center)
-        ring.position.copy(center).add(new THREE.Vector3(0, 1.34, 0.12))
+        ring.position.copy(center).add(new THREE.Vector3(0, 1.42, 0.12))
         ring.lookAt(camera.position)
         ring.userData = { person }
         return ring
@@ -601,13 +728,11 @@ export function createWorld(canvas) {
     }
     const group = new THREE.Group(); lane.add(group)
     if (cue.kind === 'beat') {
-      const color = cue.direction === 'down' ? GOLD : 0xf8eee0
-      const arrow = mesh(group, arrowGeo, glow(color))
-      arrow.rotation.z = { up: 0, down: Math.PI, left: Math.PI / 2, right: -Math.PI / 2 }[cue.direction]
-      arrow.scale.setScalar(0.55)
-      const halo = mesh(group, new THREE.RingGeometry(0.078, 0.081, 48), glow(color, 0.24))
+      const bubble = mesh(group, bubbleGeo, new THREE.MeshBasicMaterial({ map: bubbleMaps[cue.direction], transparent: true, depthWrite: false }))
+      bubble.castShadow = false
+      const halo = mesh(group, new THREE.RingGeometry(0.088, 0.094, 48), glow(BEAT_COLOR[cue.direction], 0.35))
       halo.position.z = -0.003
-      group.userData.arrow = arrow
+      group.userData.arrow = bubble
     } else {
       const warm = cue.direction === 'up'
       // A curved ramp of light, warm rising / cool falling, independent of the beat lane.
@@ -616,13 +741,26 @@ export function createWorld(canvas) {
         return new THREE.Vector3(-0.08 + t * 0.16, (warm ? 1 : -1) * (t * t * 0.43 - 0.2), 0)
       })
       for (let i = 0; i < 5; i++) {
-        const streak = mesh(group, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 28, i === 0 ? 0.009 : 0.004, 6, false), glow(warm ? GOLD : COOL, i === 0 ? 0.95 : 0.2))
+        const streak = mesh(group, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 28, i === 0 ? 0.011 : 0.005, 6, false), glow(warm ? (i % 2 ? BUTTER : PINK) : COOL, i === 0 ? 0.95 : 0.35))
         streak.position.x = (i - 2) * 0.014
       }
-      const arrow = mesh(group, arrowGeo, glow(warm ? GOLD : COOL)); arrow.scale.setScalar(0.38)
+      const arrow = mesh(group, arrowGeo, glow(warm ? PINK : COOL)); arrow.scale.setScalar(0.38)
       arrow.position.set(0.08, warm ? 0.23 : -0.23, 0); arrow.rotation.z = warm ? 0 : Math.PI
     }
     group.userData.cue = cue; live.push(group)
+  }
+  // A floating note above one random player of the section that just sounded.
+  function emit(part) {
+    const people = players.filter((p) => p.userData.part === part)
+    if (!people.length || notes.length > 70) return
+    const person = people[Math.floor(Math.random() * people.length)]
+    const maps = noteMaps[part]
+    const note = mesh(scene, noteGeo, new THREE.MeshBasicMaterial({ map: maps[Math.floor(Math.random() * maps.length)], transparent: true, depthWrite: false }))
+    note.castShadow = false
+    note.position.copy(person.position).add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 1.85, 0.1))
+    note.userData = { note: true, age: 0, sway: Math.random() * Math.PI * 2, drift: (Math.random() - 0.5) * 0.35 }
+    note.renderOrder = 5
+    notes.push(note)
   }
   function remove(group) {
     group.removeFromParent()
@@ -634,11 +772,40 @@ export function createWorld(canvas) {
   function reset() {
     live.forEach(remove); live.length = 0
     cueRings.forEach(entry => entry.rings.forEach(remove)); cueRings.length = 0
+    notes.forEach(note => { note.removeFromParent(); note.material.dispose() }); notes.length = 0
     handStates.forEach(state => { state.until = 0; state.pose = 'rest' })
   }
-  function update(seconds, playing) {
+  const NO_SECTIONS = { selected: new Set(), pending: new Map(), solo: null }
+  function update(seconds, playing, sections = NO_SECTIONS) {
     const t = performance.now() / 1000
-    animatePlayers(players, seconds, playing)
+    const dt = Math.min(0.1, Math.max(0, t - lastFrame)); lastFrame = t
+    animatePlayers(players, seconds, playing, sections, t)
+    for (const part of Object.keys(suits)) {
+      const lit = sections.selected.has(part) ? 0.22 + Math.sin(t * 6) * 0.08 : sections.pending.has(part) ? (Math.sin(t * 12) > 0 ? 0.2 : 0.05) : 0
+      suits[part].coat.emissive.copy(suits[part].color).multiplyScalar(lit)
+    }
+    halos.forEach((disc) => {
+      const part = disc.userData.of
+      const selected = sections.selected.has(part)
+      const pending = sections.pending.has(part)
+      const soloing = sections.solo?.has(part)
+      const target = selected ? 0.55 + Math.sin(t * 6) * 0.12 : pending ? (Math.sin(t * 12) > 0 ? 0.5 : 0.15) : soloing ? 0.4 : playing.has(part) ? 0.16 : 0
+      disc.material.opacity = THREE.MathUtils.lerp(disc.material.opacity, target, 0.25)
+      disc.userData.ring.material.opacity = selected || pending ? 0.9 : soloing ? 0.6 : 0
+      disc.scale.setScalar(selected ? 1 + Math.sin(t * 6) * 0.04 : 1)
+    })
+    for (let i = notes.length - 1; i >= 0; i--) {
+      const note = notes[i], data = note.userData
+      data.age += dt
+      if (data.age > 1.6) { note.removeFromParent(); note.material.dispose(); notes.splice(i, 1); continue }
+      note.position.y += dt * 0.55
+      note.position.x += Math.sin(data.age * 5 + data.sway) * dt * 0.25 + data.drift * dt
+      note.quaternion.copy(camera.quaternion)
+      note.rotateZ(Math.sin(data.age * 4 + data.sway) * 0.3)
+      note.scale.setScalar(Math.min(1, data.age * 6) * (1 + 0.15 * Math.sin(data.age * 10)))
+      note.material.opacity = 1 - Math.max(0, data.age - 0.9) / 0.7
+    }
+    if (right.userData.tip) right.userData.tip.rotation.z = t * 1.4
     ;[left, right].forEach((item, index) => {
       const state = handStates[index], active = t < state.until
       const rest = rests[index].clone(); rest.y *= Math.max(1, 1.4 / camera.aspect)
@@ -717,6 +884,13 @@ export function createWorld(canvas) {
     }
     renderer.render(scene, camera)
   }
+  function screenPositions() {
+    const rect = canvas.getBoundingClientRect()
+    return players.map((person) => {
+      const p = person.position.clone().add(new THREE.Vector3(0, 1.4, 0)).project(camera)
+      return { part: person.userData.part, x: (p.x + 1) / 2 * rect.width, y: (1 - p.y) / 2 * rect.height }
+    })
+  }
   function pose(which, gesture, part) {
     const state = handStates[which === 'right' ? 1 : 0]
     const now = performance.now() / 1000
@@ -738,5 +912,5 @@ export function createWorld(canvas) {
     while (node && !node.userData.part) node = node.parent
     return node?.userData.part || null
   }
-  return { resize, update, spawn, pose, pick, reset, players }
+  return { resize, update, spawn, emit, pose, pick, reset, screenPositions, players }
 }

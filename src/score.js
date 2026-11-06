@@ -9,6 +9,39 @@ const CHORDS = [
   { root: "F2", piano: ["F3", "A3", "C4"], violin4: ["C5", "A4", "F4", "C5"], violin3: ["C5", "A4", "F4"], flute: ["F4", "C5"] },
 ]
 
+// Free-mode flute melody over the eight-bar C–G–Am–F loop, as [note, beats] pairs.
+const MELODY = [
+  [["E5", 1], ["G5", 1], ["C6", 2]],
+  [["B5", 1], ["A5", 1], ["G5", 2]],
+  [["A5", 1], ["G5", 1], ["E5", 2]],
+  [["F5", 1], ["A5", 1], ["C6", 1], ["A5", 1]],
+  [["G5", 1], ["E5", 1], ["C5", 2]],
+  [["D5", 1], ["G5", 1], ["B5", 2]],
+  [["C6", 1], ["B5", 1], ["A5", 2]],
+  [["A5", 1], ["G5", 1], ["F5", 2]],
+]
+export const LOOP_BARS = MELODY.length
+
+export function loopEvents() {
+  const events = []
+  for (let bar = 0; bar < LOOP_BARS; bar += 1) {
+    const chord = CHORDS[bar]
+    for (const beat of [0, 2]) {
+      events.push({ part: "piano", note: chord.piano, time: `${bar}:${beat}:0`, dur: "4n", vel: beat ? 0.5 : 0.65 })
+      events.push({ part: "cello", note: chord.root, time: `${bar}:${beat}:0`, dur: "2n", vel: beat ? 0.45 : 0.55 })
+    }
+    chord.violin4.forEach((note, beat) => {
+      events.push({ part: "violin", note, time: `${bar}:${beat}:0`, dur: "8n", vel: 0.55 })
+    })
+    let beat = 0
+    for (const [note, length] of MELODY[bar]) {
+      events.push({ part: "flute", note, time: `${bar}:${beat}:0`, dur: length === 2 ? "2n" : "4n", vel: 0.45 })
+      beat += length
+    }
+  }
+  return events
+}
+
 function chordFor(bar) {
   return CHORDS[bar === 0 ? 0 : (bar - 1) % CHORDS.length]
 }

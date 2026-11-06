@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/world.test.mjs && node tests/controller.test.mjs"
+    "test": "node tests/world.test.mjs && node tests/sections.test.mjs && node tests/controller.test.mjs"
   },
   "dependencies": {
     "three": "^0.170.0",
