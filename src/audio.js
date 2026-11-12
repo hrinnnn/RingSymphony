@@ -42,13 +42,25 @@ function ensure() {
     gates[part] = gate
     meters[part] = meter
   }
+  // The pulse is not a section: it bypasses the gates and the dynamics so the beat is always audible.
+  synths.kick = new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 3, envelope: { attack: 0.001, decay: 0.22, sustain: 0, release: 0.05 } })
+  synths.tick = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 } })
+  synths.kick.volume.value = -6
+  synths.tick.volume.value = -24
+  synths.kick.toDestination()
+  synths.tick.toDestination()
   parts = { synths, gates, meters, master }
 }
 
 function scheduleEvents(events, hooks) {
+  // Monophonic voices throw if a late callback hands them a start time at or before their previous one.
+  const lastStart = {}
   for (const event of events) {
     Tone.Transport.schedule((time) => {
-      parts.synths[event.part].triggerAttackRelease(event.note, event.dur, time, event.vel)
+      const at = Math.max(time, (lastStart[event.part] ?? -Infinity) + 0.001)
+      lastStart[event.part] = at
+      parts.synths[event.part].triggerAttackRelease(event.note, event.dur, at, event.vel)
+      if (!parts.gates[event.part]) return
       Tone.Draw.schedule(() => {
         if (parts.gates[event.part].gain.value > 0.05) hooks.onVoice(event.part)
       }, time)
@@ -88,7 +100,7 @@ export async function startLevel(chart, hooks) {
   resetTransport(chart.bpm, chart.meter)
   setPart("piano", true)
   setPart("cello", true)
-  scheduleEvents(eventsFor(chart.meter), hooks)
+  scheduleEvents(eventsFor(chart.study), hooks)
   Tone.Transport.schedule((time) => {
     Tone.Draw.schedule(() => hooks.onDone(), time)
   }, chart.duration)
@@ -161,6 +173,15 @@ export function stopLevel() {
 
 export function transportSeconds() {
   return Tone.Transport.seconds
+}
+
+// What the player is hearing now. Transport.seconds runs lookAhead ahead of the audio clock, and the
+// device adds its own output latency on top; judging and drawing against it would put every beat early.
+export function songSeconds() {
+  const context = Tone.getContext()
+  const raw = context.rawContext
+  const output = (raw.outputLatency ?? 0) || (raw.baseLatency ?? 0)
+  return Tone.Transport.seconds - context.lookAhead - output
 }
 
 export function transportBeats() {

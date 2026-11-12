@@ -1,14 +1,14 @@
 import * as THREE from "three"
+import { laneLayout } from "./lane.js"
 
 // All scenery, people, instruments and UI geometry are original procedural assets.
-// Candy music-box palette: each section owns one pastel, shared by suits, halos and notes.
-const PINK = 0xd9898f
-const MINT = 0x86bfa3
-const LILAC = 0x8e9ccf
-const BUTTER = 0xe3b45e
-const SKY = 0x86b9d6
+// Night-hall palette: each section owns one cool neon accent, shared by suits, halos and notes.
+const PINK = 0xe0457c
+const MINT = 0x2fcfa8
+const LILAC = 0x7f68e6
+const BUTTER = 0xe8a22e
+const SKY = 0x35c8ee
 const GOLD = BUTTER
-const COOL = SKY
 export const SECTION_COLOR = { violin: PINK, cello: LILAC, flute: MINT, piano: BUTTER }
 const toonRamp = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 215, 215, 215, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat)
 toonRamp.minFilter = THREE.NearestFilter
@@ -391,15 +391,22 @@ function hand(right) {
   const group = new THREE.Group()
   const skin = material(0xf0c8ad)
   const ink = material(0x3a3f58)
-  rod(group, [0, -0.32, 0.16], [0, -0.07, 0.02], 0.052, ink, 0.04)
-  rod(group, [0, -0.075, 0.028], [0, -0.04, 0.012], 0.046, ivory, 0.042)
+  let forearm = null, cuff = null
+  if (right) {
+    rod(group, [0, -0.32, 0.16], [0, -0.07, 0.02], 0.052, ink, 0.04)
+    rod(group, [0, -0.075, 0.028], [0, -0.04, 0.012], 0.046, ivory, 0.042)
+  } else {
+    forearm = makeRod(group, 0.052, ink, 0.04)
+    cuff = makeRod(group, 0.046, ivory, 0.042)
+  }
   oval(group, [0.011, 0.011, 0.007], gilt, right ? 0.03 : -0.03, -0.045, 0.03)
   box(group, [0.1, 0.034, 0.1], skin, 0, 0.02, -0.02)
   oval(group, [0.048, 0.03, 0.04], skin, 0, 0.016, 0.035)
+  if (!right) oval(group, [0.038, 0.042, 0.035], skin, 0, -0.022, 0.025)
   const fingers = []
   const xs = right ? [-0.042, -0.014, 0.014, 0.042] : [0.042, 0.014, -0.014, -0.042]
   const lengths = [0.11, 0.124, 0.112, 0.086]
-  const curl = right ? -1.15 : 0.42
+  const curl = right ? -1.15 : -0.12
   xs.forEach((x) => oval(group, [0.016, 0.014, 0.016], skin, x, 0.04, -0.07))
   for (let i = 0; i < 4; i++) fingers.push(addFinger(group, skin, xs[i], lengths[i], curl))
   const thumb = new THREE.Group()
@@ -419,7 +426,7 @@ function hand(right) {
     tip.rotation.x = -0.5
     oval(batonLag, [0.065, 0.065, 0.065], glow(0xfff1b8, 0.25), -0.125, 0.45, -0.39)
   }
-  group.userData = { fingers, thumb, batonLag, tip }
+  group.userData = { fingers, thumb, batonLag, tip, forearm, cuff }
   group.renderOrder = 6
   return group
 }
@@ -499,12 +506,6 @@ function animatePlayers(players, seconds, playing, sections, wall) {
     }
   }
 }
-function arrowShape() {
-  const s = new THREE.Shape()
-  s.moveTo(-0.045, -0.14); s.lineTo(0.045, -0.14); s.lineTo(0.045, 0.025)
-  s.lineTo(0.13, 0.025); s.lineTo(0, 0.16); s.lineTo(-0.13, 0.025); s.lineTo(-0.045, 0.025); s.closePath()
-  return new THREE.ShapeGeometry(s)
-}
 
 // Vertical colour bands instead of canvas gradients, so textures also build headless.
 function bands(g, w, h, stops) {
@@ -527,32 +528,8 @@ function noteTexture(color, glyph) {
     g.fillText(glyph, w / 2, h * 0.54)
   }, 128, 128)
 }
-// Candy bubble with a white rim, a glossy highlight and a chunky arrow drawn upright per direction.
-function bubbleTexture(color, direction) {
-  return texture((g, w, h) => {
-    const c = new THREE.Color(color)
-    const r = w * 0.4
-    g.fillStyle = '#' + c.clone().multiplyScalar(0.75).getHexString()
-    g.beginPath(); g.arc(w / 2, h / 2 + w * 0.035, r, 0, Math.PI * 2); g.fill()
-    g.fillStyle = '#' + c.getHexString()
-    g.beginPath(); g.arc(w / 2, h / 2, r, 0, Math.PI * 2); g.fill()
-    g.lineWidth = w * 0.055; g.strokeStyle = '#ffffff'
-    g.beginPath(); g.arc(w / 2, h / 2, r, 0, Math.PI * 2); g.stroke()
-    g.fillStyle = 'rgba(255,255,255,0.55)'
-    g.beginPath(); g.ellipse(w * 0.36, h * 0.3, w * 0.11, w * 0.06, -0.6, 0, Math.PI * 2); g.fill()
-    g.save(); g.translate(w / 2, h / 2)
-    g.rotate({ up: 0, right: Math.PI / 2, down: Math.PI, left: -Math.PI / 2 }[direction])
-    g.fillStyle = '#ffffff'; g.lineJoin = 'round'; g.lineWidth = w * 0.04; g.strokeStyle = '#ffffff'
-    g.beginPath()
-    g.moveTo(0, -w * 0.24); g.lineTo(w * 0.19, -w * 0.02); g.lineTo(w * 0.07, -w * 0.02)
-    g.lineTo(w * 0.07, w * 0.2); g.lineTo(-w * 0.07, w * 0.2); g.lineTo(-w * 0.07, -w * 0.02)
-    g.lineTo(-w * 0.19, -w * 0.02); g.closePath(); g.fill(); g.stroke()
-    g.restore()
-  }, 256, 256)
-}
-const BEAT_COLOR = { down: PINK, left: MINT, right: LILAC, up: BUTTER }
 
-export function createWorld(canvas) {
+export function createWorld(canvas, laneCanvas) {
   paper = scoreMap()
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
@@ -561,87 +538,73 @@ export function createWorld(canvas) {
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   const scene = new THREE.Scene()
-  scene.background = texture((g, w, h) => bands(g, w, h, [0xdcdbe8, 0xefe4dc, 0xf4ebe0]), 4, 256)
-  scene.fog = new THREE.FogExp2(0xefe6de, 0.022)
+  scene.background = texture((g, w, h) => bands(g, w, h, [0x03050b, 0x0a1022, 0x121a33]), 4, 256)
+  scene.fog = new THREE.FogExp2(0x070b17, 0.028)
   const camera = new THREE.PerspectiveCamera(53, 1, 0.05, 60)
   camera.position.set(0, 2.2, 4.7)
   camera.lookAt(0, 1.25, -3)
   scene.add(camera)
-  scene.add(new THREE.HemisphereLight(0xfbf7f2, 0xd8c3b0, 1.5))
-  const key = new THREE.DirectionalLight(0xfff3e6, 1.9); key.position.set(-3, 7, 4)
+  scene.add(new THREE.HemisphereLight(0x8fa6dc, 0x161222, 1.05))
+  const key = new THREE.DirectionalLight(0xd8e6ff, 1.25); key.position.set(-3, 7, 4)
   key.castShadow = true; key.shadow.mapSize.set(2048, 2048)
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 25 })
   key.shadow.bias = -0.001; scene.add(key)
-  const rim = new THREE.DirectionalLight(0xc9d4ff, 0.8); rim.position.set(4, 4, -7); scene.add(rim)
+  const rim = new THREE.DirectionalLight(0x35e0ff, 1.5); rim.position.set(4, 4, -7); scene.add(rim)
+  const rimWarm = new THREE.DirectionalLight(0xff4f8b, 0.9); rimWarm.position.set(-5, 3, -6); scene.add(rimWarm)
   for (const x of [-4, 0, 4]) {
-    const spot = new THREE.SpotLight(0xfff0dc, 14, 18, 0.55, 0.9, 1.5)
+    const spot = new THREE.SpotLight(0xcfe0ff, 16, 18, 0.55, 0.9, 1.5)
     spot.position.set(x, 6, -1); spot.target.position.set(x * 0.7, 0, -3)
     scene.add(spot, spot.target)
-    oval(scene, [0.09, 0.045, 0.09], glow(0xfff6d8), x, 5.8, -1)
+    oval(scene, [0.09, 0.045, 0.09], glow(0xdff0ff), x, 5.8, -1)
   }
   const floorMap = texture((g, w, h) => {
-    g.fillStyle = '#d9b38c'; g.fillRect(0, 0, w, h)
+    g.fillStyle = '#151a2a'; g.fillRect(0, 0, w, h)
     let seed = 42
     const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
     for (let row = 0; row < 8; row++) {
-      g.fillStyle = `hsl(${27 + rand() * 5} 42% ${64 + rand() * 7}%)`; g.fillRect(0, row * 64, w, 63)
-      g.fillStyle = '#b28761'; g.fillRect(0, row * 64, w, 3)
+      g.fillStyle = `hsl(${222 + rand() * 8} 26% ${14 + rand() * 5}%)`; g.fillRect(0, row * 64, w, 63)
+      g.fillStyle = '#0b0f1c'; g.fillRect(0, row * 64, w, 3)
       for (let n = 0; n < 18; n++) {
-        g.strokeStyle = `rgba(140,92,58,${rand() * 0.16})`; g.beginPath()
+        g.strokeStyle = `rgba(120,150,220,${rand() * 0.08})`; g.beginPath()
         const y = row * 64 + rand() * 64
         g.moveTo(0, y); g.bezierCurveTo(150, y + rand() * 7, 340, y - rand() * 7, w, y); g.stroke()
       }
-      g.fillStyle = '#b28761'; g.fillRect(row % 2 ? 120 : 360, row * 64, 3, 64)
+      g.fillStyle = '#0b0f1c'; g.fillRect(row % 2 ? 120 : 360, row * 64, 3, 64)
     }
   })
   floorMap.wrapS = floorMap.wrapT = THREE.RepeatWrapping; floorMap.repeat.set(4, 5); floorMap.anisotropy = renderer.capabilities.getMaxAnisotropy()
   const floor = mesh(scene, new THREE.PlaneGeometry(19, 23, 19, 23), new THREE.MeshToonMaterial({ map: floorMap, gradientMap: toonRamp }), 0, -0.01, -3)
   floor.rotation.x = -Math.PI / 2
-  box(scene, [19, 0.35, 20], material(0xa9805e), 0, -0.2, -4)
-  // Warm timber hall: light wood panels, brass organ pipes, dusty-rose curtains, a strand of bunting.
-  box(scene, [18, 7, 0.3], material(0xe4d6c6), 0, 3.4, -10)
+  box(scene, [19, 0.35, 20], material(0x0d1120), 0, -0.2, -4)
+  // Dark hall: charcoal panels, dim steel organ pipes, wine-black curtains, thin cyan light strips.
+  box(scene, [18, 7, 0.3], material(0x1a2033), 0, 3.4, -10)
   for (let i = -8; i <= 8; i++) {
-    box(scene, [0.79, 5.4, 0.15], material(i % 2 ? 0xd9bf9f : 0xcdae8b), i * 0.96, 2.8, -9.75)
-    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.03, brass)
+    box(scene, [0.79, 5.4, 0.15], material(i % 2 ? 0x222a42 : 0x1c233a), i * 0.96, 2.8, -9.75)
+    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.02, glow(0x35e0ff, 0.55))
   }
-  const pipeColors = [0xd8bd86, 0xc7a874]
+  const pipeColors = [0x4a5470, 0x3d465f]
   for (let i = -10; i <= 10; i++) {
     const h = 2.3 + (1 - Math.abs(i) / 11) * 1.9
     const pipeMat = material(pipeColors[(i + 10) % pipeColors.length])
     rod(scene, [i * 0.17, 1.5, -9.35], [i * 0.17, 1.5 + h, -9.35], 0.064, pipeMat)
-    oval(scene, [0.07, 0.035, 0.07], white, i * 0.17, 1.5 + h, -9.35)
+    oval(scene, [0.07, 0.035, 0.07], material(0x8f9bbd), i * 0.17, 1.5 + h, -9.35)
   }
   for (const s of [-1, 1]) {
     for (let i = 0; i < 18; i++) {
-      const curtain = mesh(scene, new THREE.CylinderGeometry(0.22, 0.24, 7.5, 12), material(i % 2 ? 0xa65a63 : 0x96505a), s * (6.3 + i * 0.16), 3.5, -7.6 + Math.sin(i) * 0.12)
+      const curtain = mesh(scene, new THREE.CylinderGeometry(0.22, 0.24, 7.5, 12), material(i % 2 ? 0x2a1020 : 0x220c19), s * (6.3 + i * 0.16), 3.5, -7.6 + Math.sin(i) * 0.12)
       curtain.scale.z = 0.8
     }
-    box(scene, [0.6, 6, 15], material(0xd8d2dc), s * 9, 3, -2)
+    box(scene, [0.6, 6, 15], material(0x141a2c), s * 9, 3, -2)
     for (const y of [2.9, 5.1]) {
-      box(scene, [0.7, 0.2, 14], material(0xc9a27c), s * 8.4, y, -2.5)
-      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.04, brass)
-      for (let z = -9; z < 4; z += 0.5) rod(scene, [s * 8, y, z], [s * 8, y + 0.55, z], 0.016, white)
+      box(scene, [0.7, 0.2, 14], material(0x1c2338), s * 8.4, y, -2.5)
+      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.03, glow(0x35e0ff, 0.7))
+      for (let z = -9; z < 4; z += 0.5) rod(scene, [s * 8, y, z], [s * 8, y + 0.55, z], 0.012, material(0x2c3552))
     }
   }
-  const flagColors = [PINK, BUTTER, MINT, SKY, LILAC]
-  const flag = new THREE.Shape(); flag.moveTo(-0.17, 0); flag.lineTo(0.17, 0); flag.lineTo(0, -0.36); flag.closePath()
-  const flagGeo = new THREE.ShapeGeometry(flag)
-  for (const [z, top, sag] of [[-7.6, 5.4, 0.45]]) {
-    const points = []
-    for (let i = 0; i <= 26; i++) {
-      const t = i / 26, x = -6.5 + t * 13
-      points.push(new THREE.Vector3(x, top - Math.sin(t * Math.PI) * sag, z))
-    }
-    mesh(scene, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 64, 0.012, 4, false), white)
-    points.forEach((p, i) => {
-      const piece = mesh(scene, flagGeo, new THREE.MeshToonMaterial({ color: flagColors[i % flagColors.length], gradientMap: toonRamp, side: THREE.DoubleSide }), p.x, p.y, p.z)
-      piece.castShadow = false
-    })
-  }
-  const podium = box(scene, [2.8, 0.19, 4.2], material(0xb88a62), 0, 0.095, 3.3)
-  box(podium, [2.64, 0.018, 4.03], material(0x9c5560), 0, 0.105, 0)
-  for (const x of [-1.35, 1.35]) box(scene, [0.025, 0.012, 4.15], brass, x, 0.2, 3.3)
-  box(scene, [2.72, 0.012, 0.025], brass, 0, 0.2, 1.23)
+  const podium = box(scene, [2.8, 0.19, 4.2], material(0x1c2238), 0, 0.095, 3.3)
+  box(podium, [2.64, 0.018, 4.03], material(0x2a1226), 0, 0.105, 0)
+  for (const x of [-1.35, 1.35]) box(scene, [0.025, 0.012, 4.15], glow(0x35e0ff, 0.8), x, 0.2, 3.3)
+  box(scene, [2.72, 0.012, 0.025], glow(0x35e0ff, 0.8), 0, 0.2, 1.23)
   const desk = stand(scene, 0, 2.6, 1.18)
   desk.rotation.y = Math.PI
   const players = []
@@ -654,9 +617,9 @@ export function createWorld(canvas) {
   ]
   // Stepped risers keep the back rows' big heads visible over the cellos.
   const RISER = { violin: 0, cello: 0.2, flute: 0.45, piano: 0.45 }
-  for (const [height, z, depth, width, color] of [[0.45, -5.8, 1.7, 9, 0xc8a885], [0.2, -3.75, 1.4, 5.6, 0xd2b593]]) {
+  for (const [height, z, depth, width, color] of   [[0.45, -5.8, 1.7, 9, 0x1a2036], [0.2, -3.75, 1.4, 5.6, 0x222a44]]) {
     const riser = box(scene, [width, height, depth], material(color), 0, height / 2, z)
-    box(riser, [width + 0.02, 0.03, 0.04], white, 0, height / 2 - 0.01, depth / 2)
+      box(riser, [width + 0.02, 0.03, 0.04], glow(0x35e0ff, 0.65), 0, height / 2 - 0.01, depth / 2)
   }
   layout.forEach(([part, x, z], i) => {
     const person = musician(part, x, z, i)
@@ -665,7 +628,19 @@ export function createWorld(canvas) {
     scene.add(person); players.push(person)
   })
   const left = hand(false), right = hand(true)
-  const rests = [new THREE.Vector3(-0.38, -0.36, -0.95), new THREE.Vector3(0.4, -0.35, -0.98)]
+  const laneDepth = 1.65
+  const laneTexture = new THREE.CanvasTexture(laneCanvas)
+  laneTexture.colorSpace = THREE.SRGBColorSpace
+  let laneWidth = laneCanvas.width, laneHeight = laneCanvas.height
+  const lanePlane = mesh(camera, new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
+    map: laneTexture, transparent: true, depthWrite: false, toneMapped: false,
+  }), 0, 0, -laneDepth)
+  lanePlane.castShadow = false
+  lanePlane.receiveShadow = false
+  lanePlane.visible = false
+  const freeRests = [new THREE.Vector3(-0.26, -0.26, -0.95), new THREE.Vector3(0.4, -0.35, -0.98)]
+  const rests = freeRests.map(rest => rest.clone())
+  let levelHands = false
   left.position.copy(rests[0]); right.position.copy(rests[1]); camera.add(left, right)
   const handStates = [{ until: 0, pose: 'rest' }, { until: 0, pose: 'rest' }]
 
@@ -685,23 +660,7 @@ export function createWorld(canvas) {
   const noteGeo = new THREE.PlaneGeometry(0.26, 0.26)
   let lastFrame = performance.now() / 1000
 
-  // Camera-space approach keeps EVERY direction crossing the same horizontal hit line.
-  const lane = new THREE.Group(); camera.add(lane)
-  const lineY = 0.035, lineZ = -1.65
-  box(lane, [1.53, 0.016, 0.002], glow(0xffffff, 0.75), 0.08, lineY, lineZ + 0.001)
-  const dotGeo = new THREE.CircleGeometry(0.0085, 20)
-  for (let i = 0; i <= 30; i++) {
-    const dot = mesh(lane, dotGeo, glow([PINK, BUTTER, MINT, SKY, LILAC][i % 5]), -0.68 + i * (1.52 / 30), lineY, lineZ + 0.002)
-    dot.castShadow = false
-  }
-  for (const x of [-0.7, 0.86]) {
-    const star = mesh(lane, starGeometry(0.026, 0.012, 0.002), glow(BUTTER), x, lineY, lineZ + 0.003)
-    star.castShadow = false
-  }
-  const live = [], cueRings = []
-  const arrowGeo = arrowShape()
-  const bubbleGeo = new THREE.PlaneGeometry(0.17, 0.17)
-  const bubbleMaps = Object.fromEntries(Object.entries(BEAT_COLOR).map(([direction, color]) => [direction, bubbleTexture(color, direction)]))
+  const cueRings = []
   function resize() {
     const rect = canvas.getBoundingClientRect()
     if (!rect.width || !rect.height) return
@@ -710,44 +669,36 @@ export function createWorld(canvas) {
     // Keep the full orchestra in portrait layouts too.
     camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(53 / 2)) * Math.max(1, 1.4 / camera.aspect)))
     camera.updateProjectionMatrix()
-    lane.scale.x = 1
-  }
-  function spawn(cue) {
-    if (cue.kind === 'cue') {
-      const people = players.filter(p => p.userData.part === cue.part)
-      const rings = people.map(person => {
-        const ring = mesh(scene, new THREE.RingGeometry(0.19, 0.24, 64), glow(SECTION_COLOR[cue.part]))
-        mesh(ring, new THREE.RingGeometry(0.245, 0.262, 64), glow(0xffffff, 0.9))
-        const center = new THREE.Vector3(); person.getWorldPosition(center)
-        ring.position.copy(center).add(new THREE.Vector3(0, 1.42, 0.12))
-        ring.lookAt(camera.position)
-        ring.userData = { person }
-        return ring
-      })
-      cueRings.push({ cue, rings }); return
-    }
-    const group = new THREE.Group(); lane.add(group)
-    if (cue.kind === 'beat') {
-      const bubble = mesh(group, bubbleGeo, new THREE.MeshBasicMaterial({ map: bubbleMaps[cue.direction], transparent: true, depthWrite: false }))
-      bubble.castShadow = false
-      const halo = mesh(group, new THREE.RingGeometry(0.088, 0.094, 48), glow(BEAT_COLOR[cue.direction], 0.35))
-      halo.position.z = -0.003
-      group.userData.arrow = bubble
-    } else {
-      const warm = cue.direction === 'up'
-      // A curved ramp of light, warm rising / cool falling, independent of the beat lane.
-      const points = Array.from({ length: 28 }, (_, i) => {
-        const t = i / 27
-        return new THREE.Vector3(-0.08 + t * 0.16, (warm ? 1 : -1) * (t * t * 0.43 - 0.2), 0)
-      })
-      for (let i = 0; i < 5; i++) {
-        const streak = mesh(group, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 28, i === 0 ? 0.011 : 0.005, 6, false), glow(warm ? (i % 2 ? BUTTER : PINK) : COOL, i === 0 ? 0.95 : 0.35))
-        streak.position.x = (i - 2) * 0.014
+    const planeHeight = 2 * laneDepth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+    lanePlane.scale.set(planeHeight * camera.aspect, planeHeight, 1)
+    rests.forEach((rest, index) => {
+      rest.copy(freeRests[index])
+      if (!levelHands) {
+        rest.y *= Math.max(1, 1.4 / camera.aspect)
+        return
       }
-      const arrow = mesh(group, arrowGeo, glow(warm ? PINK : COOL)); arrow.scale.setScalar(0.38)
-      arrow.position.set(0.08, warm ? 0.23 : -0.23, 0); arrow.rotation.z = warm ? 0 : Math.PI
-    }
-    group.userData.cue = cue; live.push(group)
+      const target = laneLayout(rect.width, rect.height)[index ? "right" : "left"].target
+      const palm = new THREE.Vector3(0, 0.02, -0.02).applyAxisAngle(new THREE.Vector3(1, 0, 0), index ? 0 : 0.45)
+      const depth = -(rest.z + palm.z)
+      const halfHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * depth
+      rest.x = (target.x / rect.width * 2 - 1) * halfHeight * camera.aspect - palm.x
+      rest.y = (1 - (target.y + rect.height * 0.1) / rect.height * 2) * halfHeight - palm.y
+    })
+  }
+  // The lane canvas is composited on a plane behind the hands; the hall marks who is due to enter.
+  function spawn(cue) {
+    if (cue.kind !== 'cue') return
+    const people = players.filter(p => p.userData.part === cue.part)
+    const rings = people.map(person => {
+      const ring = mesh(scene, new THREE.RingGeometry(0.24, 0.31, 64), glow(SECTION_COLOR[cue.part]))
+      mesh(ring, new THREE.RingGeometry(0.315, 0.34, 64), glow(0xffffff, 0.9))
+      const center = new THREE.Vector3(); person.getWorldPosition(center)
+      ring.position.copy(center).add(new THREE.Vector3(0, 1.42, 0.12))
+      ring.lookAt(camera.position)
+      ring.userData = { person }
+      return ring
+    })
+    cueRings.push({ cue, rings })
   }
   // A floating note above one random player of the section that just sounded.
   function emit(part) {
@@ -765,15 +716,14 @@ export function createWorld(canvas) {
   function remove(group) {
     group.removeFromParent()
     group.traverse(obj => {
-      if (obj.geometry && obj.geometry !== arrowGeo) obj.geometry.dispose()
+      if (obj.geometry) obj.geometry.dispose()
       if (obj.material) obj.material.dispose()
     })
   }
   function reset() {
-    live.forEach(remove); live.length = 0
     cueRings.forEach(entry => entry.rings.forEach(remove)); cueRings.length = 0
     notes.forEach(note => { note.removeFromParent(); note.material.dispose() }); notes.length = 0
-    handStates.forEach(state => { state.until = 0; state.pose = 'rest' })
+    handStates.forEach(state => { state.until = 0; state.pose = 'rest'; state.preview = false })
   }
   const NO_SECTIONS = { selected: new Set(), pending: new Map(), solo: null }
   function update(seconds, playing, sections = NO_SECTIONS) {
@@ -808,25 +758,29 @@ export function createWorld(canvas) {
     if (right.userData.tip) right.userData.tip.rotation.z = t * 1.4
     ;[left, right].forEach((item, index) => {
       const state = handStates[index], active = t < state.until
-      const rest = rests[index].clone(); rest.y *= Math.max(1, 1.4 / camera.aspect)
+      const rest = rests[index].clone()
       const age = t - (state.from || 0)
       const u = age / (index ? 0.46 : 0.9)
-      let rx = 0, ry = 0, rz = 0
-      if (!active) rest.y += Math.sin(t * 1.6 + index) * 0.01
+      let rx = index ? 0 : 0.45, ry = 0, rz = 0
+      if (!active && !levelHands) rest.y += Math.sin(t * 1.6 + index) * 0.01
+      // Beats move the hand strictly in the screen plane (up / down / left / right), never toward or away from the player.
       if (active && index) {
         const a = ictus(u)
         const flick = Math.sin(Math.pow(clamp01(u), 0.22) * Math.PI)
-        if (state.pose === "down") { rest.y -= 0.15 * a; rest.z += 0.05 * a; rx = 0.7 * flick; rz = 0.1 * a }
-        else if (state.pose === "up") { rest.y += 0.16 * a; rest.z -= 0.04 * a; rx = -0.5 * flick; rz = -0.12 * a }
-        else if (state.pose === "left") { rest.x -= 0.22 * a; rest.y += 0.045 * Math.sin(clamp01(u) * Math.PI); rz = 0.62 * flick; ry = 0.15 * a }
-        else if (state.pose === "right") { rest.x += 0.22 * a; rest.y += 0.045 * Math.sin(clamp01(u) * Math.PI); rz = -0.62 * flick; ry = -0.15 * a }
+        if (state.pose === "down") { rest.y -= 0.22 * a }
+        else if (state.pose === "up") { rest.y += 0.22 * a }
+        else if (state.pose === "left") { rest.x -= 0.3 * a; rz = 0.3 * flick }
+        else if (state.pose === "right") { rest.x += 0.3 * a; rz = -0.3 * flick }
       } else if (active) {
-        const a = smooth(Math.min(1, age / 0.16))
-        if (state.pose === "up") { rest.y += 0.2 * a; rest.z -= 0.05 * a; rx = -1.05 * a }
-        else if (state.pose === "down") { rest.y -= 0.12 * a; rx = 0.7 * a }
+        const dynamics = state.pose === "up" || state.pose === "down"
+        const a = dynamics
+          ? smooth(age / 0.85) * (1 - smooth((age - 1.05) / 0.85))
+          : smooth(age / 0.2) * (1 - smooth((age - 0.55) / 0.35))
+        if (state.pose === "up") rest.y += 0.17 * a
+        else if (state.pose === "down") rest.y -= 0.12 * a
         else if (state.pose === "point") {
-          rest.y += 0.14 * a; rest.z -= 0.18 * a; rx = -0.3 * a
-          if (state.aimX !== undefined) rest.x = state.aimX
+          rest.y += 0.06 * a; rest.z -= 0.15 * a
+          if (state.aimX !== undefined) rest.x += (state.aimX - rest.x) * a
         }
       }
       item.position.lerp(rest, index ? 0.5 : 0.28)
@@ -835,18 +789,24 @@ export function createWorld(canvas) {
       item.rotation.z = THREE.MathUtils.lerp(item.rotation.z, rz, 0.32)
       const poseName = active ? state.pose : "rest"
       if (!index) {
+        const anchor = new THREE.Vector3(freeRests[0].x - 0.03, freeRests[0].y * Math.max(1, 1.4 / camera.aspect) - 0.42, freeRests[0].z + 0.16)
+          .sub(item.position).applyQuaternion(item.quaternion.clone().invert())
+        const wrist = new THREE.Vector3(0, -0.04, 0.012)
+        const cuffStart = wrist.clone().lerp(anchor, 0.1)
+        setRod(item.userData.forearm, anchor.toArray(), cuffStart.toArray())
+        setRod(item.userData.cuff, cuffStart.toArray(), wrist.toArray())
         const table = {
-          rest: { curl: 0.42, spread: 0.14, thumb: 0.15 },
-          up: { curl: 0.2, spread: 0.32, thumb: 0.45 },
-          down: { curl: 0.7, spread: 0.04, thumb: -0.35 },
-          point: { curl: -1.35, spread: 0.03, thumb: -0.95, indexCurl: 0.25 },
+          rest: { curl: -0.12, spread: 0.04, thumb: -0.4 },
+          up: { curl: -0.12, spread: 0.04, thumb: -0.4 },
+          down: { curl: -0.12, spread: 0.04, thumb: -0.4 },
+          point: { curl: -1.05, spread: 0.03, thumb: -0.65, indexCurl: -0.08 },
         }
         const spec = table[poseName] || table.rest
         item.userData.fingers.forEach((finger, i) => {
           const curl = poseName === "point" && i === 0 ? spec.indexCurl : spec.curl
           finger.rotation.x = THREE.MathUtils.lerp(finger.rotation.x, curl, 0.3)
           finger.rotation.y = THREE.MathUtils.lerp(finger.rotation.y, (i - 1.5) * spec.spread, 0.3)
-          finger.userData.mid.rotation.x = Math.min(0, curl) * 0.85
+          finger.userData.mid.rotation.x = Math.min(0, finger.rotation.x) * 0.85
         })
         item.userData.thumb.rotation.x = THREE.MathUtils.lerp(item.userData.thumb.rotation.x, spec.thumb, 0.3)
       } else {
@@ -862,18 +822,6 @@ export function createWorld(canvas) {
         }
       }
     })
-    for (let i = live.length - 1; i >= 0; i--) {
-      const group = live[i], cue = group.userData.cue, remain = cue.time - seconds
-      if (remain < -0.25 || cue.result) { remove(group); live.splice(i, 1); continue }
-      const progress = 1 - remain / 2
-      // z approaches the player, y approaches the line; all four arrows share one target.
-      const z = THREE.MathUtils.lerp(-4.1, lineZ, progress)
-      const x = cue.kind === 'beat' ? 0.3 : -0.6
-      group.position.set(x, cue.kind === 'beat' ? THREE.MathUtils.lerp(1.15 * Math.max(1, 1.4 / camera.aspect), lineY, progress) : 0.15, z)
-      const size = cue.kind === 'beat' ? 1 : 0.7
-      group.scale.setScalar(size)
-      group.visible = remain <= 2
-    }
     for (let i = cueRings.length - 1; i >= 0; i--) {
       const { cue, rings } = cueRings[i], remain = cue.time - seconds
       if (remain < -0.25 || cue.result) { rings.forEach(remove); cueRings.splice(i, 1); continue }
@@ -881,6 +829,14 @@ export function createWorld(canvas) {
         ring.scale.setScalar(1 + Math.sin(t * 7) * 0.08)
         ring.material.opacity = 0.65 + Math.sin(t * 7) * 0.3
       })
+    }
+    if (lanePlane.visible) {
+      if (laneCanvas.width !== laneWidth || laneCanvas.height !== laneHeight) {
+        laneTexture.dispose()
+        laneWidth = laneCanvas.width
+        laneHeight = laneCanvas.height
+      }
+      laneTexture.needsUpdate = true
     }
     renderer.render(scene, camera)
   }
@@ -894,12 +850,25 @@ export function createWorld(canvas) {
   function pose(which, gesture, part) {
     const state = handStates[which === 'right' ? 1 : 0]
     const now = performance.now() / 1000
-    state.pose = gesture; state.from = now; state.until = now + (which === 'right' ? 0.46 : 0.9)
+    if (which === 'right' && state.preview && state.pose === gesture && now < state.until) {
+      state.preview = false
+      return
+    }
+    state.preview = false
+    state.pose = gesture; state.from = now
+    state.until = now + (which === 'right' ? 0.46 : gesture === 'up' || gesture === 'down' ? 1.9 : 0.9)
+    state.aimX = undefined
     if (part) {
       const person = players.find(p => p.userData.part === part)
       const position = person.position.clone().add(new THREE.Vector3(0, 1.3, 0)).project(camera)
       state.aimX = THREE.MathUtils.clamp(position.x * 0.65, -0.65, 0.45)
     }
+  }
+  function previewRight(gesture) {
+    const state = handStates[1]
+    if (state.pose === gesture && performance.now() / 1000 < state.until) return
+    pose('right', gesture)
+    state.preview = true
   }
   function pick(clientX, clientY) {
     const rect = canvas.getBoundingClientRect()
@@ -912,5 +881,9 @@ export function createWorld(canvas) {
     while (node && !node.userData.part) node = node.parent
     return node?.userData.part || null
   }
-  return { resize, update, spawn, emit, pose, pick, reset, screenPositions, players }
+  function setLevelHands(value) {
+    levelHands = value
+    lanePlane.visible = value
+  }
+  return { resize, update, spawn, emit, pose, previewRight, pick, reset, setLevelHands, screenPositions, players }
 }

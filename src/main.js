@@ -1,10 +1,13 @@
-import { endFree, partLevels, queuePart, setDynamics, setPart, setPartGain, setTempo, startFree, startLevel, stopLevel, transportBeats, transportSeconds } from "./audio.js"
-import { buildChart } from "./chart.js"
+import { endFree, partLevels, queuePart, setDynamics, setPart, setPartGain, setTempo, songSeconds, startFree, startLevel, stopLevel, transportBeats } from "./audio.js"
+import { buildChart, STUDIES } from "./chart.js"
 import { createMixerHud } from "./hud.js"
 import { GOOD, PERFECT } from "./judge.js"
 import { lassoParts, pathLength } from "./lasso.js"
 import { createMixer, PART_INFO, PARTS } from "./mixer.js"
+import { createLane } from "./lane.js"
+import { startRing } from "./ring/index.js"
 import { LOOP_BARS } from "./score.js"
+import { createSettings } from "./settings.js"
 import { createTempo } from "./tempo.js"
 import { createWorld } from "./world.js"
 
@@ -13,11 +16,11 @@ const homeEl = document.querySelector("#home")
 const playEl = document.querySelector("#play")
 const resultEl = document.querySelector("#result")
 const hintEl = document.querySelector("#hint")
-const gradeEl = document.querySelector("#grade")
 const view = document.querySelector("#view")
 const levelList = document.querySelector("#level-list")
 const accuracyEl = document.querySelector("#accuracy")
 const countsEl = document.querySelector("#counts")
+const timingEl = document.querySelector("#timing")
 const starsEl = document.querySelector("#stars")
 const toolsEl = document.querySelector("#tools")
 const toastEl = document.querySelector("#toast")
@@ -27,7 +30,10 @@ const sessionTitle = document.querySelector("#session-title")
 const sessionSub = document.querySelector("#session-sub")
 const tallyLabel = document.querySelector("#tally-label")
 
-const world = createWorld(view)
+const laneCanvas = document.querySelector("#lane")
+const world = createWorld(view, laneCanvas)
+const lane = createLane(laneCanvas)
+const settings = createSettings({ button: document.querySelector("#settings-btn"), panel: document.querySelector("#settings-panel") })
 const beatDots = [...document.querySelectorAll(".beat-dot")]
 const progressEl = document.querySelector("#progress-fill")
 const cueHintEl = document.querySelector("#cue-hint")
@@ -37,15 +43,22 @@ const hud = createMixerHud(document.querySelector("#mixer"), pickCard)
 let chart = null
 let cues = []
 let counts = { perfect: 0, good: 0, miss: 0 }
+// Signed timing error (s, negative = early) of every cue that scored, for the early / late summary.
+let deltas = []
 let mode = "home"
 let spawned = new Set()
 let dynamics = 1
 let pointer = null
-let gradeFlip = false
 let toastTimer = 0
 const mixer = createMixer()
 const tempo = createTempo(96)
 let ending = false
+let lastStudy = STUDIES[0]
+// A ring gesture reaches the page a little after it happened; keep a cue open that long past its Good window.
+const LATE_GRACE = 0.12
+// The user's input delay (Settings) is subtracted from every gesture time: a gesture is judged that much earlier than it arrived.
+const inputNow = () => songSeconds() - settings.latency
+const TIMING_EDGE = 0.03
 
 function levelButton(icon, tone, title, detail, tag, onClick) {
   const button = document.createElement("button")
@@ -57,7 +70,7 @@ function levelButton(icon, tone, title, detail, tag, onClick) {
   button.addEventListener("click", onClick)
   levelList.append(button)
 }
-levelButton("♪", "var(--pink)", "练习曲 · 四拍 · 96", "右手跟着飞来的音符打拍<br>左手点名小提琴、长笛，抬手渐强", "节奏关卡", begin)
+STUDIES.forEach((study, i) => levelButton(["♪", "♩", "♬"][i], ["var(--pink)", "var(--sky)", "var(--butter)"][i], study.title, study.blurb, study.tag, () => begin(study)))
 levelButton("♫", "var(--mint)", "自由指挥 · 分声部", "点选或画圈选中声部，起奏、停止、独奏<br>挥拍的快慢就是乐队的速度", "自由模式", beginFree)
 
 function setMode(next) {
@@ -79,23 +92,13 @@ function toast(text) {
   toastTimer = window.setTimeout(() => toastEl.classList.toggle("show", false), 1600)
 }
 
-function showGrade(kind) {
-  const label = kind === "perfect" ? "Perfect!" : kind === "good" ? "Good!" : "Miss"
-  gradeFlip = !gradeFlip
-  gradeEl.textContent = label
-  gradeEl.className = gradeFlip ? `${kind} pop2` : kind
-  gradeEl.hidden = false
-  window.setTimeout(() => {
-    if (gradeEl.textContent === label) gradeEl.hidden = true
-  }, 480)
-}
-
-function scoreCue(cue, kind) {
+function scoreCue(cue, kind, delta) {
   if (cue.result) return
   cue.result = kind
   counts[kind] += 1
+  if (kind !== "miss" && delta !== undefined) deltas.push(delta)
   tallyEl.textContent = String(counts.perfect * 100 + counts.good * 50).padStart(4, "0")
-  showGrade(kind)
+  lane.hit(cue, kind, delta)
   if (kind === "miss") return
   if (cue.kind === "cue") { setPart(cue.part, true); world.pose("left", "point", cue.part) }
   if (cue.kind === "dynamics") {
@@ -103,14 +106,13 @@ function scoreCue(cue, kind) {
     setDynamics(dynamics)
     world.pose("left", cue.direction)
   }
-  if (cue.kind === "beat") world.pose("right", cue.direction)
 }
 
-function nearest(now, hand) {
+function nearest(now, hand, kind) {
   let best = null
   let distance = Infinity
   for (const cue of cues) {
-    if (cue.result || cue.hand !== hand) continue
+    if (cue.result || cue.hand !== hand || (kind && cue.kind !== kind)) continue
     const gap = Math.abs(now - cue.time)
     if (gap < distance) {
       distance = gap
@@ -118,7 +120,7 @@ function nearest(now, hand) {
     }
   }
   if (!best || distance > chart.beat / 2) return null
-  return { cue: best, distance }
+  return { cue: best, distance, delta: now - best.time }
 }
 
 function gradeDistance(distance) {
@@ -127,36 +129,92 @@ function gradeDistance(distance) {
   return "miss"
 }
 
-function playBeat(direction) {
+// `at` is the gesture time on the song clock; rings supply it back-dated by their transmission delay.
+function playBeat(direction, at = inputNow(), fromRing = false) {
   if (mode === "free") return freeBeat(direction)
   if (mode !== "playing" && mode !== "count-in") return
+  if (!direction) {
+    if (fromRing) toast("方向不确定，请重新校准或挥得更明确")
+    return
+  }
+  const found = nearest(at, "right", "beat")
   world.pose("right", direction)
-  const found = nearest(transportSeconds(), "right")
-  if (!found || found.cue.kind !== "beat") return
+  if (!found) return
+  if (fromRing && found.cue.direction === direction && found.distance <= GOOD) ring?.reportError(at - found.cue.time)
   const kind = found.cue.direction === direction ? gradeDistance(found.distance) : "miss"
-  scoreCue(found.cue, kind)
+  scoreCue(found.cue, kind, found.delta)
 }
 
-function playPalm(direction) {
+function playPalm(direction, at = inputNow()) {
   if (mode === "free") return freeNudge(direction)
   if (mode !== "playing" && mode !== "count-in") return
   world.pose("left", direction)
-  const found = nearest(transportSeconds(), "left")
+  const found = nearest(at, "left")
   if (!found || found.cue.kind !== "dynamics" || found.cue.direction !== direction) return
-  scoreCue(found.cue, gradeDistance(found.distance))
+  scoreCue(found.cue, gradeDistance(found.distance), found.delta)
 }
 
-function playPoint(part) {
+function playPoint(part, at = inputNow()) {
   if (mode === "free") return freeSelect(part)
   if (!part || (mode !== "playing" && mode !== "count-in")) return
   world.pose("left", "point", part)
-  const found = nearest(transportSeconds(), "left")
+  const found = nearest(at, "left")
   if (!found || found.cue.kind !== "cue" || found.cue.part !== part) return
-  scoreCue(found.cue, gradeDistance(found.distance))
+  scoreCue(found.cue, gradeDistance(found.distance), found.delta)
 }
 
 function pickCard(part) {
-  playPoint(part)
+  if (manual("left")) playPoint(part)
+}
+
+// ---------- Rings ----------
+
+function onRing(event) {
+  if (mode === "free") {
+    if (event.hand !== "left") return
+    const calibration = ring.input.snapshot().palmCalibration
+    if (calibration.active) return
+    if (event.type === "strike") freeStart()
+    else if (event.type === "palm") {
+      if (calibration.ready) playPalm(event.dir)
+      else toast("请先校准左手抬掌/压掌")
+    }
+    return
+  }
+  if (mode !== "playing" && mode !== "count-in") return
+  const at = inputNow() - event.age
+  if (event.type === "fist") return stopByFist()
+  if (event.hand === "right" && event.type === "beat") playBeat(event.dir, at, true)
+  else if (event.hand === "left" && event.type === "palm") playPalm(event.dir, at)
+  else if (event.hand === "left" && event.type === "strike") {
+    // Without a camera the strike cannot say who is pointed at, so it answers whichever entrance is due.
+    const found = nearest(at, "left", "cue")
+    if (found) playPoint(found.cue.part, at)
+    else world.pose("left", "point")
+  }
+}
+
+function stopByFist() {
+  toast("握拳 · 收束")
+  world.pose("left", "down")
+  finish()
+}
+
+const ring = startRing({
+  onGesture: onRing,
+  onPreview: (event) => {
+    if (mode === "playing" || mode === "count-in") world.previewRight(event.dir)
+  },
+})
+
+function timingSummary() {
+  if (!deltas.length) { timingEl.innerHTML = ""; settings.suggest(null); return }
+  const early = deltas.filter((d) => d < -TIMING_EDGE).length
+  const late = deltas.filter((d) => d > TIMING_EDGE).length
+  const mean = Math.round(deltas.reduce((sum, d) => sum + d, 0) / deltas.length * 1000)
+  const bias = mean === 0 ? "平均 刚好" : `平均${mean < 0 ? "偏早" : "偏晚"} ${Math.abs(mean)} ms`
+  timingEl.innerHTML = `<span class="early">偏早 ${early}</span><span>准 ${deltas.length - early - late}</span><span class="late">偏晚 ${late}</span><span>${bias}</span>`
+  settings.suggest(deltas.length >= 6 && Math.abs(mean) >= 15 ? mean : null)
 }
 
 function finish() {
@@ -167,33 +225,57 @@ function finish() {
   const stars = percent >= 90 ? 3 : percent >= 70 ? 2 : percent >= 40 ? 1 : 0
   accuracyEl.textContent = `${percent}%`
   countsEl.innerHTML = `<span class="perfect">Perfect ${counts.perfect}</span><span class="good">Good ${counts.good}</span><span class="miss">Miss ${counts.miss}</span>`
+  timingSummary()
   starsEl.innerHTML = [0, 1, 2].map((i) => `<i class="${i < stars ? "lit" : ""}">★</i>`).join("")
   setMode("result")
   statusEl.textContent = "结果"
 }
 
-async function begin() {
+async function begin(study = lastStudy) {
+  const ringSnapshot = ring.input?.snapshot()
+  if (ring.input?.live("right") && !ringSnapshot.direction.ready) {
+    ring.openPanel()
+    toast("请先完成右手四个方向的校准")
+    return
+  }
+  if (ring.input?.live("left") && !ringSnapshot.palmCalibration.ready) {
+    ring.openPanel()
+    toast("请先完成左手抬掌/压掌校准")
+    return
+  }
+  lastStudy = study
+  ring.clearTiming()
+  ring.closePanel?.()
+  settings.close()
   stopLevel()
   world.reset()
+  lane.reset()
   mixer.reset()
-  chart = buildChart()
+  chart = buildChart(study)
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
   counts = { perfect: 0, good: 0, miss: 0 }
+  deltas = []
   spawned = new Set()
   dynamics = 1
-  gradeEl.hidden = true
   tallyEl.textContent = "0000"
   tallyLabel.textContent = "SCORE"
-  sessionTitle.textContent = "练习曲"
-  sessionSub.textContent = "ÉTUDE I　/　4:4　/　96 BPM"
+  sessionTitle.textContent = study.title
+  sessionSub.textContent = study.sub
+  beatDots.forEach((dot, i) => { dot.hidden = i >= chart.meter })
   progressEl.style.width = "0%"
   setMode("count-in")
   statusEl.textContent = "预备"
-  hintEl.innerHTML = '<span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或右半屏滑动 · 打拍</span><span>点击乐手 · 声部进入</span><span><kbd>E</kbd> 左侧上划 · 渐强</span><span><kbd>D</kbd> 左侧下划 · 渐弱</span>'
+  hintEl.innerHTML = [
+    manual("right") ? "<span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或右半屏滑动 · 打拍（右手戒指未连接）</span>" : "<span>右手戒指 · 按箭头方向和节拍挥动</span>",
+    manual("left") ? "<span>点击乐手 · 声部进入</span><span><kbd>E</kbd> 左侧上划 · 渐强</span><span><kbd>D</kbd> 左侧下划 · 渐弱</span>" : "<span>左手戒指 · 向前一指进入，掌心抬 / 压 = 渐强 / 渐弱</span>",
+    "<span>握拳 · 停止</span>",
+  ].join("")
+  world.setLevelHands(true)
   world.resize()
+  lane.resize()
   await startLevel(chart, {
     onVoice: (part) => world.emit?.(part),
-    onDone: finish,
+    onDone: () => { if (cues.every((cue) => cue.result)) finish() },
   })
   setDynamics(1)
 }
@@ -208,19 +290,22 @@ async function beginFree() {
   chart = null
   dynamics = 1
   ending = false
-  gradeEl.hidden = true
   sessionTitle.textContent = "自由指挥"
   sessionSub.textContent = "FREE　/　4:4　/　C · G · Am · F"
   tallyLabel.textContent = "BPM"
   tallyEl.textContent = "96"
   progressEl.style.width = "0%"
   setMode("free")
+  beatDots.forEach((dot) => { dot.hidden = false })
   statusEl.textContent = "等待起奏"
-  hintEl.innerHTML = '<span>点乐手 / <kbd>1</kbd>–<kbd>4</kbd> · 选声部</span><span>拖动画圈 · 圈选</span><span><kbd>F</kbd> 起奏　<kbd>G</kbd> 停止</span><span><kbd>E</kbd><kbd>D</kbd> 渐强渐弱　<kbd>S</kbd> 独奏</span><span><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> 打拍控速</span>'
+  hintEl.innerHTML = '<span>点乐手 / <kbd>1</kbd>–<kbd>4</kbd> · 选声部</span><span>拖动画圈 · 圈选</span><span>左手指环前指 / <kbd>F</kbd> 起奏　<kbd>G</kbd> 停止</span><span>左手抬/压掌 / <kbd>E</kbd><kbd>D</kbd> 渐强渐弱　<kbd>S</kbd> 独奏</span><span><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> 打拍控速</span>'
+  world.setLevelHands(false)
   world.resize()
+  lane.resize()
+  lane.update(0, null, [])
   await startFree({ onVoice: (part) => world.emit?.(part) })
   setDynamics(1)
-  toast("先选一个声部，再按 F 起奏")
+  toast("先选声部，再前指或按 F 起奏")
 }
 
 const names = (list) => list.map((part) => PART_INFO[part].name).join("、")
@@ -355,7 +440,7 @@ function freeLoop() {
   if (playing.size && !ending) statusEl.textContent = `第 ${bar + 1} / ${LOOP_BARS} 小节`
   const selected = [...mixer.selected]
   if (ending) cueHintEl.textContent = "谢幕中…"
-  else if (selected.length) cueHintEl.textContent = `已选 ${names(selected)} · F 起奏 / G 停止 / S 独奏`
+  else if (selected.length) cueHintEl.textContent = `已选 ${names(selected)} · 前指 / F 起奏 · G 停止 / S 独奏`
   else if (!playing.size) cueHintEl.textContent = "点一位乐手，或拖动鼠标画个圈"
   else cueHintEl.textContent = "挥拍控制速度 · 没选人时 G 全体收束"
   const pending = new Map(PARTS.filter((part) => mixer.parts[part].pending).map((part) => [part, mixer.parts[part].pending]))
@@ -370,48 +455,60 @@ function loop() {
   if (!chart || mode === "home" || mode === "result") {
     return
   }
-  const now = transportSeconds()
+  const now = Math.max(0, songSeconds())
   if (mode === "count-in" && now >= chart.countIn) {
     mode = "playing"
     statusEl.textContent = "演奏"
   }
   progressEl.style.width = `${Math.min(100, now / chart.duration * 100)}%`
-  beatDots.forEach((dot, i) => dot.classList.toggle("active", Math.floor(now / chart.beat) % 4 === i))
+  beatDots.forEach((dot, i) => dot.classList.toggle("active", Math.floor(now / chart.beat) % chart.meter === i))
   const nextLeft = cues.find(cue => cue.hand === "left" && !cue.result && cue.time >= now - GOOD)
-  if (now < chart.countIn) cueHintEl.textContent = `预备 · ${4 - Math.min(3, Math.floor(now / chart.beat))}`
+  const leftRing = !manual("left")
+  const rightRing = !manual("right")
+  if (now < chart.countIn) cueHintEl.textContent = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
   else if (nextLeft && nextLeft.time - now < 2) {
-    cueHintEl.textContent = nextLeft.kind === "cue" ? `点一下发光的圈 · ${nextLeft.part === "violin" ? "小提琴" : "长笛"}进入` : nextLeft.direction === "up" ? "抬起左手 · 渐强  E" : "放低左手 · 渐弱  D"
-  } else cueHintEl.textContent = "音符落到判定线时 · 按同方向打拍"
+    if (nextLeft.kind === "cue") cueHintEl.textContent = leftRing ? `左手向前一指 · ${PART_INFO[nextLeft.part].name}进入` : `点一下发光的圈 · ${PART_INFO[nextLeft.part].name}进入`
+    else if (nextLeft.direction === "up") cueHintEl.textContent = leftRing ? "左手掌心向上抬 · 渐强" : "抬起左手 · 渐强  E"
+    else cueHintEl.textContent = leftRing ? "左手压下去 · 渐弱" : "放低左手 · 渐弱  D"
+  } else cueHintEl.textContent = rightRing ? "音符落到判定圈时 · 按箭头方向挥动右手" : "音符落到判定圈时 · 按同方向打拍"
   if (mode === "playing") {
     const bar = Math.min(chart.bars, Math.floor((now - chart.countIn) / (chart.meter * chart.beat)) + 1)
     if (bar > 0) statusEl.textContent = `第 ${bar} / ${chart.bars} 小节`
   }
+  // A positive input delay judges gestures earlier, so a cue must stay open that much longer.
+  const delay = Math.max(0, settings.latency)
   cues.forEach((cue, index) => {
     if (!spawned.has(index) && cue.time - now < 2.05) {
       spawned.add(index)
-      world.spawn(cue)
+      if (cue.kind === "cue") world.spawn(cue)
     }
-    if (!cue.result && now > cue.time + GOOD) scoreCue(cue, "miss")
+    const grace = ((cue.hand === "right" && rightRing) || (cue.hand === "left" && leftRing) ? 0.5 : LATE_GRACE) + delay
+    if (!cue.result && now > cue.time + GOOD + grace) scoreCue(cue, "miss")
   })
-  if (now >= chart.duration) finish()
+  if (now >= chart.duration && cues.every((cue) => cue.result)) finish()
   const playing = new Set(["piano", "cello"])
   if (cues.some((cue) => cue.kind === "cue" && cue.part === "violin" && cue.result && cue.result !== "miss")) playing.add("violin")
   if (cues.some((cue) => cue.kind === "cue" && cue.part === "flute" && cue.result && cue.result !== "miss")) playing.add("flute")
   hud.update(levelView(playing, partLevels?.() || {}))
   const pending = new Map(cues.filter((cue) => cue.kind === "cue" && !cue.result && cue.time - now < 2).map((cue) => [cue.part, "in"]))
+  lane.update(now, chart, cues)
   world.update(now, playing, { selected: new Set(), pending, solo: null })
 }
 
+// In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.
+const manual = (hand) => mode === "free" || !ring?.input?.live?.(hand)
+
 window.addEventListener("keydown", (event) => {
+  if (document.querySelector(".ring-rerecord")?.open) return
   if (event.repeat) return
   const beat = { ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up" }[event.key]
   if (beat) {
     event.preventDefault()
-    playBeat(beat)
+    if (manual("right")) playBeat(beat)
   }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
-  if (key === "e") playPalm("up")
-  if (key === "d") playPalm("down")
+  if (key === "e" && manual("left")) playPalm("up")
+  if (key === "d" && manual("left")) playPalm("down")
   if (mode !== "free") return
   const part = PARTS.find((name) => PART_INFO[name].key === key)
   if (part) freeSelect(part)
@@ -437,11 +534,31 @@ view.addEventListener("pointerdown", (event) => {
   pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: mode === "free" ? [local(event)] : null }
 })
 
+function swipeDirection(dx, dy) {
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : (dy > 0 ? "down" : "up")
+}
+
+function swipe(fromLeft, dx, dy) {
+  const direction = swipeDirection(dx, dy)
+  if (fromLeft && (direction === "up" || direction === "down")) { if (manual("left")) playPalm(direction) }
+  else if (!fromLeft && manual("right")) playBeat(direction)
+}
+
 view.addEventListener("pointermove", (event) => {
-  if (!pointer?.trail) return
-  pointer.trail.push(local(event))
-  if (pathLength(pointer.trail) > 36) {
-    lassoPath.setAttribute("d", "M" + pointer.trail.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" L") + " Z")
+  if (!pointer) return
+  if (pointer.trail) {
+    pointer.trail.push(local(event))
+    if (pathLength(pointer.trail) > 36) {
+      lassoPath.setAttribute("d", "M" + pointer.trail.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" L") + " Z")
+    }
+    return
+  }
+  // A beat lands as soon as the stroke is clearly a swipe, not when the finger lifts.
+  const dx = event.clientX - pointer.x
+  const dy = event.clientY - pointer.y
+  if (mode !== "free" && !pointer.fired && Math.hypot(dx, dy) >= 36) {
+    pointer.fired = true
+    swipe(pointer.left, dx, dy)
   }
 })
 
@@ -455,6 +572,7 @@ view.addEventListener("pointerup", (event) => {
   const dx = event.clientX - pointer.x
   const dy = event.clientY - pointer.y
   const fromLeft = pointer.left
+  const fired = pointer.fired
   const trail = pointer.trail
   pointer = null
   if (trail) {
@@ -464,16 +582,13 @@ view.addEventListener("pointerup", (event) => {
       return
     }
   }
+  if (fired) return
   if (Math.hypot(dx, dy) < 36) {
-    playPoint(world.pick(event.clientX, event.clientY))
+    if (manual("left")) playPoint(world.pick(event.clientX, event.clientY))
     return
   }
   if (mode === "free") return
-  const direction = Math.abs(dx) > Math.abs(dy)
-    ? (dx > 0 ? "right" : "left")
-    : (dy > 0 ? "down" : "up")
-  if (fromLeft && (direction === "up" || direction === "down")) playPalm(direction)
-  else if (!fromLeft) playBeat(direction)
+  swipe(fromLeft, dx, dy)
 })
 
 function goHome() {
@@ -483,11 +598,12 @@ function goHome() {
   setMode("home")
 }
 
-document.querySelector("#retry").addEventListener("click", begin)
+document.querySelector("#retry").addEventListener("click", () => begin())
 document.querySelector("#back").addEventListener("click", goHome)
 exitEl.addEventListener("click", goHome)
 
-window.addEventListener("resize", () => world.resize())
+window.addEventListener("resize", () => { world.resize(); lane.resize() })
 setMode("home")
 world.resize()
+lane.resize()
 loop()

@@ -1,5 +1,5 @@
-export const PERFECT = 0.08
-export const GOOD = 0.18
+export const PERFECT = 0.12
+export const GOOD = 0.25
 
 export function createJudge(level) {
   const beatSec = 60 / level.bpm

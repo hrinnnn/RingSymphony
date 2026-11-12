@@ -11,13 +11,16 @@
       <header>
         <span class="brand"><i class="logo" aria-hidden="true">♪</i><span>指环指挥<small>RING SYMPHONY</small></span></span>
         <span class="header-right">
+          <button id="ring-btn" type="button" data-state="off">指环 · 桥接未连接</button>
+          <button id="settings-btn" type="button">设置</button>
           <span id="status">选关</span>
           <button id="exit" type="button" hidden>返回</button>
         </span>
       </header>
+      <aside id="ring-panel" hidden aria-label="指环状态"></aside>
+      <aside id="settings-panel" hidden aria-label="设置"></aside>
 
       <section id="home">
-        <div class="floaties" aria-hidden="true"><i>♪</i><i>♫</i><i>♩</i><i>♪</i><i>♬</i><i>♫</i><i>♪</i><i>♩</i></div>
         <p class="eyebrow">TAKE THE PODIUM</p>
         <h1>让乐声，<em>随你而起</em>。</h1>
         <p class="intro">右手掌握节拍，左手唤醒乐团。<br>站上指挥台，开始你的第一场演出。</p>
@@ -27,12 +30,12 @@
       <section id="play" hidden>
         <div class="frame hall">
           <canvas id="view" aria-label="第一人称乐团舞台：方向键或右侧滑动打拍，点击乐手进入，E 渐强，D 渐弱"></canvas>
+          <canvas id="lane" aria-hidden="true"></canvas>
           <svg id="lasso" aria-hidden="true"><path d="" /></svg>
           <div id="progress"><span id="progress-fill"></span></div>
           <div class="session"><h2 id="session-title">练习曲</h2><p id="session-sub">ÉTUDE I　/　4:4　/　96 BPM</p></div>
           <div class="tally"><small id="tally-label">SCORE</small><span id="tally">0000</span></div>
           <div class="conducting-hud"><div class="beats"><i class="beat-dot"></i><i class="beat-dot"></i><i class="beat-dot"></i><i class="beat-dot"></i></div><p id="cue-hint">预备</p></div>
-          <p id="grade" aria-live="polite"></p>
           <div id="mixer" aria-label="声部"></div>
           <div id="tools" hidden>
             <button type="button" data-act="start" class="candy pink"><b>起奏</b><small>向前一指</small><kbd>F</kbd></button>
@@ -49,6 +52,7 @@
               <p class="stars" id="stars"></p>
               <p class="accuracy" id="accuracy"></p>
               <p class="counts" id="counts"></p>
+              <p class="timing" id="timing"></p>
               <div class="actions">
                 <button id="retry" type="button" class="candy pink">再来一次</button>
                 <button id="back" type="button" class="candy plain">换一关</button>
