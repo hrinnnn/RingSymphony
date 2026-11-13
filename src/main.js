@@ -130,14 +130,17 @@ function gradeDistance(distance) {
 }
 
 // `at` is the gesture time on the song clock; rings supply it back-dated by their transmission delay.
-function playBeat(direction, at = inputNow(), fromRing = false) {
+// A "weak" beat cleared the low trigger but not the high one: it is only taken as a beat when it
+// lands near a cue the player was due to hit, so incidental motion is dropped instead of scored.
+function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong") {
   if (mode === "free") return freeBeat(direction)
   if (mode !== "playing" && mode !== "count-in") return
   if (!direction) {
-    if (fromRing) toast("方向不确定，请重新校准或挥得更明确")
+    if (fromRing && tier === "strong") toast("方向不确定，请重新校准或挥得更明确")
     return
   }
   const found = nearest(at, "right", "beat")
+  if (tier === "weak" && !(found && found.distance <= GOOD * 2)) return
   world.pose("right", direction)
   if (!found) return
   if (fromRing && found.cue.direction === direction && found.distance <= GOOD) ring?.reportError(at - found.cue.time)
@@ -184,7 +187,7 @@ function onRing(event) {
   if (mode !== "playing" && mode !== "count-in") return
   const at = inputNow() - event.age
   if (event.type === "fist") return stopByFist()
-  if (event.hand === "right" && event.type === "beat") playBeat(event.dir, at, true)
+  if (event.hand === "right" && event.type === "beat") playBeat(event.dir, at, true, event.tier)
   else if (event.hand === "left" && event.type === "palm") playPalm(event.dir, at)
   else if (event.hand === "left" && event.type === "strike") {
     // Without a camera the strike cannot say who is pointed at, so it answers whichever entrance is due.

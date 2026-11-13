@@ -9,8 +9,11 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 export const DEFAULTS = {
-  // beat: |ω| peak above 1.15 × running mean; suppress rapid return strokes.
-  beatRise: 1.15,
+  // beat: |ω| peak above weakRise × running mean registers at all; above beatRise × mean it is
+  // unambiguous. Between the two the motion is deliberate-but-soft or incidental, and the
+  // consumer decides (main.js asks whether it landed near a real cue).
+  beatRise: 1.6,
+  weakRise: 1.15,
   beatFloor: 1.6,
   beatDrop: 0.8,
   beatGap: 0.34,
@@ -93,17 +96,21 @@ export function createBeatDetector(options = {}) {
       rest = rest === null
         ? o.beatFloor / o.floorRest
         : rest + (w > rest ? restK : restK * 3) * (w - rest)
-      const level = Math.max(floor(), o.beatRise * mean)
+      // Triggering uses the low bar, so soft strokes are seen at all; the tier on the emitted
+      // event says whether it cleared the high one.
+      const level = Math.max(floor(), o.weakRise * mean)
+      const strongLevel = Math.max(floor(), o.beatRise * mean)
       if (rising && (w < o.beatDrop * peak || w < level * 0.6)) {
         rising = false
         const accepted = peakT - lastBeat >= o.beatGap
         const strength = peak / Math.max(mean, 0.3)
+        const tier = peak >= strongLevel ? "strong" : "weak"
         const p = peakT
         const peakSpeed = peak
         peak = 0
         if (accepted) {
           lastBeat = p
-          return { type: "beat", t: p, strength, peakSpeed }
+          return { type: "beat", t: p, strength, peakSpeed, tier }
         }
       } else if (w > level && t >= mutedUntil) {
         if (!rising || w > peak) { peak = w; peakT = t }

@@ -47,3 +47,22 @@ import { createBeatDetector } from '../src/ring/detectors.js'
 }
 
 console.log('detectors ok')
+
+// A clear stroke is strong; a soft one above the floor is weak.
+{
+  const detector = createBeatDetector({ adaptiveFloor: false })
+  const strong = [0, 0, 2, 6, 1, 0].map((s, i) => detector.push(i * 0.01, s)).filter(Boolean)
+  assert.equal(strong.length, 1)
+  assert.equal(strong[0].tier, 'strong')
+}
+// A soft stroke that clears the low bar but not the high one is weak.
+// With mean ≈ 0.5 and floor 0.5: weak trigger is 0.575, strong is 0.8.
+{
+  const detector = createBeatDetector({ adaptiveFloor: false, beatFloor: 0.5 })
+  for (let i = 0; i < 400; i += 1) detector.push(i * 0.005, 0.5)
+  const weak = [0.5, 0.5, 0.6, 0.7, 0.55, 0.5].map((s, i) => detector.push(2 + i * 0.01, s)).filter(Boolean)
+  assert.equal(weak.length, 1)
+  assert.equal(weak[0].tier, 'weak')
+}
+
+console.log('detectors tier ok')
