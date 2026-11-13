@@ -165,10 +165,16 @@ console.log('Replay cleanup and portrait resize: pass')
 const chart = buildChart()
 assert.equal(chart.bpm,80); assert.equal(chart.meter,4); assert.equal(chart.bars,8); assert.equal(chart.countIn,3)
 assert.equal(chart.cues.filter(c=>c.kind==='beat').length,32)
-assert.equal(chart.cues.find(c=>c.part==='violin').time,8.625)
-assert.equal(chart.cues.find(c=>c.part==='flute').time,14.625)
+// Every left-hand cue shares its moment with a right-hand beat, so the player tracks one grid
+// rather than two: entries now land on the bar line instead of half a beat ahead of it.
+assert.equal(chart.cues.find(c=>c.part==='violin').time,9)
+assert.equal(chart.cues.find(c=>c.part==='flute').time,15)
 assert.equal(chart.cues.find(c=>c.kind==='dynamics'&&c.direction==='up').time,18)
 assert.equal(chart.cues.find(c=>c.kind==='dynamics'&&c.direction==='down').time,22.5)
+for (const cue of chart.cues.filter(c=>c.hand==='left')) {
+  assert.ok(chart.cues.some(c=>c.hand==='right'&&Math.abs(c.time-cue.time)<1e-9),
+    `left-hand ${cue.kind} at ${cue.time}s must share a beat with a right-hand cue`)
+}
 assert.equal(PERFECT,.12); assert.equal(GOOD,.25)
 console.log('Chart I, cue positions, 120 ms / 250 ms windows: pass')
 for (const study of STUDIES) {
@@ -182,8 +188,14 @@ for (const study of STUDIES) {
   assert.ok(events.filter(e => e.time.startsWith('0:')).every(e => e.part === 'tick'), `${study.id}: the count-in is pulse only`)
   assert.equal(events.filter(e => e.part === 'tick' && e.time.startsWith('0:')).length, study.meter, `${study.id}: one count-in click per beat`)
   for (const c of built.cues.filter(c => c.kind === 'cue')) {
-    const bars = (c.time + built.beat / 2 - built.countIn) / (study.meter * built.beat)
-    assert.ok(Math.abs(bars - Math.round(bars)) < 1e-9, `${study.id}: ${c.part} is cued half a beat before a bar line`)
+    const bars = (c.time - built.countIn) / (study.meter * built.beat)
+    assert.ok(Math.abs(bars - Math.round(bars)) < 1e-9, `${study.id}: ${c.part} is cued on the bar line`)
+  }
+  // Both hands act together: a left-hand cue always shares its moment with a right-hand beat,
+  // so the player counts one grid instead of two.
+  for (const c of built.cues.filter(c => c.hand === 'left')) {
+    assert.ok(beats.some((b) => Math.abs(b.time - c.time) < 1e-9),
+      `${study.id}: left-hand ${c.kind} at ${c.time.toFixed(3)}s shares a beat with a right-hand cue`)
   }
 }
 console.log('Every level: cues sit on audible pulses and piano chords, count-in is pulse only')

@@ -45,8 +45,10 @@ export function buildChart(study = STUDIES[0]) {
     const hits = study.hits?.[bar] ?? dirs.map((_, i) => i)
     for (const i of hits) cues.push({ kind: "beat", hand: "right", direction: dirs[i], time: at(bar, i) })
   }
-  // A section cue is given half a beat ahead of the bar line the section actually enters on.
-  for (const { part, bar } of study.entries) cues.push({ kind: "cue", hand: "left", part, time: at(bar, 0) - beat * 0.5 })
+  // A section cue lands on the bar line the section enters on, where a right-hand beat also
+  // falls. A conductor would gesture half a beat early, but a player tracking two hands has to
+  // count two separate grids to do that; on the beat they can point and wave as one motion.
+  for (const { part, bar } of study.entries) cues.push({ kind: "cue", hand: "left", part, time: at(bar, 0) })
   for (const { direction, bar, beat: inBar } of study.dynamics) cues.push({ kind: "dynamics", hand: "left", direction, time: at(bar, inBar) })
   cues.sort((a, b) => a.time - b.time)
   return { bpm, meter, beat, countIn, bars, cues, duration: countIn + bars * meter * beat, study }
