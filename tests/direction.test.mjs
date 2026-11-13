@@ -479,3 +479,72 @@ assert.equal(dual.snapshot().direction.pending, "down", "left-hand data gaps do 
 }
 
 console.log("Direction: outlier tolerance pass")
+
+// A round trip restores a working calibration, so a refresh or reconnect does not cost one.
+{
+  const cal = createDirectionCalibration()
+  const vecs = { down: [0, 0, 1], left: [0, 1, 0], right: [1, 0, 0], up: [0, 0, -1] }
+  for (const [dir, vec] of Object.entries(vecs)) {
+    for (let i = 0; i < 3; i += 1) { cal.arm(dir, "AA", i); cal.capture(vec, "AA", i + 0.1, i + 0.1, 2) }
+  }
+  const saved = cal.serialise("right")
+  const fresh = createDirectionCalibration()
+  assert.equal(fresh.restore(saved, "AA", "right"), true)
+  assert.equal(fresh.status(0).ready, true, fresh.status(0).message)
+  assert.equal(fresh.classify([0, 0, 1], "AA"), "down", "a restored calibration must classify")
+}
+
+// Malformed, stale or mismatched stored calibration must be refused, not loaded.
+{
+  const cal = createDirectionCalibration()
+  const body = { version: 1, address: "AA", hand: "right", samples: {}, speeds: {} }
+  assert.equal(cal.restore({ ...body, version: 99 }, "AA", "right"), false, "wrong version")
+  assert.equal(cal.restore({ ...body, address: "BB" }, "AA", "right"), false, "wrong ring")
+  assert.equal(cal.restore({ ...body, hand: "left" }, "AA", "right"), false, "wrong hand")
+  assert.equal(cal.restore(null, "AA", "right"), false, "missing")
+  assert.equal(cal.restore({ ...body, samples: "garbage" }, "AA", "right"), false, "malformed samples")
+  assert.equal(cal.restore({ ...body, samples: { down: [[1, 0]] } }, "AA", "right"), false, "malformed vector")
+  assert.equal(cal.status(0).ready, false, "a refused restore must leave the calibration empty")
+}
+
+console.log("Direction: persistence pass")
+
+// End to end: a calibration completed in one session is still there after a reload, and a
+// deliberate reset clears it for good.
+{
+  const store = {}
+  const storage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v }, removeItem: (k) => { delete store[k] } }
+  const session = () => {
+    let wall = 200
+    let device = 0
+    let seq = 0
+    const input = createRingInput({ now: () => wall, onEvent: () => {}, onPreview: () => {}, WebSocketImpl: null, storage })
+    input.feed({ type: "status", rings: [{ address: "G", connected: true }] })
+    const frame = (gyr = [0, 0, 0]) => {
+      input.feed({ type: "imu", address: "G", timestamp: device, sequence: seq++, acc: [0, 0, 9.81], gyr })
+      wall += 0.005
+      device += 0.005
+    }
+    const still = () => { for (let i = 0; i < 100; i += 1) frame() }
+    const stroke = (v) => { for (let i = 0; i <= 60; i += 1) frame(v.map((x) => x * 1.25 * Math.sin(Math.PI * i / 60))) }
+    return { input, still, stroke }
+  }
+  const vecs = { down: [0, 0, 1], left: [0, 1, 0], right: [1, 0, 0], up: [0, -1, 0] }
+  const first = session()
+  first.still()
+  for (const [dir, vec] of Object.entries(vecs)) {
+    for (let i = 0; i < 3; i += 1) { first.input.calibrate(dir); first.stroke(vec); first.still() }
+  }
+  assert.equal(first.input.snapshot().direction.ready, true, first.input.snapshot().direction.message)
+
+  const second = session()
+  second.still()
+  assert.equal(second.input.snapshot().direction.ready, true, "calibration must survive a reload")
+
+  second.input.resetDirection()
+  const third = session()
+  third.still()
+  assert.equal(third.input.snapshot().direction.ready, false, "resetting must clear the stored calibration")
+}
+
+console.log("Direction: calibration survives a reload")

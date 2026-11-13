@@ -5,6 +5,7 @@ import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION, MAX_SHORT_GAP, crea
 
 const ROLE_KEY = "ringsymphony.roles.v2"
 const COMP_KEY = "ringsymphony.compensation"
+const CAL_KEY = "ringsymphony.calibration.v1"
 
 function readJson(storage, key, fallback) {
   try {
@@ -140,6 +141,21 @@ export function createRingInput({
     }
   }
 
+  // Calibration is stored per ring address and hand, so a refresh or reconnect does not cost one.
+  function saveCalibration(hand = "right") {
+    const body = direction.serialise(hand)
+    if (!body) return
+    try {
+      storage?.setItem(CAL_KEY, JSON.stringify(body))
+    } catch {
+      // as above: without storage the calibration lasts for the session only
+    }
+  }
+
+  function loadCalibration(ringAddress, hand) {
+    return direction.restore(readJson(storage, CAL_KEY, null), ringAddress, hand)
+  }
+
   // Ring Studio lists every ring it has ever seen; only one that is connected and streaming counts.
   const present = (ring) => ring.connected && ring.lastSeen > 0 && now() - ring.lastSeen < 2
 
@@ -149,6 +165,8 @@ export function createRingInput({
     const palmHandChanged = ring.hand === "left" || hand === "left"
     if (palmHandChanged) clearPalmCalibration(palmAutomatic ? "左手指环改变，校准已停止" : undefined)
     if (ring.hand === "right" || hand === "right") direction.reset()
+    // A stored calibration for this exact ring and hand stands in for redoing the waves.
+    if (hand === "right") loadCalibration(ring.address, "right")
     if (ring.hand) lastByHand[ring.hand] = null
     if (hand) lastByHand[hand] = null
     ring.hand = hand
@@ -299,6 +317,7 @@ export function createRingInput({
         const feature = directionFeature(ring.history, candidate.t)
         const captured = direction.capture(feature, ring.address, arrival, arrival, candidate.peakSpeed)
         const calibration = direction.status(arrival)
+        if (captured) saveCalibration("right")
         if (captured && calibration.ready) {
           ring.detector = createHandDetector("right", { beatFloor: calibration.beatFloor })
         }
@@ -463,6 +482,7 @@ export function createRingInput({
       if (!ring) throw new Error("右手指环未连接")
       if (automatic || direction.status(now()).pending) throw new Error("请先停止正在进行的校准")
       direction.clearDirection(handDirection)
+      saveCalibration("right")
       const step = nextAutomaticStep(direction.status(now()), handDirection)
       ring.detector = createHandDetector("right")
       ring.returnFilter.reset()
@@ -494,6 +514,12 @@ export function createRingInput({
       automatic = null
       autoMessage = ""
       direction.reset()
+      // Starting over must also forget what was stored, or a refresh would bring it back.
+      try {
+        storage?.removeItem(CAL_KEY)
+      } catch {
+        // no storage: nothing was persisted to forget
+      }
       for (const ring of rings.values()) {
         if (ring.hand === "right") {
           ring.detector = createHandDetector("right")

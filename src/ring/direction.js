@@ -92,6 +92,11 @@ function agreeing(list) {
   return { kept: [], centroid: null }
 }
 
+export const CALIBRATION_VERSION = 1
+
+const vectorList = (value) => Array.isArray(value) &&
+  value.every((item) => Array.isArray(item) && item.length === 3 && item.every((n) => Number.isFinite(n)))
+
 export function createDirectionCalibration() {
   let samples = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
   let speeds = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
@@ -158,6 +163,35 @@ export function createDirectionCalibration() {
   return {
     reset,
     status,
+    serialise(hand) {
+      if (!address) return null
+      return { version: CALIBRATION_VERSION, address, hand, samples, speeds, savedAt: Date.now() }
+    },
+    // Keyed by ring address *and* hand: the same ring worn on the other hand has different axes,
+    // and assign()/swap in input.js can move a ring between hands between sessions.
+    restore(data, ringAddress, hand) {
+      if (!data || typeof data !== "object") return false
+      if (data.version !== CALIBRATION_VERSION) return false
+      if (data.address !== ringAddress || data.hand !== hand) return false
+      if (!data.samples || typeof data.samples !== "object") return false
+      if (!data.speeds || typeof data.speeds !== "object") return false
+      const restored = {}
+      const restoredSpeeds = {}
+      for (const direction of DIRECTIONS) {
+        const list = data.samples[direction] ?? []
+        const speedList = data.speeds[direction] ?? []
+        if (!vectorList(list)) return false
+        if (!Array.isArray(speedList) || !speedList.every((n) => Number.isFinite(n))) return false
+        restored[direction] = list.map((sample) => [...sample])
+        restoredSpeeds[direction] = [...speedList]
+      }
+      samples = restored
+      speeds = restoredSpeeds
+      pending = null
+      address = ringAddress
+      message = ""
+      return true
+    },
     clearDirection(direction) {
       if (!DIRECTIONS.includes(direction)) throw new Error("无效的方向")
       if (pending) throw new Error("请先停止正在进行的校准")
