@@ -457,3 +457,25 @@ for (let i = 0; i < 170; i += 1) {
   dualClock += 0.005
 }
 assert.equal(dual.snapshot().direction.pending, "down", "left-hand data gaps do not block right-hand calibration")
+
+// Two consistent waves and one outlier must still yield a usable direction: with only three
+// samples and no outlier rejection, one slip drags the centroid and fails the good samples too.
+{
+  const cal = createDirectionCalibration()
+  const good = [0, 0, 1]
+  const outlier = [0, 1, 0]
+  cal.arm("down", "AA", 0); cal.capture(good, "AA", 0.1)
+  cal.arm("down", "AA", 1); cal.capture(good, "AA", 1.1)
+  cal.arm("down", "AA", 2); cal.capture(outlier, "AA", 2.1)
+  assert.equal(cal.status(3).perDirection.down.valid, true, "two agreeing samples must survive one outlier")
+}
+
+// Three mutually inconsistent waves have no majority and must still be rejected.
+{
+  const cal = createDirectionCalibration()
+  const samples = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  samples.forEach((sample, i) => { cal.arm("down", "AA", i); cal.capture(sample, "AA", i + 0.1) })
+  assert.equal(cal.status(4).perDirection.down.valid, false, "three disagreeing samples must not pass")
+}
+
+console.log("Direction: outlier tolerance pass")

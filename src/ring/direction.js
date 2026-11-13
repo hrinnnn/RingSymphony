@@ -55,6 +55,43 @@ export function createReturnFilter() {
   }
 }
 
+// All ways to choose `size` items, used to find the largest agreeing subset of calibration samples.
+function combinations(list, size) {
+  if (size >= list.length) return [list]
+  if (size <= 0) return [[]]
+  const seen = new Set()
+  const out = []
+  for (let skip = 0; skip < list.length; skip += 1) {
+    const subset = list.filter((_, i) => i !== skip)
+    for (const result of combinations(subset, size)) {
+      const key = result.map((item) => list.indexOf(item)).join(",")
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(result)
+    }
+  }
+  return out
+}
+
+// The largest subset of samples that all agree with their own centroid, so one sloppy wave does
+// not invalidate the rest. With only three samples a single outlier drags a plain average about a
+// third of the way toward itself, which can push the two good samples outside tolerance.
+// Dropping a sample demands a tighter agreement among those kept: any two vectors less than 90°
+// apart satisfy the normal tolerance against their own midpoint, so without this a direction with
+// three mutually inconsistent waves would still find a passing pair.
+function agreeing(list) {
+  for (let size = list.length; size >= 2; size -= 1) {
+    const tolerance = size === list.length ? 0.7 : 0.94
+    for (const subset of combinations(list, size)) {
+      const centroid = unit(subset.reduce((sum, sample) => sum.map((value, i) => value + sample[i]), [0, 0, 0]))
+      if (centroid && subset.every((sample) => sample.reduce((sum, value, axis) => sum + value * centroid[axis], 0) >= tolerance)) {
+        return { kept: subset, centroid }
+      }
+    }
+  }
+  return { kept: [], centroid: null }
+}
+
 export function createDirectionCalibration() {
   let samples = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
   let speeds = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
@@ -76,18 +113,28 @@ export function createDirectionCalibration() {
       message = "未检测到足够清晰的挥动；请确认右手指环在线，再重试当前方向"
     }
     const complete = DIRECTIONS.every((direction) => samples[direction].length >= SAMPLES_PER_DIRECTION)
-    const centroids = DIRECTIONS.map((direction) => unit(samples[direction].reduce(
-      (sum, sample) => sum.map((value, i) => value + sample[i]), [0, 0, 0],
-    )))
+    // Each direction is judged on its own: a majority of its samples must agree, and the centroid
+    // used for classification comes from those alone so an outlier cannot skew it.
+    const consensus = Object.fromEntries(DIRECTIONS.map((direction) => [direction, agreeing(samples[direction])]))
+    const centroids = DIRECTIONS.map((direction) => consensus[direction].centroid)
+    const perDirection = {}
+    for (let i = 0; i < DIRECTIONS.length; i += 1) {
+      const direction = DIRECTIONS[i]
+      const count = samples[direction].length
+      let dirIssue = ""
+      if (count < SAMPLES_PER_DIRECTION) dirIssue = `${DIRECTION_NAMES[direction]}还需采集 ${SAMPLES_PER_DIRECTION - count} 次`
+      else if (!centroids[i]) dirIssue = `${DIRECTION_NAMES[direction]}的动作差异过大，请重新采集`
+      perDirection[direction] = { count, valid: count >= SAMPLES_PER_DIRECTION && Boolean(centroids[i]), issue: dirIssue }
+    }
     let issue = ""
     if (complete) {
       for (let i = 0; i < DIRECTIONS.length; i += 1) {
-        if (!centroids[i] || samples[DIRECTIONS[i]].some((sample) => sample.reduce((sum, value, axis) => sum + value * centroids[i][axis], 0) < 0.7)) {
-          issue = `${DIRECTION_NAMES[DIRECTIONS[i]]}的三次动作差异过大，请重新采集`
+        if (!centroids[i]) {
+          issue = perDirection[DIRECTIONS[i]].issue
           break
         }
         for (let j = 0; j < i; j += 1) {
-          if (centroids[i].reduce((sum, value, axis) => sum + value * centroids[j][axis], 0) > 0.92) {
+          if (centroids[j] && centroids[i].reduce((sum, value, axis) => sum + value * centroids[j][axis], 0) > 0.92) {
             issue = `${DIRECTION_NAMES[DIRECTIONS[i]]}和${DIRECTION_NAMES[DIRECTIONS[j]]}的动作过于相似，请重新采集`
             break
           }
@@ -97,6 +144,7 @@ export function createDirectionCalibration() {
     }
     return {
       ready: complete && !issue,
+      perDirection,
       beatFloor: complete && !issue && DIRECTIONS.every((direction) => speeds[direction].length === SAMPLES_PER_DIRECTION)
         ? Math.max(0.65, Math.min(1.6, Math.min(...DIRECTIONS.flatMap((direction) => speeds[direction])) * 0.7))
         : 1.6,
@@ -152,9 +200,8 @@ export function createDirectionCalibration() {
       if (!feature) return { direction: null, reason: "方向特征不足" }
       if (ringAddress !== address || !status(0).ready) return { direction: null, reason: "右手尚未完成校准" }
       const scores = DIRECTIONS.map((direction) => {
-        const centroid = unit(samples[direction].reduce(
-          (sum, sample) => sum.map((value, i) => value + sample[i]), [0, 0, 0],
-        ))
+        // The centroid comes from the agreeing samples only, matching what status() validated.
+        const centroid = agreeing(samples[direction]).centroid
         return { direction, score: centroid ? feature.reduce((sum, value, i) => sum + value * centroid[i], 0) : -1 }
       }).sort((a, b) => b.score - a.score)
       if (scores[0].score < 0.8) return { direction: null, reason: "与校准动作差异过大" }
