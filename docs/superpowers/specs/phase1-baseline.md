@@ -1,5 +1,67 @@
 # Phase 1 baseline
 
+## Known-good detection state
+
+**Commit `1e7871a`, tag `detection-good-2026-11-13`.**
+
+Confirmed good by the player on real hardware (two Ringo rings, firmware
+2.0.2) on 2026-11-13: *"the detection is so much better now, this is the best
+version for detection"*.
+
+**Return here if later detection work makes things worse.** `git diff
+detection-good-2026-11-13 -- src/ring/ src/main.js` shows what has changed
+since.
+
+What is in this state:
+
+| Change | Commit |
+|---|---|
+| Adaptive beat floor | `88d6a9c` |
+| Two-tier beats, corrected thresholds | `92dfc8a` |
+| Outlier tolerance in calibration | `e211598` |
+| Calibration persisted per address and hand | `c064630` |
+| Fist no longer ends a rhythm level | `f4345a3` |
+| Cue-backed vertical stroke vs return | `7b1fe08` |
+| Learning from play - **reverted** | `1e7871a` |
+
+### Why this is the only evidence that counts
+
+This judgement came from playing, and that matters more than it sounds.
+
+During this work I quoted accuracy figures (56-68% baseline, 84/61/96% with
+learning, 0% cold start) derived from the `recordings/四拍/` files by assuming
+stroke *i* was direction `['down','left','right','up'][i % 4]`. Inspecting the
+data showed the strokes alternate between only **two** opposing clusters - the
+recordings are someone beating time, not conducting four directions.
+`README.md` states this directly: 没有逐次动作的时间标签，不能直接把所有波峰按
+文件名训练或计算准确率.
+
+**Every one of those numbers was meaningless.** The feature built on them
+(learning direction templates from strokes made during play) had no
+demonstrated benefit and made the opening of a level worse, which is what
+prompted the revert.
+
+The lesson for anyone continuing: **the repo contains no labelled dataset for
+measuring direction accuracy.** The only labelled data is `recordings/方向/`,
+which has one direction per file and three documented stroke times in
+`tests/direction.test.mjs`. That is enough to check a template is built
+correctly; it is not enough to measure classification accuracy, and it cannot
+be used to tune thresholds. Claims of the form "this improves detection by X%"
+are not currently possible from this repo. Verify by playing, or collect
+labelled data first.
+
+### Confidence in each surviving change
+
+| Change | Evidence |
+|---|---|
+| Fist no longer ends levels | Strong - reported by the player, cause found in `main.js:189` |
+| Weak-tier threshold correction | Strong - measured tier split; beat counts across all 24 recordings restored to pre-Phase-1 values |
+| 方向不确定 rate limiting | Strong - it fired on every unrecognised stroke |
+| Calibration persistence | Strong - tested end to end through `input.js` |
+| Outlier tolerance | Strong - logic verified, does not depend on labels |
+| Vertical stroke vs return | Partial - the 166-degree geometry is measured and real; the 8-of-8 improvement is from a simulation, not hardware |
+| Adaptive beat floor | Weak - tuned against a synthetic gentle signal, since no gentle recording exists |
+
 Instrument for judging whether the Phase 1 detection and calibration changes
 actually helped. Required by
 `docs/superpowers/specs/2026-11-13-camera-and-detection-design.md`.
