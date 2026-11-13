@@ -549,3 +549,42 @@ console.log("Direction: persistence pass")
 
 console.log("Direction: calibration survives a reload")
 
+
+// Up and down are near-perfect opposites (about 166 degrees apart in the recordings), so a real
+// down-stroke and the return of an up-stroke are the same motion to the gyroscope. Geometry
+// cannot separate them; timing can, because a real stroke lands on a cue and a return does not.
+{
+  const filter = createReturnFilter()
+  const up = [0, 0, 1]
+  const down = [0, 0, -1]
+  assert.equal(filter.accept(up, 1), true, "the first stroke is always taken")
+  assert.equal(filter.accept(down, 1.2), false, "a reversal soon after, with no cue due, is a return")
+
+  const onCue = createReturnFilter()
+  assert.equal(onCue.accept(up, 1), true)
+  assert.equal(onCue.accept(down, 1.2, true), true, "a reversal that lands on a cue is a real stroke")
+  // Having accepted it, the stroke after it is judged against the down stroke, not the up one.
+  assert.equal(onCue.accept(up, 1.4), false, "its own return is still suppressed")
+}
+
+console.log("Direction: cue-backed reversals pass")
+
+// Conducting up-down-up-down on the beat is the case that breaks without cue knowledge: each
+// stroke is the geometric opposite of the one before and lands inside RETURN_WINDOW, so every
+// second one was suppressed as a return and the player saw half their strokes vanish.
+{
+  const up = [0, 0, 1]
+  const down = [0, 0, -1]
+  const run = (onCue) => {
+    const filter = createReturnFilter()
+    let taken = 0
+    for (let i = 0; i < 8; i += 1) {
+      if (filter.accept(i % 2 === 0 ? up : down, i * 0.375, onCue)) taken += 1
+    }
+    return taken
+  }
+  assert.equal(run(false), 4, "without cue knowledge every second vertical stroke is lost")
+  assert.equal(run(true), 8, "strokes the chart asked for all count")
+}
+
+console.log("Direction: alternating vertical strokes on the beat pass")

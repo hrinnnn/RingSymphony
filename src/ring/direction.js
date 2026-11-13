@@ -34,6 +34,14 @@ export function directionFeatureResult(frames, peakTime) {
 }
 
 // A near-opposite rotation shortly after an accepted beat is likely the return stroke.
+//
+// Up and down sit about 166 degrees apart in practice, so a real down-stroke and the return of an
+// up-stroke are the same motion as far as the gyroscope is concerned — no cosine threshold can
+// separate them. Left and right sit about 95 degrees apart and their returns travel a different
+// arc, which is why only the vertical pair suffers. What does separate a stroke from a return is
+// when it happens: a stroke the player intends lands on a beat the music asked for, and a return
+// falls between them. `onCue` carries that knowledge in from the caller, which keeps this module
+// chart-agnostic.
 export const RETURN_WINDOW = 0.46
 
 export function createReturnFilter() {
@@ -46,9 +54,11 @@ export function createReturnFilter() {
   return {
     reset() { previous = null },
     isReturn,
-    accept(feature, time) {
+    accept(feature, time, onCue = false) {
       if (!feature) return true
-      if (isReturn(feature, time)) return false
+      // A reversal the music asked for is a stroke, not a return. It still becomes the reference
+      // for what follows, so its own return is suppressed in turn.
+      if (!onCue && isReturn(feature, time)) return false
       previous = { feature, time }
       return true
     },

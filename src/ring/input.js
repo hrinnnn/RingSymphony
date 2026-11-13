@@ -23,6 +23,9 @@ export function createRingInput({
   now = () => performance.now() / 1000,
   WebSocketImpl = globalThis.WebSocket,
   storage = globalThis.localStorage,
+  // Asked whether a right-hand cue is due near a gesture time, so a reversal the music called for
+  // is not mistaken for a return stroke. Kept as a callback to leave this module chart-agnostic.
+  cueDue = () => false,
 } = {}) {
   const rings = new Map()
   // Only roles the player chose explicitly are stored; automatic ones are re-derived from who is online.
@@ -353,7 +356,10 @@ export function createRingInput({
         event.dir = classified.direction
         event.directionReason = reason || classified.reason
         // An unclassified beat is not recorded as a stroke, but it can still be the return of one.
-        if (event.dir ? !ring.returnFilter.accept(feature, event.t) : ring.returnFilter.isReturn(feature, event.t)) {
+        // A reversal that lands where a cue is due is a real stroke: up and down are near-opposites,
+        // so geometry alone cannot tell a down-beat from the return of an up-beat.
+        const onCue = Boolean(event.dir) && cueDue(arrival - age, event.dir)
+        if (event.dir ? !ring.returnFilter.accept(feature, event.t, onCue) : ring.returnFilter.isReturn(feature, event.t)) {
           directionStats.suppressed += 1
           continue
         }

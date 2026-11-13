@@ -219,6 +219,13 @@ const ring = startRing({
   onPreview: (event) => {
     if (mode === "playing" || mode === "count-in") world.previewRight(event.dir)
   },
+  // A reversal is only rescued from return-suppression when the chart actually wants that
+  // direction then, so a slow return cannot be excused by a cue for the opposite stroke.
+  cueDue: (at, direction) => {
+    if (mode !== "playing" && mode !== "count-in") return false
+    const found = nearest(at, "right", "beat")
+    return Boolean(found && found.cue.direction === direction && found.distance <= GOOD)
+  },
 })
 
 function timingSummary() {
