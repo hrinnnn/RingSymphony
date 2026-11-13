@@ -160,8 +160,13 @@ export function createDirectionCalibration() {
     return {
       ready: complete && !issue,
       perDirection,
+      // 70% of the player's softest calibration wave. This seeds the detector's adaptive floor,
+      // so it is the bar the very first stroke of a level is judged against — there is no history
+      // yet for the floor to have learned from. It is only clamped from below: capping it at the
+      // old fixed 1.6 meant anyone who calibrated with a firm wave started at the ceiling, and
+      // their first beat had to exceed 1.6 rad/s to register at all.
       beatFloor: complete && !issue && DIRECTIONS.every((direction) => speeds[direction].length === SAMPLES_PER_DIRECTION)
-        ? Math.max(0.65, Math.min(1.6, Math.min(...DIRECTIONS.flatMap((direction) => speeds[direction])) * 0.7))
+        ? Math.max(0.65, Math.min(...DIRECTIONS.flatMap((direction) => speeds[direction])) * 0.7)
         : 1.6,
       counts: Object.fromEntries(DIRECTIONS.map((direction) => [direction, samples[direction].length])),
       pending: pending?.direction ?? null,

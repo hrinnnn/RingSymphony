@@ -66,3 +66,37 @@ console.log('detectors ok')
 }
 
 console.log('detectors tier ok')
+
+// The first stroke of a level must register however firmly the player calibrated. Calibration
+// seeds the detector's floor, so a player who calibrated with a firm wave and then conducts
+// gently had no history for the floor to have learned from, and their opening beat was judged
+// against a bar it could not clear.
+{
+  const gentleAfterCalibration = (beatFloor) => {
+    const detector = createBeatDetector({ beatFloor })
+    let t = 0
+    for (let i = 0; i < 200; i += 1) { detector.push(t, 0.3); t += 0.005 }
+    let beats = 0
+    for (let k = 0; k <= 60; k += 1) {
+      if (detector.push(t, 1.0 * Math.sin(Math.PI * k / 60))) beats += 1
+      t += 0.005
+    }
+    return beats
+  }
+  for (const floor of [0.875, 1.75, 3.5]) {
+    assert.equal(gentleAfterCalibration(floor), 1, `a gentle stroke must register after calibrating at ${floor}`)
+  }
+}
+
+// A detector that has only just started watching holds off reporting: the resting estimate seeds
+// low so a soft stroke is not lost, which would otherwise let a hand already in motion report
+// noise as beats before the estimate has risen.
+{
+  const detector = createBeatDetector()
+  let t = 0
+  let early = 0
+  for (let k = 0; k < 40; k += 1) { if (detector.push(t, 2.0 + Math.sin(k))) early += 1; t += 0.005 }
+  assert.equal(early, 0, 'a detector mid-motion from its first frame reports nothing during warmup')
+}
+
+console.log('detectors first-stroke ok')

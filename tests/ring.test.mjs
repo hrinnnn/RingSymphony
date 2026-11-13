@@ -23,7 +23,7 @@ const people = ['lry', 'yyh', 'zzw']
 
 // A peak must be reported when its speed falls 20%, even if it is still above the trigger level.
 {
-  const detector = createBeatDetector({ beatFloor: 1.6 })
+  const detector = createBeatDetector({ beatFloor: 1.6, adaptiveFloor: false })
   const signal = [0, 0, 2, 4, 3.1, 2.5, 1, 0]
   const events = signal.map((speed, i) => detector.push(i * 0.05, speed))
   assert.equal(events.findIndex(Boolean), 4, 'peak detection must not wait for speed to drop below the trigger threshold')
@@ -31,7 +31,7 @@ const people = ['lry', 'yyh', 'zzw']
 }
 
 {
-  const detector = createBeatDetector({ beatFloor: 1.6 })
+  const detector = createBeatDetector({ beatFloor: 1.6, adaptiveFloor: false })
   const stroke = (start) => [0, 0, 2, 4, 1, 0].map((speed, i) => detector.push(start + i * 0.01, speed)).filter(Boolean)
   assert.equal(stroke(1).length, 1)
   detector.gap()

@@ -29,6 +29,12 @@ export const DEFAULTS = {
   floorRest: 2.2,
   floorMin: 0.65,
   floorMax: 1.6,
+  // Seconds of signal a fresh detector watches before it will report a beat. The resting estimate
+  // seeds low so a gentle first stroke is not lost, which also means a hand already in motion
+  // would briefly report noise; this covers that window. Short enough to finish well inside a
+  // count-in, and the ring is streaming from the moment it connects, so in practice the detector
+  // has been watching long before a level starts.
+  warmup: 0.3,
   // fist: angular-acceleration shock (§6.1 ⑤). Measured over 3 samples; the data set separates at ≈4×10⁴ °/s²
   fistJerk: 40000,
   fistLockout: 1.0,
@@ -73,6 +79,11 @@ export function createBeatDetector(options = {}) {
   let mean = null
   // Resting level: the quiet baseline of the signal, tracked so the trigger can scale to it.
   let rest = null
+  // Frames seen since the detector was built or a gap reset it. The resting estimate seeds low so
+  // a gentle first stroke is not lost, but a low bar on a hand that is already moving reports
+  // noise as beats. Reporting is held off until the estimate has had time to rise into the
+  // player's real resting level — the hand is settling or the count-in is running during this.
+  let settled = 0
   let lastT = null
   let rising = false
   let peak = 0
@@ -88,16 +99,23 @@ export function createBeatDetector(options = {}) {
     push(t, w) {
       const dt = lastT === null ? 0.005 : Math.min(0.05, Math.max(0.001, t - lastT))
       lastT = t
+      settled += dt
       const k = dt / o.beatTau
       mean = mean === null ? w : mean + k * (w - mean)
       const restK = dt / o.restTau
       // Track the quiet level of the signal. It falls faster than it rises so that a conductor
       // who settles into gentle strokes is quickly judged on their own scale, while a hand that
-      // is genuinely in sustained motion keeps a higher bar. A fresh detector starts from the
-      // fixed floor and converges down, because input.js rebuilds it mid-session and a low seed
-      // would let the next stroke's lead-in through before the estimate caught up.
+      // is genuinely in sustained motion keeps a higher bar.
+      //
+      // A fresh detector seeds at the lowest bar and rises into the player's real resting level
+      // over the first second or so. Seeding high instead cost the first stroke of every level:
+      // the estimate needed about three seconds to come down — the whole count-in — so a player
+      // who calibrated firmly and then conducted gently had their opening beat judged against a
+      // bar it could not clear. Erring low can only admit an extra candidate at the start, which
+      // the direction classifier and the cue windows still have to agree with; erring high
+      // silently deletes a beat the player made.
       rest = rest === null
-        ? o.beatFloor / o.floorRest
+        ? o.floorMin / o.floorRest
         : rest + (w > rest ? restK : restK * 3) * (w - rest)
       // Triggering uses the low bar, so soft strokes are seen at all; the tier on the emitted
       // event says whether it cleared the high one.
@@ -111,7 +129,7 @@ export function createBeatDetector(options = {}) {
         const p = peakT
         const peakSpeed = peak
         peak = 0
-        if (accepted) {
+        if (accepted && (!o.adaptiveFloor || settled >= o.warmup)) {
           lastBeat = p
           return { type: "beat", t: p, strength, peakSpeed, tier }
         }

@@ -111,7 +111,7 @@ export function createRingInput({
     direction.arm(handDirection, ring.address, time)
     ring.returnFilter.reset()
     ring.calibrationStart = ring.lastT
-    ring.calibrationDetector = createBeatDetector({ beatFloor: 0.65 })
+    ring.calibrationDetector = createBeatDetector({ beatFloor: 0.65, adaptiveFloor: false })
   }
 
   function autoStatus(time) {
@@ -257,7 +257,7 @@ export function createRingInput({
           (t <= ring.lastT || t - ring.lastT > 0.12)) automatic.stillFrames = []
       if (restarted) {
         ring.detector = ring.hand ? createHandDetector(ring.hand, ring.hand === "right" && calibration.ready ? { beatFloor: calibration.beatFloor } : {}) : null
-        if (ring.calibrationDetector) ring.calibrationDetector = createBeatDetector({ beatFloor: 0.65 })
+        if (ring.calibrationDetector) ring.calibrationDetector = createBeatDetector({ beatFloor: 0.65, adaptiveFloor: false })
       } else {
         ring.detector?.gap()
         ring.calibrationDetector?.gap()
@@ -538,11 +538,13 @@ export function createRingInput({
     // wave, settling the ring, reaching for the mouse — is still the return filter's reference
     // stroke, so a first beat that happens to reverse it is suppressed and the level opens with
     // a Miss the player did nothing to earn.
+    //
+    // Only the return filter. The beat detector keeps its learned resting level: gap() clears it,
+    // and it re-seeds from the fixed floor and takes about three seconds to come back down — the
+    // whole count-in — so the first beat would be judged against the highest bar instead of the
+    // player's own.
     resetGestureState() {
-      for (const ring of rings.values()) {
-        ring.returnFilter.reset()
-        ring.detector?.gap()
-      }
+      for (const ring of rings.values()) ring.returnFilter.reset()
     },
     get compensation() { return compensation },
     set compensation(value) {
