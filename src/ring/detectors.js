@@ -16,8 +16,8 @@ export const DEFAULTS = {
   beatGap: 0.34,
   beatTau: 1.0,
   // The floor tracks how hard this player actually conducts, so a gentle conductor is not
-  // judged against an energetic one's bar. `restTau` is much longer than `beatTau` so strokes
-  // do not drag the resting estimate up; `floorRest` lifts the floor clear of resting motion.
+  // judged against an energetic one's bar. `floorRest` sets how far above the resting level
+  // the floor sits; the clamp keeps it between a safe minimum and the old fixed value.
   adaptiveFloor: true,
   restTau: 4,
   floorRest: 2.2,
@@ -65,8 +65,7 @@ export function createGravity() {
 export function createBeatDetector(options = {}) {
   const o = { ...DEFAULTS, ...options }
   let mean = null
-  // Resting level: falls quickly toward quiet motion and rises slowly, so it follows the floor
-  // of the signal rather than its average and strokes cannot inflate it.
+  // Resting level: the quiet baseline of the signal, tracked so the trigger can scale to it.
   let rest = null
   let lastT = null
   let rising = false
