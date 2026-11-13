@@ -186,7 +186,10 @@ function onRing(event) {
   }
   if (mode !== "playing" && mode !== "count-in") return
   const at = inputNow() - event.age
-  if (event.type === "fist") return stopByFist()
+  // The fist belongs to free mode, where it winds the orchestra down over the bar. In a rhythm
+  // level it was an irreversible kill switch that either hand could trip on a single spike —
+  // a sharp conducting stroke makes much the same angular jerk as a clench.
+  if (event.type === "fist") return
   if (event.hand === "right" && event.type === "beat") playBeat(event.dir, at, true, event.tier)
   else if (event.hand === "left" && event.type === "palm") playPalm(event.dir, at)
   else if (event.hand === "left" && event.type === "strike") {
@@ -195,12 +198,6 @@ function onRing(event) {
     if (found) playPoint(found.cue.part, at)
     else world.pose("left", "point")
   }
-}
-
-function stopByFist() {
-  toast("握拳 · 收束")
-  world.pose("left", "down")
-  finish()
 }
 
 const ring = startRing({

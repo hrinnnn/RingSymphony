@@ -166,11 +166,11 @@ assert.equal(node('#tally').textContent, '0100', 'a palm outside a dynamics cue 
 gesture('beat', 'right', { age: 0.2, dir: ringStudy.cues[1].direction })
 assert.equal(node('#tally').textContent, '0150', 'a beat 0.2 s early is Good')
 tick(ringStudy.cues[2].time); gesture('fist', 'left')
-assert.equal(node('#result').hidden, false, 'fist ends the level')
-const before = node('#tally').textContent
-gesture('beat', 'right', { dir: 'down' })
-assert.equal(node('#tally').textContent, before, 'ring beats after the result are ignored')
-console.log('Rings: 3/4 and 4/4 levels via ring beats/strikes/palms, latency back-dating, ignored stray palms, fist stop: pass')
+assert.equal(node('#result').hidden, true, 'a fist must not end a rhythm level')
+gesture('fist', 'right')
+assert.equal(node('#result').hidden, true, 'a fist from the right hand must not end it either')
+assert.equal(node('#tally').textContent, '0150', 'a fist scores nothing')
+console.log('Rings: 3/4 and 4/4 levels via ring beats/strikes/palms, latency back-dating, ignored stray palms, fist ignored: pass')
 
 await node('#back').handlers.click()
 ringLive.add('left')
