@@ -458,47 +458,34 @@ git commit -m "feat: replace fist kill-switch with pause menu in rhythm levels"
 
 ---
 
-### Task 7: Relative direction scoring
+### Task 7: Relative direction scoring — NOT DONE (premise did not hold)
 
-`direction.js:160` rejects anything below a fixed 0.8 cosine (36.87 degrees) regardless of how well-separated the player's own directions are. Scale the cutoff to the player's actual spread.
+Attempted and reverted. The idea was to scale the fixed 0.8 cosine cutoff
+(36.87 degrees) to how well-separated the player's own four centroids are, so
+widely-separated directions would permit a looser cutoff.
 
-**Files:**
-- Modify: `src/ring/direction.js` (`classifyDetailed`)
-- Test: `tests/direction.test.mjs` (extend)
+Measured, the premise fails:
 
-**Interfaces:**
-- Consumes: Task 3's centroids.
-- Produces: no signature change; `classifyDetailed` behaviour becomes spread-relative.
+- A realistic wrist's four calibrated directions sit about **71 degrees**
+  apart at their closest; the orthogonal test fixture sits at **90**. Both are
+  already well separated — the "clustered directions" case the change was
+  designed to help does not occur in practice.
+- An existing assertion (`tests/direction.test.mjs:23`) requires that, with
+  90-degree-separated directions, a wave 45 degrees between two of them is
+  rejected as 与校准动作差异过大. That pins the cutoff at **>= 0.707**, leaving
+  almost no room below 0.8 to loosen into.
+- Loosening anyway pushed such waves past the cutoff into the runner-up margin
+  check, which refused them as 方向相近 instead. Same refusal, worse reason,
+  and a weaker first-line check.
 
-- [ ] **Step 1: Write the failing test**
+The existing margin check (`scores[0] - scores[1] < 0.08`) already does the
+work this task was meant to do: it rejects waves that sit between two
+directions regardless of absolute score.
 
-```js
-// Well-separated calibration directions should accept a wave that a fixed 0.8 cutoff rejects,
-// while a wave near the midpoint between two centroids is still refused as ambiguous.
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `node tests/direction.test.mjs`
-Expected: FAIL.
-
-- [ ] **Step 3: Implement spread-relative scoring in `src/ring/direction.js`**
-
-Derive the acceptance cutoff from the maximum pairwise cosine between this player's four centroids: widely-separated directions permit a looser cutoff, clustered ones demand a tighter one. Keep 0.8 as the strictest value so this never accepts less than today. The runner-up margin check (`< 0.08`) is unchanged.
-
-- [ ] **Step 4: Verify**
-
-Run: `npm test && npm run eval`
-Expected: `npm test` passes. Compare eval direction counts against the Task 1 baseline and note changes in the commit message.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/ring/direction.js tests/direction.test.mjs
-git commit -m "feat: scale direction cutoff to the player's calibration spread"
-```
-
----
+If direction rejection still proves too strict on real hardware, the evidence
+to gather first is which reason dominates in 诊断信息 — 与校准动作差异过大
+(cutoff too strict) versus 方向相近 (margin too strict) — and tune the one that
+actually fires. Task 8 collects exactly that.
 
 ### Task 8: Baseline measurement
 
