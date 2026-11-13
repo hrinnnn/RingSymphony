@@ -363,20 +363,6 @@ export function createRingInput({
           directionStats.suppressed += 1
           continue
         }
-        // A stroke that matched the cue the chart asked for is a labelled example of how this
-        // player conducts, which the isolated calibration waves do not capture.
-        //
-        // A stroke the classifier could *not* name is learned too, when it sits on a cue: the
-        // strokes that fail are exactly the ones whose signature has drifted furthest from the
-        // calibration wave, so learning only from successes can never reach them. Landing within
-        // the Perfect window of a cue is strong evidence the player meant that gesture.
-        // reinforce() refuses samples pointing away from the direction they claim, so a genuinely
-        // wrong stroke cannot redefine it.
-        if (event.dir && onCue) direction.reinforce(feature, ring.address, event.dir)
-        else if (!event.dir && feature) {
-          const wanted = cueDue(arrival - age, null)
-          if (wanted) direction.reinforce(feature, ring.address, wanted)
-        }
         if (event.dir) directionStats.accepted += 1
         else if (reason === "数据不足或断帧") directionStats.data += 1
         else if (reason) directionStats.weak += 1

@@ -221,14 +221,10 @@ const ring = startRing({
   },
   // A reversal is only rescued from return-suppression when the chart actually wants that
   // direction then, so a slow return cannot be excused by a cue for the opposite stroke.
-  // With no direction given, answers which direction is due — an unrecognised stroke sitting on
-  // a cue is almost certainly that cue's gesture, and is worth learning from.
   cueDue: (at, direction) => {
     if (mode !== "playing" && mode !== "count-in") return false
     const found = nearest(at, "right", "beat")
-    if (!found || found.distance > GOOD) return false
-    if (!direction) return found.cue.direction
-    return found.cue.direction === direction
+    return Boolean(found && found.cue.direction === direction && found.distance <= GOOD)
   },
 })
 

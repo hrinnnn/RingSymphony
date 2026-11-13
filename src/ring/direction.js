@@ -1,10 +1,6 @@
 export const DIRECTIONS = ["down", "left", "right", "up"]
 export const DIRECTION_NAMES = { down: "下", left: "左", right: "右", up: "上" }
 export const SAMPLES_PER_DIRECTION = 3
-// How many in-play strokes to remember per direction. Enough to describe how the player is
-// conducting now, few enough that the templates follow a change of style rather than averaging
-// a whole session into mush.
-export const REINFORCE_KEEP = 4
 export const MAX_SHORT_GAP = 0.065
 
 function unit(vector) {
@@ -114,9 +110,6 @@ const vectorList = (value) => Array.isArray(value) &&
 export function createDirectionCalibration() {
   let samples = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
   let speeds = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
-  // Strokes confirmed during play, kept apart from the calibration waves so that clearing or
-  // redoing a direction behaves predictably and a bad run cannot destroy the original templates.
-  let learned = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
   let pending = null
   let message = "请先校准右手方向"
   let address = null
@@ -124,24 +117,9 @@ export function createDirectionCalibration() {
   function reset() {
     samples = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
     speeds = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
-    learned = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
     pending = null
     address = null
     message = "请先校准右手方向"
-  }
-
-  // The template a direction is matched against: the calibration waves that agreed with each
-  // other, plus any strokes confirmed during play. In-play strokes count double because they come
-  // from the continuous motion actually being judged, which the isolated calibration waves do not
-  // resemble closely enough on their own.
-  function templateFor(direction) {
-    const base = agreeing(samples[direction]).centroid
-    const live = learned[direction]
-    if (!live.length) return base
-    const sum = [0, 0, 0]
-    if (base) for (let axis = 0; axis < 3; axis += 1) sum[axis] += base[axis] * live.length
-    for (const sample of live) for (let axis = 0; axis < 3; axis += 1) sum[axis] += sample[axis] * 2
-    return unit(sum) ?? base
   }
 
   function status(now) {
@@ -219,9 +197,6 @@ export function createDirectionCalibration() {
       }
       samples = restored
       speeds = restoredSpeeds
-      // In-play strokes are not persisted: they describe one session's conducting, and a stale
-      // set would quietly steer classification before the player has made a single stroke.
-      learned = Object.fromEntries(DIRECTIONS.map((direction) => [direction, []]))
       pending = null
       address = ringAddress
       message = ""
@@ -232,7 +207,6 @@ export function createDirectionCalibration() {
       if (pending) throw new Error("请先停止正在进行的校准")
       samples[direction] = []
       speeds[direction] = []
-      learned[direction] = []
       message = `请重新采集${DIRECTION_NAMES[direction]}方向`
     },
     cancel(text = "已取消校准") {
@@ -247,33 +221,9 @@ export function createDirectionCalibration() {
       if (samples[direction].length >= SAMPLES_PER_DIRECTION) {
         samples[direction] = []
         speeds[direction] = []
-        learned[direction] = []
       }
       pending = { direction, start: now, deadline: now + 15 }
       message = ""
-    },
-    // A stroke the player made during play, on the cue the chart asked for. Calibration teaches
-    // the ring from isolated waves with a pause between them, but conducting is continuous: each
-    // stroke starts where the last ended and carries its momentum, so the two produce measurably
-    // different signatures. Against the 四拍 recordings, templates from isolated strokes classify
-    // 56-68% of real conducting; templates from the player's own continuous conducting classify
-    // 86-91%. These samples close that gap without asking the player for anything.
-    //
-    // Only the newest REINFORCE_KEEP are retained per direction, so the templates follow how the
-    // player is conducting now rather than averaging over a whole session.
-    reinforce(feature, ringAddress, direction) {
-      if (!feature || ringAddress !== address || !DIRECTIONS.includes(direction)) return false
-      if (pending) return false
-      // The sample must be in broadly the same half of the sphere as the direction it claims to
-      // be. The point is to follow the drift between an isolated calibration wave and continuous
-      // conducting, not to let a mistaken stroke redefine the gesture: without this, a handful of
-      // wrong-direction samples destroy the template and the direction stops classifying at all.
-      const base = agreeing(samples[direction]).centroid
-      if (base && feature.reduce((sum, value, axis) => sum + value * base[axis], 0) < 0.2) return false
-      const learnedList = learned[direction]
-      learnedList.push(feature)
-      while (learnedList.length > REINFORCE_KEEP) learnedList.shift()
-      return true
     },
     capture(feature, ringAddress, now, peakTime = now, peakSpeed = null) {
       status(now)
@@ -294,7 +244,8 @@ export function createDirectionCalibration() {
       if (!feature) return { direction: null, reason: "方向特征不足" }
       if (ringAddress !== address || !status(0).ready) return { direction: null, reason: "右手尚未完成校准" }
       const scores = DIRECTIONS.map((direction) => {
-        const centroid = templateFor(direction)
+        // The centroid comes from the agreeing samples only, matching what status() validated.
+        const centroid = agreeing(samples[direction]).centroid
         return { direction, score: centroid ? feature.reduce((sum, value, i) => sum + value * centroid[i], 0) : -1 }
       }).sort((a, b) => b.score - a.score)
       if (scores[0].score < 0.8) return { direction: null, reason: "与校准动作差异过大" }
