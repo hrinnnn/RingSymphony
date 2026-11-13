@@ -15,6 +15,14 @@ export const DEFAULTS = {
   beatDrop: 0.8,
   beatGap: 0.34,
   beatTau: 1.0,
+  // The floor tracks how hard this player actually conducts, so a gentle conductor is not
+  // judged against an energetic one's bar. `restTau` is much longer than `beatTau` so strokes
+  // do not drag the resting estimate up; `floorRest` lifts the floor clear of resting motion.
+  adaptiveFloor: true,
+  restTau: 4,
+  floorRest: 2.2,
+  floorMin: 0.65,
+  floorMax: 1.6,
   // fist: angular-acceleration shock (§6.1 ⑤). Measured over 3 samples; the data set separates at ≈4×10⁴ °/s²
   fistJerk: 40000,
   fistLockout: 1.0,
@@ -57,19 +65,36 @@ export function createGravity() {
 export function createBeatDetector(options = {}) {
   const o = { ...DEFAULTS, ...options }
   let mean = null
+  // Resting level: falls quickly toward quiet motion and rises slowly, so it follows the floor
+  // of the signal rather than its average and strokes cannot inflate it.
+  let rest = null
   let lastT = null
   let rising = false
   let peak = 0
   let peakT = 0
   let lastBeat = -Infinity
   let mutedUntil = -Infinity
+  function floor() {
+    if (!o.adaptiveFloor || rest === null) return o.beatFloor
+    return Math.min(o.floorMax, Math.max(o.floorMin, o.floorRest * rest))
+  }
   return {
+    get floor() { return floor() },
     push(t, w) {
       const dt = lastT === null ? 0.005 : Math.min(0.05, Math.max(0.001, t - lastT))
       lastT = t
       const k = dt / o.beatTau
       mean = mean === null ? w : mean + k * (w - mean)
-      const level = Math.max(o.beatFloor, o.beatRise * mean)
+      const restK = dt / o.restTau
+      // Track the quiet level of the signal. It falls faster than it rises so that a conductor
+      // who settles into gentle strokes is quickly judged on their own scale, while a hand that
+      // is genuinely in sustained motion keeps a higher bar. A fresh detector starts from the
+      // fixed floor and converges down, because input.js rebuilds it mid-session and a low seed
+      // would let the next stroke's lead-in through before the estimate caught up.
+      rest = rest === null
+        ? o.beatFloor / o.floorRest
+        : rest + (w > rest ? restK : restK * 3) * (w - rest)
+      const level = Math.max(floor(), o.beatRise * mean)
       if (rising && (w < o.beatDrop * peak || w < level * 0.6)) {
         rising = false
         const accepted = peakT - lastBeat >= o.beatGap
@@ -94,6 +119,7 @@ export function createBeatDetector(options = {}) {
     },
     gap() {
       mean = null
+      rest = null
       lastT = null
       rising = false
       peak = 0
