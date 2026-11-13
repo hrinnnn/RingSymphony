@@ -13,5 +13,5 @@ export function startRing({ onGesture, onPreview, cueDue }) {
     input,
   })
   input.connect()
-  return { input, reportError: panel.report, clearTiming: panel.clearTiming, openPanel: panel.open, closePanel: panel.close }
+  return { input, reportError: panel.report, clearTiming: panel.clearTiming, resetGestureState: input.resetGestureState, openPanel: panel.open, closePanel: panel.close }
 }

@@ -1,4 +1,5 @@
 import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION } from "./direction.js"
+import { PERFECT } from "../judge.js"
 
 // Header button + popover for ring status, left/right assignment and latency compensation.
 const HAND_LABEL = { left: "左手", right: "右手" }
@@ -213,7 +214,13 @@ export function createRingPanel({ button, panel, input }) {
     const stats = snap.directionStats
     statsEl.textContent = `右手候选：有方向 ${stats.accepted} · 数据不足或断帧 ${stats.data} · 信号弱 ${stats.weak} · 校准差异大（无明显间断 ${stats.mismatch}，有间断 ${stats.mismatchGap}） · 方向相近 ${stats.ambiguous} · 未校准 ${stats.uncalibrated} · 回程抑制 ${stats.suppressed}`
     const mean = meanError()
-    errorEl.textContent = mean === null ? "还没有可用于补偿的击拍" : `平均${mean >= 0 ? "偏晚" : "偏早"} ${Math.abs(Math.round(mean * 1000))} ms`
+    // Past half the Perfect window the offset is costing the player real judgements, not just
+    // polish, so say so rather than leaving 采用 looking like a refinement they can ignore.
+    const large = mean !== null && Math.abs(mean) > PERFECT / 2
+    errorEl.textContent = mean === null
+      ? "还没有可用于补偿的击拍"
+      : `平均${mean >= 0 ? "偏晚" : "偏早"} ${Math.abs(Math.round(mean * 1000))} ms${large ? "：差得较多，建议点「采用」" : ""}`
+    errorEl.classList.toggle("ring-error-large", large && errors.length >= 4)
     applyEl.hidden = mean === null || errors.length < 4
   }
 

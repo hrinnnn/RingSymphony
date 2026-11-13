@@ -534,6 +534,16 @@ export function createRingInput({
         }
       }
     },
+    // Called when a level starts. Whatever the player did beforehand — the last calibration
+    // wave, settling the ring, reaching for the mouse — is still the return filter's reference
+    // stroke, so a first beat that happens to reverse it is suppressed and the level opens with
+    // a Miss the player did nothing to earn.
+    resetGestureState() {
+      for (const ring of rings.values()) {
+        ring.returnFilter.reset()
+        ring.detector?.gap()
+      }
+    },
     get compensation() { return compensation },
     set compensation(value) {
       compensation = Math.max(-0.3, Math.min(0.3, value))

@@ -266,6 +266,9 @@ async function begin(study = lastStudy) {
   }
   lastStudy = study
   ring.clearTiming()
+  // Forget whatever the hands were doing before the level: otherwise the first beat can be
+  // suppressed as the return of a stroke the player made on their way to starting.
+  ring.resetGestureState?.()
   ring.closePanel?.()
   settings.close()
   stopLevel()

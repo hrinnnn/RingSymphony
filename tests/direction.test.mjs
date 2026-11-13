@@ -588,3 +588,18 @@ console.log("Direction: cue-backed reversals pass")
 }
 
 console.log("Direction: alternating vertical strokes on the beat pass")
+
+// A level must not open with a Miss the player did nothing to earn: whatever the hands were
+// doing beforehand — the last calibration wave, settling the ring — is still the return filter's
+// reference stroke, and a first beat that happens to reverse it would be suppressed.
+{
+  const stale = [0, 0, -1]
+  const firstBeat = [0, 0, 1]
+  const filter = createReturnFilter()
+  filter.accept(stale, 10)
+  assert.equal(filter.accept(firstBeat, 10.3), false, "stale state would eat the first beat")
+  filter.reset()
+  assert.equal(filter.accept(firstBeat, 10.3), true, "resetting at level start lets it through")
+}
+
+console.log("Direction: level start clears stale gesture state")

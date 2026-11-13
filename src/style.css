@@ -80,6 +80,7 @@ header { position: absolute; left: 0; top: 0; right: 0; z-index: 6; display: fle
 .ring-comp { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .ring-comp b { min-width: 52px; text-align: center; font-variant-numeric: tabular-nums; }
 .ring-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ring-error-large { color: #ffd166; }
 .ring-note { font-size: 11px; }
 
 #home {
