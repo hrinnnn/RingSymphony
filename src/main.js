@@ -45,6 +45,9 @@ let cues = []
 let counts = { perfect: 0, good: 0, miss: 0 }
 // Signed timing error (s, negative = early) of every cue that scored, for the early / late summary.
 let deltas = []
+// Right-hand ring beats only, for the automatic 延迟补偿 adjustment: keyboard and mouse hits go
+// through a different path and must not steer a correction meant for the ring pipeline.
+let ringDeltas = []
 let mode = "home"
 let spawned = new Set()
 let dynamics = 1
@@ -123,7 +126,11 @@ function nearest(now, hand, kind) {
       best = cue
     }
   }
-  if (!best || distance > chart.beat / 2) return null
+  // Reach at least as far as the sweep that marks a cue missed, or a gesture can fall between
+  // the two: too far from the cue to be matched here, not yet old enough to be swept, so the
+  // player gets no judgement at all. The first cue of a level is the likeliest to land there.
+  const reach = Math.max(chart.beat / 2, GOOD + LATE_GRACE)
+  if (!best || distance > reach) return null
   return { cue: best, distance, delta: now - best.time }
 }
 
@@ -157,7 +164,10 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong")
   world.pose("right", direction)
   if (tier === "weak" && !(found && found.distance <= GOOD * 2)) return
   if (!found) return
-  if (fromRing && found.cue.direction === direction && found.distance <= GOOD) ring?.reportError(at - found.cue.time)
+  if (fromRing && found.cue.direction === direction && found.distance <= GOOD) {
+    ring?.reportError(at - found.cue.time)
+    ringDeltas.push(at - found.cue.time)
+  }
   const kind = found.cue.direction === direction ? gradeDistance(found.distance) : "miss"
   scoreCue(found.cue, kind, found.delta)
 }
@@ -238,6 +248,33 @@ function timingSummary() {
   settings.suggest(deltas.length >= 6 && Math.abs(mean) >= 15 ? mean : null)
 }
 
+// After a level, nudge 延迟补偿 toward the offset the player's ring beats actually showed.
+//
+// Only after a level, never during one: adjusting mid-play moves the judgement window while the
+// player is adapting to it, and two identical strokes in the same level would be judged
+// differently. Only the ring's compensation, never 设置's 判定延迟 — both are fed by the same
+// measurement, so applying to both would correct the same error twice.
+//
+// The measurement is biased: reportError only records beats that landed within GOOD, so strokes
+// far enough out to miss are never sampled and the mean understates the true offset, more so the
+// worse the timing is. Hence a partial step rather than the full correction, and a cap: the
+// estimate is a direction to move in, not a value to trust outright.
+const AUTO_COMP_MIN_SAMPLES = 6
+const AUTO_COMP_DEADZONE = 0.02
+const AUTO_COMP_STEP = 0.6
+const AUTO_COMP_MAX_MOVE = 0.08
+
+function autoCompensate() {
+  if (!ring?.input || ringDeltas.length < AUTO_COMP_MIN_SAMPLES) return
+  const mean = ringDeltas.reduce((sum, d) => sum + d, 0) / ringDeltas.length
+  if (Math.abs(mean) < AUTO_COMP_DEADZONE) return
+  const move = Math.max(-AUTO_COMP_MAX_MOVE, Math.min(AUTO_COMP_MAX_MOVE, mean * AUTO_COMP_STEP))
+  const before = ring.input.compensation
+  ring.input.compensation += move
+  const applied = Math.round((ring.input.compensation - before) * 1000)
+  if (applied) toast(`已自动调整延迟补偿 ${applied > 0 ? "+" : ""}${applied} ms（指环面板可改）`)
+}
+
 function finish() {
   if (mode === "result") return
   stopLevel()
@@ -247,6 +284,7 @@ function finish() {
   accuracyEl.textContent = `${percent}%`
   countsEl.innerHTML = `<span class="perfect">Perfect ${counts.perfect}</span><span class="good">Good ${counts.good}</span><span class="miss">Miss ${counts.miss}</span>`
   timingSummary()
+  autoCompensate()
   starsEl.innerHTML = [0, 1, 2].map((i) => `<i class="${i < stars ? "lit" : ""}">★</i>`).join("")
   setMode("result")
   statusEl.textContent = "结果"
@@ -279,6 +317,7 @@ async function begin(study = lastStudy) {
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
   counts = { perfect: 0, good: 0, miss: 0 }
   deltas = []
+  ringDeltas = []
   spawned = new Set()
   dynamics = 1
   tallyEl.textContent = "0000"

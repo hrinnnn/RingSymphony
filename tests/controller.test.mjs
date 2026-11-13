@@ -280,3 +280,38 @@ assert.ok(audio.ended, 'fist with nothing selected closes the whole piece')
 audio.ended()
 assert.equal(audio.tempo, 96)
 console.log('Free mode: two sections enter on the next beat, per-section crescendo, solo ducking, tap tempo, section stop and full close: pass')
+
+// Auto-compensation converges on the player's offset without oscillating, and a partial step is
+// what prevents it: reportError only samples beats that landed within GOOD, so the measured mean
+// understates a large offset and a full correction would overshoot.
+{
+  const MIN = 6, DEADZONE = 0.02, STEP = 0.6, MAX_MOVE = 0.08
+  const settle = (trueBias) => {
+    let comp = 0
+    const seen = []
+    for (let level = 0; level < 8; level += 1) {
+      const residual = trueBias - comp
+      const samples = []
+      for (let i = 0; i < 20; i += 1) {
+        const jitter = (Math.sin(i * 2.3) + Math.sin(i * 0.7)) / 2 * 0.06
+        const e = residual + jitter
+        if (Math.abs(e) <= 0.25) samples.push(e)
+      }
+      if (samples.length >= MIN) {
+        const mean = samples.reduce((s, x) => s + x, 0) / samples.length
+        if (Math.abs(mean) >= DEADZONE) comp += Math.max(-MAX_MOVE, Math.min(MAX_MOVE, mean * STEP))
+      }
+      seen.push(trueBias - comp)
+    }
+    return seen
+  }
+  const early = settle(-0.130)
+  assert.ok(Math.abs(early.at(-1)) < 0.02, `a 130ms early bias must settle inside the dead zone, got ${Math.round(early.at(-1) * 1000)}ms`)
+  assert.ok(Math.abs(early[3]) <= Math.abs(early[0]), 'it must improve, not diverge')
+  const late = settle(0.090)
+  assert.ok(Math.abs(late.at(-1)) < 0.02, `a 90ms late bias must settle too, got ${Math.round(late.at(-1) * 1000)}ms`)
+  const none = settle(0.005)
+  assert.equal(none.every((e) => Math.abs(e) < 0.02), true, 'a player already on time is left alone')
+}
+
+console.log('Auto-compensation: converges on the ring offset without oscillating')
