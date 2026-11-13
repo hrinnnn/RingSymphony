@@ -588,3 +588,32 @@ console.log("Direction: cue-backed reversals pass")
 }
 
 console.log("Direction: alternating vertical strokes on the beat pass")
+
+// Calibration teaches the ring from isolated waves with a pause between them, but conducting is
+// continuous — each stroke starts where the last ended and carries its momentum. Strokes
+// confirmed during play describe the motion actually being judged.
+{
+  const cal = createDirectionCalibration()
+  const vecs = { down: [0, 0, 1], left: [0, 1, 0], right: [1, 0, 0], up: [0, 0, -1] }
+  for (const [dir, vec] of Object.entries(vecs)) {
+    for (let i = 0; i < 3; i += 1) { cal.arm(dir, "R", i); cal.capture(vec, "R", i + 0.1) }
+  }
+  // A consistently tilted "down" — how this player really conducts it — is learned.
+  const tilted = (() => { const v = [0.45, 0, 0.9]; const n = Math.hypot(...v); return v.map((x) => x / n) })()
+  for (let i = 0; i < 4; i += 1) assert.equal(cal.reinforce(tilted, "R", "down"), true)
+  assert.equal(cal.classify(tilted, "R"), "down", "the template follows how the player actually conducts")
+
+  // A stroke pointing the other way is refused, whatever it claims to be: without this, a few
+  // mistaken strokes destroy the template and the direction stops classifying at all.
+  assert.equal(cal.reinforce(vecs.up, "R", "down"), false, "a sample pointing away is refused")
+  for (let i = 0; i < 8; i += 1) cal.reinforce(vecs.up, "R", "down")
+  assert.equal(cal.classify(vecs.down, "R"), "down", "down still classifies after wrong strokes")
+  assert.equal(cal.classify(vecs.up, "R"), "up", "up still classifies too")
+
+  // Redoing a direction clears what was learned for it, so a fresh wave is not fighting old data.
+  cal.clearDirection("down")
+  for (let i = 0; i < 3; i += 1) { cal.arm("down", "R", 20 + i); cal.capture(vecs.down, "R", 20 + i + 0.1) }
+  assert.equal(cal.classify(vecs.down, "R"), "down")
+}
+
+console.log("Direction: learning from play pass")
