@@ -50,6 +50,10 @@ let spawned = new Set()
 let dynamics = 1
 let pointer = null
 let toastTimer = 0
+// 方向不确定 fires per unrecognised stroke, which during a level means it never leaves the
+// screen. Showing it occasionally is a hint; showing it constantly is just noise over the stage.
+let unclearAt = -Infinity
+let unclearRun = 0
 const mixer = createMixer()
 const tempo = createTempo(96)
 let ending = false
@@ -136,12 +140,22 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong")
   if (mode === "free") return freeBeat(direction)
   if (mode !== "playing" && mode !== "count-in") return
   if (!direction) {
-    if (fromRing && tier === "strong") toast("方向不确定，请重新校准或挥得更明确")
+    if (fromRing && tier === "strong") {
+      const now = inputNow()
+      unclearRun = now - unclearAt < 6 ? unclearRun + 1 : 1
+      unclearAt = now
+      // Say it once, then stay quiet unless it keeps happening — at which point the advice
+      // changes, because by the fourth miss in a row the problem is the calibration, not the wave.
+      if (unclearRun === 1) toast("方向不确定")
+      else if (unclearRun === 4) toast("方向总是认不出，建议到「指环」面板补录该方向")
+    }
     return
   }
   const found = nearest(at, "right", "beat")
-  if (tier === "weak" && !(found && found.distance <= GOOD * 2)) return
+  // A weak beat still moves the hand: the player made a motion and the stage should answer it.
+  // It simply does not score when there is no cue it could plausibly belong to.
   world.pose("right", direction)
+  if (tier === "weak" && !(found && found.distance <= GOOD * 2)) return
   if (!found) return
   if (fromRing && found.cue.direction === direction && found.distance <= GOOD) ring?.reportError(at - found.cue.time)
   const kind = found.cue.direction === direction ? gradeDistance(found.distance) : "miss"

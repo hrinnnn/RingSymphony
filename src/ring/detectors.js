@@ -12,8 +12,11 @@ export const DEFAULTS = {
   // beat: |ω| peak above weakRise × running mean registers at all; above beatRise × mean it is
   // unambiguous. Between the two the motion is deliberate-but-soft or incidental, and the
   // consumer decides (main.js asks whether it landed near a real cue).
-  beatRise: 1.6,
-  weakRise: 1.15,
+  // beatRise stays close to the historical 1.15 trigger: raising it demotes ordinary strokes
+  // into the weak tier, where anything not near a cue is dropped. The weak band is meant to
+  // reach *below* what used to register, not to reclassify what already worked.
+  beatRise: 1.2,
+  weakRise: 0.85,
   beatFloor: 1.6,
   beatDrop: 0.8,
   beatGap: 0.34,
