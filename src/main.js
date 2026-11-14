@@ -9,6 +9,7 @@ import { startRing } from "./ring/index.js"
 import { createCameraTracker } from "./camera/tracker.js"
 import { createCameraLog } from "./camera/log.js"
 import { createCameraPanel } from "./camera/panel.js"
+import { createGestureLog } from "./ring/gesture-log.js"
 import { LOOP_BARS } from "./score.js"
 import { createSettings } from "./settings.js"
 import { createTempo } from "./tempo.js"
@@ -32,6 +33,8 @@ const lassoPath = document.querySelector("#lasso path")
 const sessionTitle = document.querySelector("#session-title")
 const sessionSub = document.querySelector("#session-sub")
 const tallyLabel = document.querySelector("#tally-label")
+const reportEl = document.querySelector("#gesture-report")
+const DIR_LABEL = { up: "上", down: "下", left: "左", right: "右" }
 
 const laneCanvas = document.querySelector("#lane")
 const world = createWorld(view, laneCanvas)
@@ -46,6 +49,9 @@ const hud = createMixerHud(document.querySelector("#mixer"), pickCard)
 // exactly the path it took before the camera existed.
 const camera = createCameraTracker()
 const cameraLog = createCameraLog()
+// What each sensor said versus what the chart asked for. The chart is ground truth only while the
+// player conducts what it requested, which the export states alongside the data.
+const gestureLog = createGestureLog()
 
 let chart = null
 let cues = []
@@ -221,7 +227,14 @@ function onRing(event) {
   // level it was an irreversible kill switch that either hand could trip on a single spike —
   // a sharp conducting stroke makes much the same angular jerk as a clench.
   if (event.type === "fist") return
-  if (event.hand === "right" && event.type === "beat") playBeat(event.dir, at, true, event.tier)
+  if (event.hand === "right" && event.type === "beat") {
+    gestureLog.record({
+      at, fused: event.dir, ring: event.ringDir, camera: event.cameraDir,
+      cameraReason: event.cameraReason, displacement: event.cameraDisplacement,
+      source: event.directionSource, tier: event.tier,
+    })
+    playBeat(event.dir, at, true, event.tier)
+  }
   else if (event.hand === "left" && event.type === "palm") playPalm(event.dir, at)
   else if (event.hand === "left" && event.type === "strike") {
     // Without a camera the strike cannot say who is pointed at, so it answers whichever entrance is due.
@@ -307,10 +320,55 @@ function finish() {
   accuracyEl.textContent = `${percent}%`
   countsEl.innerHTML = `<span class="perfect">Perfect ${counts.perfect}</span><span class="good">Good ${counts.good}</span><span class="miss">Miss ${counts.miss}</span>`
   timingSummary()
+  showGestureReport()
   autoCompensate()
   starsEl.innerHTML = [0, 1, 2].map((i) => `<i class="${i < stars ? "lit" : ""}">★</i>`).join("")
   setMode("result")
   statusEl.textContent = "结果"
+}
+
+// The per-sensor report on the result screen. Scoring tells the player how they did; this tells
+// them whether the equipment agreed with them, which is a different question and the one that
+// matters while the detection is still being tuned.
+function showGestureReport() {
+  const summary = gestureLog.summary()
+  if (!reportEl) return
+  if (!summary.matched) {
+    reportEl.innerHTML = '<p class="report-empty">这一关没有可对照的击拍</p>'
+    return
+  }
+  const pct = (part) => part.answered ? Math.round((part.right / part.answered) * 100) + "%" : "—"
+  const line = (label, part) => `<span><b>${label}</b> ${pct(part)} <small>(${part.right}/${part.answered}${part.silent ? `，${part.silent} 次未作答` : ""})</small></span>`
+  const timing = summary.timing
+  // Spread, not just the mean: a consistent offset is one slider away from fixed, a wide spread is
+  // not correctable by any single number, and only the second means the player should keep practising.
+  const timingText = timing
+    ? `平均${timing.mean >= 0 ? "偏晚" : "偏早"} ${Math.abs(Math.round(timing.mean * 1000))} ms · 波动 ${Math.round(timing.spread * 1000)} ms`
+    : "—"
+  const worst = Object.entries(summary.confusion)
+    .flatMap(([want, got]) => Object.entries(got).filter(([g, n]) => g !== want && n).map(([g, n]) => ({ want, got: g, n })))
+    .sort((a, b) => b.n - a.n).slice(0, 3)
+  reportEl.innerHTML = `
+    <div class="report-row">${line("戒指方向", summary.ring)}${line("摄像头", summary.camera)}${line("最终采用", summary.fused)}</div>
+    <div class="report-row"><span><b>时间</b> ${timingText}</span><span><b>击拍</b> ${summary.matched}/${summary.cues}</span></div>
+    ${worst.length ? `<p class="report-confusion">常见误判：${worst.map((w) => `${DIR_LABEL[w.want]}→${DIR_LABEL[w.got]} ${w.n} 次`).join(" · ")}</p>` : ""}
+    ${Object.keys(summary.cameraSilence).length ? `<p class="report-confusion">摄像头未作答：${Object.entries(summary.cameraSilence).map(([k, n]) => `${k} ${n}`).join(" · ")}</p>` : ""}
+    <button type="button" id="export-gestures" class="candy plain">导出本关记录</button>`
+  // The stub DOM in the controller tests has no element-level querySelector; the report is a
+  // diagnostic, so it degrades to not binding rather than taking the level down with it.
+  const exportButton = reportEl.querySelector?.("#export-gestures")
+  exportButton?.addEventListener("click", () => {
+    const url = URL.createObjectURL(new Blob([gestureLog.toJSON()], { type: "application/json" }))
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `gestures-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`
+    // In the document and revoked late: an anchor outside the document has its download attribute
+    // ignored, and revoking straight after click() leaves the browser saving an empty file.
+    document.body.append(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
+  })
 }
 
 async function begin(study = lastStudy) {
@@ -338,6 +396,7 @@ async function begin(study = lastStudy) {
   mixer.reset()
   chart = buildChart(study)
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
+  gestureLog.begin(study, cues)
   counts = { perfect: 0, good: 0, miss: 0 }
   deltas = []
   ringDeltas = []

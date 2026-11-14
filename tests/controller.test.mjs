@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { buildChart, STUDIES } from '../src/chart.js'
 import { createMixer, PART_INFO, PARTS, DUCK } from '../src/mixer.js'
+import { createGestureLog } from '../src/ring/gesture-log.js'
 import { createTempo } from '../src/tempo.js'
 import { lassoParts, pathLength } from '../src/lasso.js'
 import { LOOP_BARS } from '../src/score.js'
@@ -47,6 +48,7 @@ globalThis.__controller = {
   createCameraTracker: () => ({ verdict: () => null, framesFor: () => [], status: () => ({ state: 'off', fps: 0, hands: { left: false, right: false }, mismatch: false }), onStatus() {}, enable: async () => false, disable() {}, video: null }),
   createCameraLog: () => ({ record() {}, entries: () => [], clear() {}, toJSON: () => '{}' }),
   createCameraPanel: () => ({ render() {}, offerIfUnasked() {}, resume: async () => {} }),
+  createGestureLog,
 }
 const names = Object.keys(globalThis.__controller).join(',')
 const source=(await readFile(new URL('../src/main.js',import.meta.url),'utf8')).replace(/^import .* from .*\r?\n/gm,'')

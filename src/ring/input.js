@@ -407,9 +407,19 @@ export function createRingInput({
         // confusion are one phenomenon with one cause: a down-stroke and the return of an
         // up-stroke are the same rotation. Fusing afterwards would leave the filter reading the
         // ring's blind guess and suppressing beats on a direction already overruled.
-        const fused = fuseDirection(classified.direction, askCamera("right", event.t + ring.offset))
+        const verdict = askCamera("right", event.t + ring.offset)
+        const fused = fuseDirection(classified.direction, verdict)
         event.dir = fused.dir
         event.directionSource = fused.source
+        // Both sensors' raw answers ride along with the event, so the game can record what each
+        // one said against what the chart actually asked for. Without this the only observable is
+        // the fused answer, which cannot tell "the ring was wrong and the camera saved it" from
+        // "both were right" — and those call for opposite fixes.
+        event.ringDir = classified.direction
+        event.cameraDir = verdict?.dir ?? null
+        event.cameraReason = verdict?.dir ? null : verdict?.reason ?? "摄像头未开启"
+        event.cameraDisplacement = verdict?.displacement ?? null
+        event.peakSpeed = event.peakSpeed ?? null
         if (fused.source === "camera") cameraStats[classified.direction ? "overrides" : "fills"] += 1
         if (fused.disagreed) {
           cameraStats.disagreements += 1
