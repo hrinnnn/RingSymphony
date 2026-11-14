@@ -4,9 +4,14 @@
 // Permissive, never restrictive. There is no AND gate: requiring both sensors to agree would kill
 // a beat whenever either was uncertain, which is strictly worse than having no camera at all.
 //
-// Pure: no DOM, no imports beyond the axis constant.
+// Pure: no DOM, no imports.
 
 const ringKeeps = (dir, disagreed) => ({ dir, source: "ring", disagreed })
+
+// Below this the camera is reading a stroke's edges, not its body, and is wrong often enough to be
+// worse than nothing: measured over 64 labelled strokes it was right 4/6 below 0.05 and 30/32
+// between 0.05 and 0.1, against a ring that was right 60/60.
+const TRUST_DISPLACEMENT = 0.08
 
 // `ringDir` is the ring's classification, or null when it declined. `verdict` is the camera's,
 // or null when there is no camera at all. The two null cases are deliberately identical: every
@@ -16,30 +21,29 @@ export function fuseDirection(ringDir, verdict) {
   const cameraDir = verdict?.dir ?? null
   if (!cameraDir) return ringKeeps(ringDir ?? null, false)
 
-  // The ring had nothing. An unclassified beat scores nothing and shows 方向不确定, so any earned
-  // camera verdict is strictly better than what it replaces. This is the common case: the ring
-  // declining is far more frequent than the two sensors contradicting each other.
-  if (!ringDir) return { dir: cameraDir, source: "camera", disagreed: false }
+  // The ring answers, so the ring decides. This reverses an earlier decision, and the reversal is
+  // the only part of this design backed by data rather than geometry.
+  //
+  // The argument for overruling was that up and down sit 166 degrees apart in the ring's own axes
+  // (direction.js:37), so no threshold could separate a down-stroke from an up-stroke's return,
+  // and deferring to the ring was deferring to a coin flip. The geometry is real. The conclusion
+  // did not survive contact with a calibrated ring: over two labelled sessions, 64 strokes,
+  //
+  //     ring    60/60 correct when it answered
+  //     camera  46/51 correct when it answered
+  //
+  // and every one of the three overrides took a CORRECT ring answer and made it wrong. Zero were
+  // fixed. The coin flip was hypothetical; the camera's errors were not.
+  //
+  // What changed between the two is calibration. The ring was blind on vertical while its stored
+  // calibration was missing its gyro bias — a ~0.78 rad/s offset that tilts a stroke's feature by
+  // up to 27 degrees. With that fixed the ring is not blind, so there is no coin flip to beat.
+  if (ringDir) return ringKeeps(ringDir, ringDir !== cameraDir)
 
-  if (ringDir === cameraDir) return ringKeeps(ringDir, false)
-
-  // The camera wins every disagreement it has earned a verdict for.
-  //
-  // This started narrower — vertical only — on the reasoning that up and down sit 166 degrees
-  // apart in the ring's axes while left and right sit 95, so the ring was blind on one axis and
-  // merely weaker on the other. Measuring the calibrated centroids from recordings/方向 showed
-  // that 95 degrees is the wrong number to look at:
-  //
-  //     up vs down 166   up vs right 39   down vs left 127
-  //     left vs right 95   up vs left 67   down vs right 130
-  //
-  // A left stroke returns rightward, and that return sits 39 degrees from `up` and near `right` —
-  // so when a return escapes suppression, or the player starts the next stroke without returning
-  // first, a left stroke is read as 右. That is a wearer-dependent axis confusion of exactly the
-  // kind screen coordinates do not have, and it is not confined to the vertical pair.
-  //
-  // The camera's displacement is unambiguous on both axes, and it only reaches this point having
-  // satisfied the earning rule in direction.js: tracked through the window, inside the frame, and
-  // past a real displacement threshold.
-  return { dir: cameraDir, source: "camera", disagreed: true }
+  // The ring declined. Filling in can only convert a guaranteed no-score into a score, so it is
+  // still worth doing — but only on a verdict big enough to trust. Both fill-ins in the measured
+  // sessions were wrong, at displacements of 0.036 and 0.055, which is the camera reading the
+  // start or end of a stroke rather than its body.
+  if ((verdict.displacement ?? 0) < TRUST_DISPLACEMENT) return ringKeeps(null, false)
+  return { dir: cameraDir, source: "camera", disagreed: false }
 }

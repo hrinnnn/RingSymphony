@@ -1,0 +1,481 @@
+{
+  "version": 1,
+  "exported": "2026-11-14T08:15:36.092Z",
+  "assumption": "每个击拍按谱面要求的方向完成。若演奏时动作本身出错，本记录无法区分是传感器误判还是动作失误。",
+  "summary": {
+    "level": {
+      "title": "第一乐章 · 晨光",
+      "bpm": 80,
+      "meter": 4,
+      "startedAt": "2026-11-14T08:15:02.101Z"
+    },
+    "cues": 32,
+    "strokes": 34,
+    "matched": 32,
+    "unmatched": 2,
+    "missedCues": 0,
+    "ring": {
+      "answered": 31,
+      "right": 31,
+      "silent": 1
+    },
+    "camera": {
+      "answered": 25,
+      "right": 24,
+      "silent": 7
+    },
+    "fused": {
+      "answered": 31,
+      "right": 30,
+      "silent": 1
+    },
+    "confusion": {
+      "up": {
+        "up": 8,
+        "down": 0,
+        "left": 0,
+        "right": 0
+      },
+      "down": {
+        "up": 0,
+        "down": 7,
+        "left": 0,
+        "right": 0
+      },
+      "left": {
+        "up": 0,
+        "down": 0,
+        "left": 8,
+        "right": 0
+      },
+      "right": {
+        "up": 0,
+        "down": 0,
+        "left": 0,
+        "right": 8
+      }
+    },
+    "cameraSilence": {
+      "位移过小": 3,
+      "没有画面数据": 3,
+      "画面帧数不足": 1
+    },
+    "timing": {
+      "median": 0.001,
+      "mean": -0.014,
+      "earliest": -0.183,
+      "latest": 0.116,
+      "spread": 0.299
+    }
+  },
+  "strokes": [
+    {
+      "at": 0.038,
+      "want": null,
+      "offset": null,
+      "fused": null,
+      "ring": null,
+      "camera": null,
+      "cameraReason": "没有画面数据",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 0.427,
+      "want": null,
+      "offset": null,
+      "fused": "right",
+      "ring": "right",
+      "camera": null,
+      "cameraReason": "没有画面数据",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 2.861,
+      "want": "down",
+      "offset": -0.139,
+      "fused": null,
+      "ring": null,
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 3.806,
+      "want": "left",
+      "offset": 0.056,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.054,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 4.579,
+      "want": "right",
+      "offset": 0.079,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.065,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 5.224,
+      "want": "up",
+      "offset": -0.026,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.068,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 6.026,
+      "want": "down",
+      "offset": 0.026,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.053,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 6.841,
+      "want": "left",
+      "offset": 0.091,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.066,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 7.541,
+      "want": "right",
+      "offset": 0.041,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.066,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 8.127,
+      "want": "up",
+      "offset": -0.123,
+      "fused": "up",
+      "ring": "up",
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 8.889,
+      "want": "down",
+      "offset": -0.111,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.07,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 9.798,
+      "want": "left",
+      "offset": 0.048,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.13,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 10.501,
+      "want": "right",
+      "offset": 0.001,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.071,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 11.195,
+      "want": "up",
+      "offset": -0.055,
+      "fused": "up",
+      "ring": "up",
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 11.932,
+      "want": "down",
+      "offset": -0.068,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.075,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 12.783,
+      "want": "left",
+      "offset": 0.033,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.122,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 13.525,
+      "want": "right",
+      "offset": 0.025,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.098,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 14.141,
+      "want": "up",
+      "offset": -0.109,
+      "fused": "down",
+      "ring": "up",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.059,
+      "source": "camera",
+      "tier": "strong"
+    },
+    {
+      "at": 14.949,
+      "want": "down",
+      "offset": -0.051,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.128,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 15.812,
+      "want": "left",
+      "offset": 0.062,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.057,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 16.523,
+      "want": "right",
+      "offset": 0.023,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.12,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 17.164,
+      "want": "up",
+      "offset": -0.086,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.079,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 17.817,
+      "want": "down",
+      "offset": -0.183,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.098,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 18.742,
+      "want": "left",
+      "offset": -0.008,
+      "fused": "left",
+      "ring": "left",
+      "camera": null,
+      "cameraReason": "没有画面数据",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 19.517,
+      "want": "right",
+      "offset": 0.017,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.12,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 20.205,
+      "want": "up",
+      "offset": -0.045,
+      "fused": "up",
+      "ring": "up",
+      "camera": null,
+      "cameraReason": "画面帧数不足",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 20.907,
+      "want": "down",
+      "offset": -0.093,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.098,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 21.843,
+      "want": "left",
+      "offset": 0.093,
+      "fused": "left",
+      "ring": "left",
+      "camera": null,
+      "cameraReason": "没有画面数据",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 22.461,
+      "want": "right",
+      "offset": -0.039,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.072,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 23.144,
+      "want": "up",
+      "offset": -0.106,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.161,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 23.897,
+      "want": "down",
+      "offset": -0.103,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.15,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 24.866,
+      "want": "left",
+      "offset": 0.116,
+      "fused": "left",
+      "ring": "left",
+      "camera": null,
+      "cameraReason": "没有画面数据",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 25.609,
+      "want": "right",
+      "offset": 0.109,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.1,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 26.339,
+      "want": "up",
+      "offset": 0.089,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.099,
+      "source": "ring",
+      "tier": "strong"
+    }
+  ]
+}

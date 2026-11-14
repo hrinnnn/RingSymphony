@@ -155,29 +155,29 @@ const left = { dir: 'left', axis: 'horizontal', displacement: 0.3 }
 const right = { dir: 'right', axis: 'horizontal', displacement: 0.3 }
 const noVerdict = { dir: null, reason: '手不在画面内' }
 
-// The camera wins every disagreement it has earned a verdict for. Vertical is the starkest case:
-// up and down sit 166 degrees apart in the ring's axes, so a down-stroke and an up-stroke's return
-// are the same rotation and no threshold separates them.
-assert.deepEqual(fuseDirection('up', down), { dir: 'down', source: 'camera', disagreed: true })
-assert.deepEqual(fuseDirection('down', up), { dir: 'up', source: 'camera', disagreed: true })
+// Measured over 64 labelled strokes in two sessions: the ring answered 60/60 correctly, the camera
+// 46/51, and all three overrides turned a CORRECT ring answer into an error while fixing none. So
+// when the ring answers, the ring decides - on every axis.
+//
+// This reverses the earlier rule, which let the camera overrule on the 166-degree vertical
+// confusion in direction.js:37. That geometry is real but it described an *uncalibrated* ring: the
+// stored calibration was missing its gyro bias, a ~0.78 rad/s offset tilting a stroke's feature by
+// up to 27 degrees. With the bias restored the ring is not blind, so there is no coin flip to beat.
+assert.deepEqual(fuseDirection('up', down), { dir: 'up', source: 'ring', disagreed: true })
+assert.deepEqual(fuseDirection('down', up), { dir: 'down', source: 'ring', disagreed: true })
+assert.deepEqual(fuseDirection('left', right), { dir: 'left', source: 'ring', disagreed: true })
+assert.deepEqual(fuseDirection('up', left), { dir: 'up', source: 'ring', disagreed: true })
 
-// Horizontal too. This was once ring-authoritative, on the reasoning that left and right sit 95
-// degrees apart so the ring was not blind there. Measuring the calibrated centroids showed the
-// relevant angle is not that one: a left stroke's return sits 39 degrees from `up` and close to
-// `right`, so an unsuppressed return reads a left stroke as 右 - a wearer-dependent confusion the
-// camera does not share.
-assert.deepEqual(fuseDirection('right', left), { dir: 'left', source: 'camera', disagreed: true })
-assert.deepEqual(fuseDirection('left', right), { dir: 'right', source: 'camera', disagreed: true })
-
-// Cross-axis disagreements resolve to the camera for the same reason: up sits only 39 degrees
-// from right in the ring's axes, which is exactly how a return gets mislabelled.
-assert.deepEqual(fuseDirection('up', left), { dir: 'left', source: 'camera', disagreed: true })
-assert.deepEqual(fuseDirection('left', up), { dir: 'up', source: 'camera', disagreed: true })
-
-// Fill-in. The ring declining is far more common than it disagreeing, and an unclassified beat was
-// never going to score, so any earned verdict is strictly better than the toast it replaces.
-assert.deepEqual(fuseDirection(null, up), { dir: 'up', source: 'camera', disagreed: false })
-assert.deepEqual(fuseDirection(null, left), { dir: 'left', source: 'camera', disagreed: false })
+// Fill-in survives, because converting a guaranteed no-score into a score cannot cost anything the
+// player already had - but only on a displacement big enough to trust. Both measured fill-ins were
+// wrong, at 0.036 and 0.055: the camera reading a stroke's edge rather than its body.
+const bigUp = { dir: 'up', axis: 'vertical', displacement: 0.12 }
+const bigLeft = { dir: 'left', axis: 'horizontal', displacement: 0.12 }
+const weakUp = { dir: 'up', axis: 'vertical', displacement: 0.05 }
+assert.deepEqual(fuseDirection(null, bigUp), { dir: 'up', source: 'camera', disagreed: false })
+assert.deepEqual(fuseDirection(null, bigLeft), { dir: 'left', source: 'camera', disagreed: false })
+assert.deepEqual(fuseDirection(null, weakUp), { dir: null, source: 'ring', disagreed: false },
+  'a small displacement is a stroke edge, not a stroke')
 
 // No verdict: the ring's answer stands untouched, including when the ring also had none. This is
 // the path every degradation converges on, so it must leave the pipeline exactly as it was.

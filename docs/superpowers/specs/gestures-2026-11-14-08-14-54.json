@@ -1,0 +1,467 @@
+{
+  "version": 1,
+  "exported": "2026-11-14T08:14:54.118Z",
+  "assumption": "每个击拍按谱面要求的方向完成。若演奏时动作本身出错，本记录无法区分是传感器误判还是动作失误。",
+  "summary": {
+    "level": {
+      "title": "第一乐章 · 晨光",
+      "bpm": 80,
+      "meter": 4,
+      "startedAt": "2026-11-14T08:14:22.588Z"
+    },
+    "cues": 32,
+    "strokes": 33,
+    "matched": 32,
+    "unmatched": 1,
+    "missedCues": 0,
+    "ring": {
+      "answered": 29,
+      "right": 29,
+      "silent": 3
+    },
+    "camera": {
+      "answered": 26,
+      "right": 22,
+      "silent": 6
+    },
+    "fused": {
+      "answered": 31,
+      "right": 27,
+      "silent": 1
+    },
+    "confusion": {
+      "up": {
+        "up": 6,
+        "down": 0,
+        "left": 0,
+        "right": 0
+      },
+      "down": {
+        "up": 0,
+        "down": 8,
+        "left": 0,
+        "right": 0
+      },
+      "left": {
+        "up": 0,
+        "down": 0,
+        "left": 7,
+        "right": 0
+      },
+      "right": {
+        "up": 0,
+        "down": 0,
+        "left": 0,
+        "right": 8
+      }
+    },
+    "cameraSilence": {
+      "位移过小": 6
+    },
+    "timing": {
+      "median": 0.025,
+      "mean": 0.009,
+      "earliest": -0.186,
+      "latest": 0.14,
+      "spread": 0.326
+    }
+  },
+  "strokes": [
+    {
+      "at": 0.192,
+      "want": null,
+      "offset": null,
+      "fused": "right",
+      "ring": "right",
+      "camera": null,
+      "cameraReason": "没有画面数据",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 2.934,
+      "want": "down",
+      "offset": -0.066,
+      "fused": "down",
+      "ring": "down",
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 3.694,
+      "want": "left",
+      "offset": -0.056,
+      "fused": "up",
+      "ring": null,
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.036,
+      "source": "camera",
+      "tier": "strong"
+    },
+    {
+      "at": 4.549,
+      "want": "right",
+      "offset": 0.049,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.061,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 5.134,
+      "want": "up",
+      "offset": -0.116,
+      "fused": null,
+      "ring": null,
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 6.068,
+      "want": "down",
+      "offset": 0.068,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.092,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 6.866,
+      "want": "left",
+      "offset": 0.116,
+      "fused": "left",
+      "ring": "left",
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 7.566,
+      "want": "right",
+      "offset": 0.066,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.088,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 8.22,
+      "want": "up",
+      "offset": -0.03,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.068,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 9.009,
+      "want": "down",
+      "offset": 0.009,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.12,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 9.818,
+      "want": "left",
+      "offset": 0.068,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.065,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 10.546,
+      "want": "right",
+      "offset": 0.046,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.087,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 11.209,
+      "want": "up",
+      "offset": -0.041,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.094,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 12.011,
+      "want": "down",
+      "offset": 0.011,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.107,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 12.783,
+      "want": "left",
+      "offset": 0.033,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.048,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 13.525,
+      "want": "right",
+      "offset": 0.025,
+      "fused": "left",
+      "ring": "right",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.307,
+      "source": "camera",
+      "tier": "strong"
+    },
+    {
+      "at": 14.242,
+      "want": "up",
+      "offset": -0.008,
+      "fused": "up",
+      "ring": "up",
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 14.963,
+      "want": "down",
+      "offset": -0.037,
+      "fused": "down",
+      "ring": "down",
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 15.799,
+      "want": "left",
+      "offset": 0.049,
+      "fused": "up",
+      "ring": "left",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.035,
+      "source": "camera",
+      "tier": "strong"
+    },
+    {
+      "at": 16.588,
+      "want": "right",
+      "offset": 0.088,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.075,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 17.064,
+      "want": "up",
+      "offset": -0.186,
+      "fused": "down",
+      "ring": null,
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.055,
+      "source": "camera",
+      "tier": "strong"
+    },
+    {
+      "at": 17.919,
+      "want": "down",
+      "offset": -0.081,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.087,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 18.748,
+      "want": "left",
+      "offset": -0.002,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.064,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 19.542,
+      "want": "right",
+      "offset": 0.042,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.109,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 20.208,
+      "want": "up",
+      "offset": -0.042,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.078,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 21.003,
+      "want": "down",
+      "offset": 0.003,
+      "fused": "down",
+      "ring": "down",
+      "camera": "down",
+      "cameraReason": null,
+      "displacement": 0.037,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 21.89,
+      "want": "left",
+      "offset": 0.14,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.079,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 22.557,
+      "want": "right",
+      "offset": 0.057,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.056,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 23.229,
+      "want": "up",
+      "offset": -0.021,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.151,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 24.064,
+      "want": "down",
+      "offset": 0.064,
+      "fused": "down",
+      "ring": "down",
+      "camera": null,
+      "cameraReason": "位移过小",
+      "displacement": null,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 24.887,
+      "want": "left",
+      "offset": 0.137,
+      "fused": "left",
+      "ring": "left",
+      "camera": "left",
+      "cameraReason": null,
+      "displacement": 0.04,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 25.531,
+      "want": "right",
+      "offset": 0.031,
+      "fused": "right",
+      "ring": "right",
+      "camera": "right",
+      "cameraReason": null,
+      "displacement": 0.066,
+      "source": "ring",
+      "tier": "strong"
+    },
+    {
+      "at": 26.13,
+      "want": "up",
+      "offset": -0.12,
+      "fused": "up",
+      "ring": "up",
+      "camera": "up",
+      "cameraReason": null,
+      "displacement": 0.038,
+      "source": "ring",
+      "tier": "strong"
+    }
+  ]
+}
