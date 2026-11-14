@@ -30,7 +30,27 @@ export function directionFeatureResult(frames, peakTime) {
     for (let axis = 0; axis < 3; axis += 1) mean[axis] += frame.gyr[axis] / window.length
   }
   const feature = unit(mean)
-  return { feature, reason: feature ? null : "方向信号过弱或相互抵消", hasGap: gaps > 0 }
+  // How hard the hand was driven into this peak: the climb from the quietest moment in the window
+  // up to the fastest, over the time between them. A stroke the player drives ramps hard; a return
+  // is the arm relaxing back and barely ramps at all.
+  //
+  // Measured between the extremes rather than the window's endpoints. The window is the 150 ms
+  // *before* the peak, but `peakTime` is when |ω| was highest, not when the detector emitted —
+  // frames after the turn are in history by then, so the last frame in the window is often already
+  // past the crest. Differencing the endpoints then reports a near-flat ramp for a stroke that
+  // plainly had one (1.05 → 1.30 on a wave peaking at 9.4).
+  let low = Infinity
+  let lowAt = null
+  let high = -Infinity
+  let highAt = null
+  for (const frame of window) {
+    const speed = Math.hypot(...frame.gyr)
+    if (speed < low) { low = speed; lowAt = frame.t }
+    if (speed > high) { high = speed; highAt = frame.t }
+  }
+  const span = highAt === null || lowAt === null ? 0 : highAt - lowAt
+  const rise = span > 0 ? (high - low) / span : null
+  return { feature, rise, reason: feature ? null : "方向信号过弱或相互抵消", hasGap: gaps > 0 }
 }
 
 // A near-opposite rotation shortly after an accepted beat is likely the return stroke.
@@ -44,20 +64,45 @@ export function directionFeatureResult(frames, peakTime) {
 // chart-agnostic.
 export const RETURN_WINDOW = 0.46
 
+// How fast |ω| is still climbing over the 150 ms into the peak, in rad/s². A stroke the player
+// drives ramps hard into its peak; a return is the arm relaxing back and barely ramps at all.
+// Measured on the left/right recordings, where gravity labels each peak independently of anything
+// being tested here (53 strokes, 59 returns):
+//
+//     real strokes     rise p10 20.5, median 33.9
+//     returns          rise p10 -11.2, median -1.1
+//
+// Those populations barely overlap, which is why this catches returns the geometry misses: a
+// return only looks like a reversal if the stroke before it was seen and classified, so the first
+// return after any gap, suppression or unclassified stroke sails straight through as a phantom
+// beat. Of 17 such escapes in the recordings, a bar at 4 removes 5 and costs nothing — no real
+// stroke in the set ramps that slowly. Higher bars catch more but start deleting real strokes, and
+// a deleted stroke is a Miss the player did not earn, which is strictly worse than a phantom one
+// the cue windows may well discard anyway.
+export const RETURN_RISE = 4
+
 export function createReturnFilter() {
   let previous = null
   // Read-only check, also usable for unclassified beats and live previews (which pass a looser cosine).
-  function isReturn(feature, time, cosine = -0.8) {
-    return Boolean(feature && previous && time > previous.time && time - previous.time < RETURN_WINDOW &&
+  // `rise` is optional: callers without it (the preview path, tests) get the geometric test alone.
+  function isReturn(feature, time, cosine = -0.8, rise = null) {
+    if (!feature) return false
+    // Too limp to have been driven, whatever came before it. This stands on its own because the
+    // geometric test needs a classified predecessor and a return often has none.
+    if (rise !== null && rise < RETURN_RISE) return true
+    return Boolean(previous && time > previous.time && time - previous.time < RETURN_WINDOW &&
       feature.reduce((sum, value, axis) => sum + value * previous.feature[axis], 0) < cosine)
   }
   return {
     reset() { previous = null },
     isReturn,
-    accept(feature, time, onCue = false) {
+    accept(feature, time, onCue = false, rise = null) {
       if (!feature) return true
       // A reversal the music asked for is a stroke, not a return. It still becomes the reference
-      // for what follows, so its own return is suppressed in turn.
+      // for what follows, so its own return is suppressed in turn. The cue overrides the geometry
+      // but not the ramp: a limp motion where a cue happens to fall is not the stroke that cue
+      // asked for, and admitting it would score the player for relaxing their arm.
+      if (rise !== null && rise < RETURN_RISE) return false
       if (!onCue && isReturn(feature, time)) return false
       previous = { feature, time }
       return true
@@ -306,7 +351,7 @@ export function createDirectionCalibration() {
       pending = { direction, start: now, deadline: now + 15 }
       message = ""
     },
-    capture(feature, ringAddress, now, peakTime = now, peakSpeed = null) {
+    capture(feature, ringAddress, now, peakTime = now, peakSpeed = null, rise = null) {
       status(now)
       if (!pending || peakTime < pending.start || ringAddress !== address) return false
       if (!feature) {
@@ -315,6 +360,14 @@ export function createDirectionCalibration() {
         return false
       }
       const direction = pending.direction
+      // Too limp to have been driven. A sample taken from the swing back describes the opposite of
+      // the direction being recorded, and this catches it whether or not the stroke it returns from
+      // was itself captured — which the geometric check below cannot do.
+      if (rise !== null && rise < RETURN_RISE) {
+        message = `这次动作太轻，像是回程或收手，已跳过；请回位停稳后再挥一次`
+        pending = null
+        return false
+      }
       // A wave and the swing back are the same rotation reversed, so the return is a candidate peak
       // in its own right. Captured as a sample it describes the opposite of the direction being
       // recorded, and three samples pointing two ways produce a template pointing nowhere useful —

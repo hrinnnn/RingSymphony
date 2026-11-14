@@ -707,3 +707,43 @@ console.log("Direction: calibration fit scores how well a set classifies its own
 }
 
 console.log("Direction: a calibration that cannot classify itself is refused")
+
+// A return only looks like a reversal if the stroke before it was seen and classified, so the
+// first return after a gap, a suppression or an unclassified stroke sails through the geometric
+// test as a phantom beat. How hard the hand was driven does not depend on history: a stroke the
+// player drives ramps into its peak, a return is the arm relaxing back and barely ramps at all.
+{
+  const filter = createReturnFilter()
+  const feature = [0, 0, 1]
+  // No predecessor at all, so geometry cannot help — the ramp has to carry it alone.
+  assert.equal(filter.accept(feature, 1, false, 60), true, "a driven stroke is accepted on its own")
+  assert.equal(filter.accept([0, 0, -1], 5, false, 1), false, "a limp motion is a return however long since the last stroke")
+  // A cue overrides the geometry but not the ramp: a relaxing arm is not the stroke a cue asked for.
+  assert.equal(filter.accept([0, 0, -1], 6, true, 1), false, "being on a cue does not make a limp motion a stroke")
+  assert.equal(filter.accept([0, 0, -1], 7, true, 60), true, "a driven reversal the chart asked for still counts")
+  // Callers without a ramp (the live preview) keep the old behaviour exactly.
+  const legacy = createReturnFilter()
+  assert.equal(legacy.accept([0, 0, 1], 1), true)
+  assert.equal(legacy.accept([0, 0, -1], 1.2), false, "geometry alone still suppresses a close reversal")
+}
+
+console.log("Direction: a limp motion is treated as a return without needing a predecessor")
+
+// The ramp is measured between the window's slowest and fastest frames, not its endpoints.
+// `peakTime` is when the hand was fastest, but the detector only emits once the speed has fallen
+// away, and by then the frames past the crest are already in history — so the window's last frame
+// is often already on the way down. Differencing the endpoints reported a near-flat ramp for a
+// wave that plainly had one, and would have refused real calibration waves.
+{
+  const frames = []
+  // A clean stroke: speed climbs from rest to a crest, then falls back inside the same window.
+  for (let i = 0; i <= 30; i += 1) {
+    const t = i * 0.005
+    const speed = i <= 24 ? 1 + i * 0.4 : 1 + 24 * 0.4 - (i - 24) * 0.8
+    frames.push({ t, gyr: [0, 0, speed] })
+  }
+  const { rise } = directionFeatureResult(frames, frames[frames.length - 1].t)
+  assert.ok(rise > 50, `a driven stroke must report a steep ramp, got ${rise}`)
+}
+
+console.log("Direction: the ramp survives a peak that has already turned over")

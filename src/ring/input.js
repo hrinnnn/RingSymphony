@@ -352,8 +352,11 @@ export function createRingInput({
     if (capturing && ring.calibrationDetector) {
       const candidate = ring.calibrationDetector.push(t, w)
       if (candidate && candidate.t > ring.calibrationStart) {
-        const feature = directionFeature(ring.history, candidate.t)
-        const captured = direction.capture(feature, ring.address, arrival, arrival, candidate.peakSpeed)
+        // The ramp goes in too: a calibration sample taken from the swing back describes the
+        // opposite of the direction being recorded, and three samples pointing two ways give a
+        // template pointing nowhere useful.
+        const { feature, rise } = directionFeatureResult(ring.history, candidate.t)
+        const captured = direction.capture(feature, ring.address, arrival, arrival, candidate.peakSpeed, rise)
         const calibration = direction.status(arrival)
         if (captured) { saveCalibration("right"); fusion.reset() }
         if (captured && calibration.ready) {
@@ -398,7 +401,7 @@ export function createRingInput({
       }
       if (event.type === "beat" && ring.hand === "right") {
         if (capturing) continue
-        const { feature, reason, hasGap } = directionFeatureResult(ring.history, event.t)
+        const { feature, reason, hasGap, rise } = directionFeatureResult(ring.history, event.t)
         const classified = direction.classifyDetailed(feature, ring.address)
         // The camera decides vertical direction, because the ring cannot: up and down sit about
         // 166 degrees apart in its own axes (direction.js:37). Asked on the uncompensated page
@@ -439,7 +442,7 @@ export function createRingInput({
         // A reversal that lands where a cue is due is a real stroke: up and down are near-opposites,
         // so geometry alone cannot tell a down-beat from the return of an up-beat.
         const onCue = Boolean(event.dir) && cueDue(arrival - age, event.dir)
-        if (event.dir ? !ring.returnFilter.accept(feature, event.t, onCue) : ring.returnFilter.isReturn(feature, event.t)) {
+        if (event.dir ? !ring.returnFilter.accept(feature, event.t, onCue, rise) : ring.returnFilter.isReturn(feature, event.t, -0.8, rise)) {
           directionStats.suppressed += 1
           continue
         }
