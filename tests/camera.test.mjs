@@ -3,6 +3,7 @@
 // mid-stroke, frame rate collapsing, a stalled video — are exercised deterministically.
 import assert from 'node:assert/strict'
 import { cameraDirection, CAMERA_WINDOW, MIN_FRAMES } from '../src/camera/direction.js'
+import { fuseDirection } from '../src/camera/fuse.js'
 
 // Screen coordinates, MediaPipe's convention: x and y normalised 0-1, y growing *downward*.
 const frames = (points, { t0 = 1.0, step = 0.033, inFrame = true } = {}) =>
@@ -88,3 +89,42 @@ const falling = [...rising].reverse()
 }
 
 console.log('camera tests passed')
+
+// ---------- fuseDirection ----------
+
+const up = { dir: 'up', axis: 'vertical', displacement: 0.3 }
+const down = { dir: 'down', axis: 'vertical', displacement: 0.3 }
+const left = { dir: 'left', axis: 'horizontal', displacement: 0.3 }
+const right = { dir: 'right', axis: 'horizontal', displacement: 0.3 }
+const noVerdict = { dir: null, reason: '手不在画面内' }
+
+// The vertical pair is the confusable one, so the camera overrules the ring there and only there.
+assert.deepEqual(fuseDirection('up', down), { dir: 'down', source: 'camera', disagreed: true })
+assert.deepEqual(fuseDirection('down', up), { dir: 'up', source: 'camera', disagreed: true })
+
+// Left and right sit 95 degrees apart with differently-shaped returns, so the ring is not blind
+// there and keeps the call.
+assert.deepEqual(fuseDirection('left', right), { dir: 'left', source: 'ring', disagreed: true })
+assert.deepEqual(fuseDirection('right', left), { dir: 'right', source: 'ring', disagreed: true })
+
+// A cross-axis disagreement is not the 166-degree confusion the camera is justified by.
+assert.deepEqual(fuseDirection('up', left), { dir: 'up', source: 'ring', disagreed: true })
+assert.deepEqual(fuseDirection('left', up), { dir: 'left', source: 'ring', disagreed: true })
+
+// Fill-in. The ring declining is far more common than it disagreeing, and an unclassified beat was
+// never going to score, so any earned verdict is strictly better than the toast it replaces.
+assert.deepEqual(fuseDirection(null, up), { dir: 'up', source: 'camera', disagreed: false })
+assert.deepEqual(fuseDirection(null, left), { dir: 'left', source: 'camera', disagreed: false })
+
+// No verdict: the ring's answer stands untouched, including when the ring also had none. This is
+// the path every degradation converges on, so it must leave the pipeline exactly as it was.
+assert.deepEqual(fuseDirection('up', noVerdict), { dir: 'up', source: 'ring', disagreed: false })
+assert.deepEqual(fuseDirection(null, noVerdict), { dir: null, source: 'ring', disagreed: false })
+assert.deepEqual(fuseDirection('up', null), { dir: 'up', source: 'ring', disagreed: false })
+assert.deepEqual(fuseDirection(null, null), { dir: null, source: 'ring', disagreed: false })
+
+// Agreement is not disagreement, and must not be logged as one.
+assert.deepEqual(fuseDirection('up', up), { dir: 'up', source: 'ring', disagreed: false })
+assert.deepEqual(fuseDirection('left', left), { dir: 'left', source: 'ring', disagreed: false })
+
+console.log('fusion tests passed')
