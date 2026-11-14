@@ -29,13 +29,26 @@ const falling = [...rising].reverse()
 {
   assert.equal(cameraDirection(frames(falling), 1.14).dir, 'down')
 }
+// Horizontal is flipped relative to the image. The player faces the camera unmirrored - the
+// pixels must not be mirrored, or MediaPipe's handedness inverts - so a stroke the player makes
+// to their own left travels toward increasing x in the image.
 {
   const verdict = cameraDirection(frames([[0.30, 0.5], [0.38, 0.5], [0.45, 0.5], [0.52, 0.5], [0.60, 0.5]]), 1.14)
-  assert.equal(verdict.dir, 'right')
+  assert.equal(verdict.dir, 'left', 'increasing image x is the player moving to their own left')
   assert.equal(verdict.axis, 'horizontal')
 }
 {
-  assert.equal(cameraDirection(frames([[0.60, 0.5], [0.52, 0.5], [0.45, 0.5], [0.38, 0.5], [0.30, 0.5]]), 1.14).dir, 'left')
+  assert.equal(cameraDirection(frames([[0.60, 0.5], [0.52, 0.5], [0.45, 0.5], [0.38, 0.5], [0.30, 0.5]]), 1.14).dir, 'right')
+}
+
+// The left/right flip, stated as the invariant rather than as two coordinates. This was wrong in
+// the first version and reached a player as "I swipe left and it says 右" - the same symptom the
+// ring's own axis confusion produces, which is what made it hard to spot.
+{
+  const toImageRight = frames([[0.35, 0.5], [0.45, 0.5], [0.55, 0.5], [0.62, 0.5], [0.68, 0.5]])
+  const toImageLeft = frames([[0.68, 0.5], [0.62, 0.5], [0.55, 0.5], [0.45, 0.5], [0.35, 0.5]])
+  assert.notEqual(cameraDirection(toImageRight, 1.14).dir, cameraDirection(toImageLeft, 1.14).dir)
+  assert.equal(cameraDirection(toImageRight, 1.14).dir, 'left', 'the camera is not mirrored, so the player and the image disagree about left')
 }
 
 // A real conducting stroke is never purely on one axis; the dominant component decides.
@@ -102,18 +115,24 @@ const left = { dir: 'left', axis: 'horizontal', displacement: 0.3 }
 const right = { dir: 'right', axis: 'horizontal', displacement: 0.3 }
 const noVerdict = { dir: null, reason: '手不在画面内' }
 
-// The vertical pair is the confusable one, so the camera overrules the ring there and only there.
+// The camera wins every disagreement it has earned a verdict for. Vertical is the starkest case:
+// up and down sit 166 degrees apart in the ring's axes, so a down-stroke and an up-stroke's return
+// are the same rotation and no threshold separates them.
 assert.deepEqual(fuseDirection('up', down), { dir: 'down', source: 'camera', disagreed: true })
 assert.deepEqual(fuseDirection('down', up), { dir: 'up', source: 'camera', disagreed: true })
 
-// Left and right sit 95 degrees apart with differently-shaped returns, so the ring is not blind
-// there and keeps the call.
-assert.deepEqual(fuseDirection('left', right), { dir: 'left', source: 'ring', disagreed: true })
-assert.deepEqual(fuseDirection('right', left), { dir: 'right', source: 'ring', disagreed: true })
+// Horizontal too. This was once ring-authoritative, on the reasoning that left and right sit 95
+// degrees apart so the ring was not blind there. Measuring the calibrated centroids showed the
+// relevant angle is not that one: a left stroke's return sits 39 degrees from `up` and close to
+// `right`, so an unsuppressed return reads a left stroke as 右 - a wearer-dependent confusion the
+// camera does not share.
+assert.deepEqual(fuseDirection('right', left), { dir: 'left', source: 'camera', disagreed: true })
+assert.deepEqual(fuseDirection('left', right), { dir: 'right', source: 'camera', disagreed: true })
 
-// A cross-axis disagreement is not the 166-degree confusion the camera is justified by.
-assert.deepEqual(fuseDirection('up', left), { dir: 'up', source: 'ring', disagreed: true })
-assert.deepEqual(fuseDirection('left', up), { dir: 'left', source: 'ring', disagreed: true })
+// Cross-axis disagreements resolve to the camera for the same reason: up sits only 39 degrees
+// from right in the ring's axes, which is exactly how a return gets mislabelled.
+assert.deepEqual(fuseDirection('up', left), { dir: 'left', source: 'camera', disagreed: true })
+assert.deepEqual(fuseDirection('left', up), { dir: 'up', source: 'camera', disagreed: true })
 
 // Fill-in. The ring declining is far more common than it disagreeing, and an unclassified beat was
 // never going to score, so any earned verdict is strictly better than the toast it replaces.

@@ -5,7 +5,6 @@
 // a beat whenever either was uncertain, which is strictly worse than having no camera at all.
 //
 // Pure: no DOM, no imports beyond the axis constant.
-import { VERTICAL } from "./direction.js"
 
 const ringKeeps = (dir, disagreed) => ({ dir, source: "ring", disagreed })
 
@@ -18,24 +17,29 @@ export function fuseDirection(ringDir, verdict) {
   if (!cameraDir) return ringKeeps(ringDir ?? null, false)
 
   // The ring had nothing. An unclassified beat scores nothing and shows 方向不确定, so any earned
-  // camera verdict is strictly better than what it replaces — on either axis. This is the common
-  // case: the ring declining is far more frequent than the two sensors contradicting each other.
+  // camera verdict is strictly better than what it replaces. This is the common case: the ring
+  // declining is far more frequent than the two sensors contradicting each other.
   if (!ringDir) return { dir: cameraDir, source: "camera", disagreed: false }
 
   if (ringDir === cameraDir) return ringKeeps(ringDir, false)
 
-  // Both answers vertical is the one case the camera is justified in overruling. From
-  // direction.js:37, up and down sit about 166 degrees apart in the ring's own axes, so a
-  // down-stroke and the return of an up-stroke are the same rotation and no threshold separates
-  // them. Deferring to the ring here is deferring to a coin flip, and overruling a coin flip
-  // cannot cost accuracy in expectation.
-  if (VERTICAL.includes(ringDir) && VERTICAL.includes(cameraDir)) {
-    return { dir: cameraDir, source: "camera", disagreed: true }
-  }
-
-  // Everything else: left against right (95 degrees apart, with differently-shaped returns, so the
-  // ring is not blind), or a cross-axis contradiction, which is not the confusion the camera is
-  // justified by and more likely means one of the two is simply wrong. The ring keeps the call and
-  // the disagreement is logged for later.
-  return ringKeeps(ringDir, true)
+  // The camera wins every disagreement it has earned a verdict for.
+  //
+  // This started narrower — vertical only — on the reasoning that up and down sit 166 degrees
+  // apart in the ring's axes while left and right sit 95, so the ring was blind on one axis and
+  // merely weaker on the other. Measuring the calibrated centroids from recordings/方向 showed
+  // that 95 degrees is the wrong number to look at:
+  //
+  //     up vs down 166   up vs right 39   down vs left 127
+  //     left vs right 95   up vs left 67   down vs right 130
+  //
+  // A left stroke returns rightward, and that return sits 39 degrees from `up` and near `right` —
+  // so when a return escapes suppression, or the player starts the next stroke without returning
+  // first, a left stroke is read as 右. That is a wearer-dependent axis confusion of exactly the
+  // kind screen coordinates do not have, and it is not confined to the vertical pair.
+  //
+  // The camera's displacement is unambiguous on both axes, and it only reaches this point having
+  // satisfied the earning rule in direction.js: tracked through the window, inside the frame, and
+  // past a real displacement threshold.
+  return { dir: cameraDir, source: "camera", disagreed: true }
 }

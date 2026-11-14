@@ -60,7 +60,11 @@ export function cameraDirection(frames, beatTime) {
 
   const first = window[0]
   const last = window[window.length - 1]
-  const dx = last.x - first.x
+  // Image x grows rightward *in the image*, and the player faces the camera unmirrored, so their
+  // left hand appears on the image's right. A stroke the player makes to their left therefore
+  // travels toward increasing x. Flipping here — rather than mirroring the pixels — keeps
+  // MediaPipe's handedness output valid, since that inverts on a mirrored image.
+  const dx = first.x - last.x
   const dy = last.y - first.y
   const displacement = Math.max(Math.abs(dx), Math.abs(dy))
   if (displacement < MIN_DISPLACEMENT) return decline("位移过小")
