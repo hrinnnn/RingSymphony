@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { createHandDetector } from "../src/ring/detectors.js"
-import { createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "../src/ring/direction.js"
+import { CALIBRATION_VERSION, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "../src/ring/direction.js"
 import { createRingInput } from "../src/ring/input.js"
 
 const calibration = createDirectionCalibration()
@@ -489,21 +489,50 @@ console.log("Direction: outlier tolerance pass")
   }
   const saved = cal.serialise("right")
   const fresh = createDirectionCalibration()
-  assert.equal(fresh.restore(saved, "AA", "right"), true)
+  assert.deepEqual(fresh.restore(saved, "AA", "right"), { ok: true, gyroBias: null })
   assert.equal(fresh.status(0).ready, true, fresh.status(0).message)
   assert.equal(fresh.classify([0, 0, 1], "AA"), "down", "a restored calibration must classify")
+}
+
+// The gyro bias travels with the calibration. Templates are built from bias-corrected readings, so
+// restoring them without it compares corrected templates against uncorrected features - and the
+// panel would say 校准完成 while direction detection quietly degraded. Measured on recordings/方向
+// the bias is ~0.78 rad/s, which tilts a 1.5 rad/s stroke's feature by up to 27 degrees, against a
+// 36.9 degree accept threshold and only 39 degrees between `up` and `right`.
+{
+  const cal = createDirectionCalibration()
+  const vecs = { down: [0, 0, 1], left: [0, 1, 0], right: [1, 0, 0], up: [0, 0, -1] }
+  for (const [dir, vec] of Object.entries(vecs)) {
+    for (let i = 0; i < 3; i += 1) { cal.arm(dir, "AA", i); cal.capture(vec, "AA", i + 0.1, i + 0.1, 2) }
+  }
+  const bias = [0.26, -0.72, -0.09]
+  const fresh = createDirectionCalibration()
+  assert.deepEqual(fresh.restore(cal.serialise("right", bias), "AA", "right"), { ok: true, gyroBias: bias })
+  // A stored calibration from before the bias was saved restores without one rather than failing:
+  // the templates are still usable, and the next calibration will supply it.
+  const older = cal.serialise("right")
+  delete older.gyroBias
+  assert.deepEqual(createDirectionCalibration().restore(older, "AA", "right"), { ok: true, gyroBias: null })
+  // A malformed bias is ignored, never applied.
+  assert.deepEqual(createDirectionCalibration().restore({ ...cal.serialise("right"), gyroBias: [1, 2] }, "AA", "right"), { ok: true, gyroBias: null })
+  assert.deepEqual(createDirectionCalibration().restore({ ...cal.serialise("right"), gyroBias: "x" }, "AA", "right"), { ok: true, gyroBias: null })
 }
 
 // Malformed, stale or mismatched stored calibration must be refused, not loaded.
 {
   const cal = createDirectionCalibration()
-  const body = { version: 1, address: "AA", hand: "right", samples: {}, speeds: {} }
-  assert.equal(cal.restore({ ...body, version: 99 }, "AA", "right"), false, "wrong version")
-  assert.equal(cal.restore({ ...body, address: "BB" }, "AA", "right"), false, "wrong ring")
-  assert.equal(cal.restore({ ...body, hand: "left" }, "AA", "right"), false, "wrong hand")
-  assert.equal(cal.restore(null, "AA", "right"), false, "missing")
-  assert.equal(cal.restore({ ...body, samples: "garbage" }, "AA", "right"), false, "malformed samples")
-  assert.equal(cal.restore({ ...body, samples: { down: [[1, 0]] } }, "AA", "right"), false, "malformed vector")
+  const body = { version: CALIBRATION_VERSION, address: "AA", hand: "right", samples: {}, speeds: {} }
+  const refused = (data, why) => assert.equal(cal.restore(data, "AA", "right").ok, false, why)
+  refused({ ...body, version: 99 }, "wrong version")
+  // Version 1 predates the stored gyro bias. Loading it would restore templates built from
+  // bias-corrected readings with no bias to correct the live feed by, which is the failure this
+  // version bump exists to prevent - so it is refused and the player recalibrates once.
+  refused({ ...body, version: 1 }, "calibration from before the bias was stored")
+  refused({ ...body, address: "BB" }, "wrong ring")
+  refused({ ...body, hand: "left" }, "wrong hand")
+  refused(null, "missing")
+  refused({ ...body, samples: "garbage" }, "malformed samples")
+  refused({ ...body, samples: { down: [[1, 0]] } }, "malformed vector")
   assert.equal(cal.status(0).ready, false, "a refused restore must leave the calibration empty")
 }
 

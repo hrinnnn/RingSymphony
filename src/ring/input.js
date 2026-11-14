@@ -158,8 +158,11 @@ export function createRingInput({
   }
 
   // Calibration is stored per ring address and hand, so a refresh or reconnect does not cost one.
+  // The gyro bias goes with it: the templates were built from bias-corrected readings, so storing
+  // them without it would restore a calibration that silently no longer matches the live feed.
   function saveCalibration(hand = "right") {
-    const body = direction.serialise(hand)
+    const ring = [...rings.values()].find((candidate) => candidate.hand === hand)
+    const body = direction.serialise(hand, ring?.gyroBias ?? null)
     if (!body) return
     try {
       storage?.setItem(CAL_KEY, JSON.stringify(body))
@@ -168,8 +171,12 @@ export function createRingInput({
     }
   }
 
-  function loadCalibration(ringAddress, hand) {
-    return direction.restore(readJson(storage, CAL_KEY, null), ringAddress, hand)
+  function loadCalibration(ring, hand) {
+    const result = direction.restore(readJson(storage, CAL_KEY, null), ring.address, hand)
+    // Restoring templates without their bias is worse than not restoring at all: the panel would
+    // show 校准完成 while every direction feature carried an offset the templates do not expect.
+    if (result.ok) ring.gyroBias = result.gyroBias
+    return result.ok
   }
 
   // Ring Studio lists every ring it has ever seen; only one that is connected and streaming counts.
@@ -192,8 +199,6 @@ export function createRingInput({
     const palmHandChanged = ring.hand === "left" || hand === "left"
     if (palmHandChanged) clearPalmCalibration(palmAutomatic ? "左手指环改变，校准已停止" : undefined)
     if (ring.hand === "right" || hand === "right") direction.reset()
-    // A stored calibration for this exact ring and hand stands in for redoing the waves.
-    if (hand === "right") loadCalibration(ring.address, "right")
     if (ring.hand) lastByHand[ring.hand] = null
     if (hand) lastByHand[hand] = null
     ring.hand = hand
@@ -203,6 +208,10 @@ export function createRingInput({
     ring.returnFilter.reset()
     ring.gyroBias = null
     ring.history = []
+    // After the reset, not before: a restored calibration brings its own bias, and clearing it
+    // here would leave the panel showing 校准完成 while the live feed carried an offset the
+    // templates were never built against.
+    if (hand === "right") loadCalibration(ring, "right")
   }
 
   function allocate() {

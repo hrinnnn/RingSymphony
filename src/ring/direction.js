@@ -102,7 +102,7 @@ function agreeing(list) {
   return { kept: [], centroid: null }
 }
 
-export const CALIBRATION_VERSION = 1
+export const CALIBRATION_VERSION = 2
 
 const vectorList = (value) => Array.isArray(value) &&
   value.every((item) => Array.isArray(item) && item.length === 3 && item.every((n) => Number.isFinite(n)))
@@ -178,25 +178,26 @@ export function createDirectionCalibration() {
   return {
     reset,
     status,
-    serialise(hand) {
+    serialise(hand, gyroBias = null) {
       if (!address) return null
-      return { version: CALIBRATION_VERSION, address, hand, samples, speeds, savedAt: Date.now() }
+      return { version: CALIBRATION_VERSION, address, hand, samples, speeds, gyroBias, savedAt: Date.now() }
     },
     // Keyed by ring address *and* hand: the same ring worn on the other hand has different axes,
     // and assign()/swap in input.js can move a ring between hands between sessions.
     restore(data, ringAddress, hand) {
-      if (!data || typeof data !== "object") return false
-      if (data.version !== CALIBRATION_VERSION) return false
-      if (data.address !== ringAddress || data.hand !== hand) return false
-      if (!data.samples || typeof data.samples !== "object") return false
-      if (!data.speeds || typeof data.speeds !== "object") return false
+      const no = { ok: false, gyroBias: null }
+      if (!data || typeof data !== "object") return no
+      if (data.version !== CALIBRATION_VERSION) return no
+      if (data.address !== ringAddress || data.hand !== hand) return no
+      if (!data.samples || typeof data.samples !== "object") return no
+      if (!data.speeds || typeof data.speeds !== "object") return no
       const restored = {}
       const restoredSpeeds = {}
       for (const direction of DIRECTIONS) {
         const list = data.samples[direction] ?? []
         const speedList = data.speeds[direction] ?? []
-        if (!vectorList(list)) return false
-        if (!Array.isArray(speedList) || !speedList.every((n) => Number.isFinite(n))) return false
+        if (!vectorList(list)) return no
+        if (!Array.isArray(speedList) || !speedList.every((n) => Number.isFinite(n))) return no
         restored[direction] = list.map((sample) => [...sample])
         restoredSpeeds[direction] = [...speedList]
       }
@@ -205,7 +206,15 @@ export function createDirectionCalibration() {
       pending = null
       address = ringAddress
       message = ""
-      return true
+      // The gyro bias is part of the calibration, not an extra. The templates were built from
+      // bias-corrected readings, so restoring them without it compares corrected templates against
+      // uncorrected features. Measured on recordings/方向 the bias is ~0.78 rad/s, which tilts a
+      // 1.5 rad/s stroke's feature by up to 27 degrees - against a 36.9 degree accept threshold
+      // and only 39 degrees between `up` and `right`. Returned rather than applied here because
+      // the bias belongs to the ring, which this module does not own.
+      return Array.isArray(data.gyroBias) && data.gyroBias.length === 3 && data.gyroBias.every(Number.isFinite)
+        ? { ok: true, gyroBias: [...data.gyroBias] }
+        : { ok: true, gyroBias: null }
     },
     clearDirection(direction) {
       if (!DIRECTIONS.includes(direction)) throw new Error("无效的方向")
