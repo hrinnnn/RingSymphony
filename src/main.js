@@ -229,7 +229,7 @@ function onRing(event) {
   if (event.type === "fist") return
   if (event.hand === "right" && event.type === "beat") {
     gestureLog.record({
-      at, fused: event.dir, ring: event.ringDir, camera: event.cameraDir,
+      at, fused: event.dir, ring: event.ringDir, ringReason: event.ringReason, camera: event.cameraDir,
       cameraReason: event.cameraReason, displacement: event.cameraDisplacement,
       source: event.directionSource, tier: event.tier,
     })
@@ -352,6 +352,7 @@ function showGestureReport() {
     <div class="report-row">${line("戒指方向", summary.ring)}${line("摄像头", summary.camera)}${line("最终采用", summary.fused)}</div>
     <div class="report-row"><span><b>时间</b> ${timingText}</span><span><b>击拍</b> ${summary.matched}/${summary.cues}</span></div>
     ${worst.length ? `<p class="report-confusion">常见误判：${worst.map((w) => `${DIR_LABEL[w.want]}→${DIR_LABEL[w.got]} ${w.n} 次`).join(" · ")}</p>` : ""}
+    ${Object.keys(summary.ringSilence).length ? `<p class="report-confusion">戒指未作答：${Object.entries(summary.ringSilence).map(([k, n]) => `${k} ${n}`).join(" · ")}</p>` : ""}
     ${Object.keys(summary.cameraSilence).length ? `<p class="report-confusion">摄像头未作答：${Object.entries(summary.cameraSilence).map(([k, n]) => `${k} ${n}`).join(" · ")}</p>` : ""}
     <button type="button" id="export-gestures" class="candy plain">导出本关记录</button>`
   // The stub DOM in the controller tests has no element-level querySelector; the report is a

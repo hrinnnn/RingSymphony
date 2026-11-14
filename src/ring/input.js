@@ -426,6 +426,10 @@ export function createRingInput({
           onDisagreement({ t: event.t + ring.offset, hand: "right", ring: classified.direction, source: fused.source })
         }
         event.directionReason = event.dir ? null : (reason || classified.reason)
+        // Why the *ring* declined, kept separately from directionReason, which goes null once the
+        // camera fills in. Without it a declined stroke is indistinguishable from a classified one
+        // in the log, and the four declines measured so far could not be explained at all.
+        event.ringReason = classified.direction ? null : (reason || classified.reason)
         // An unclassified beat is not recorded as a stroke, but it can still be the return of one.
         // A reversal that lands where a cue is due is a real stroke: up and down are near-opposites,
         // so geometry alone cannot tell a down-beat from the return of an up-beat.

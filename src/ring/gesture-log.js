@@ -35,7 +35,7 @@ export function createGestureLog() {
 
     // Called for every right-hand beat that reached the game, whether or not it scored. `at` is on
     // the song clock, the same clock the cues use.
-    record({ at, fused, ring, camera, cameraReason, displacement, source, tier }) {
+    record({ at, fused, ring, ringReason, camera, cameraReason, displacement, source, tier }) {
       if (!level) return
       // The nearest unused cue, by time alone. Deliberately not by direction: matching on
       // direction would quietly discard every misread, which is the thing being measured.
@@ -50,6 +50,7 @@ export function createGestureLog() {
         offset: best ? Number((at - best.cue.time).toFixed(3)) : null,
         fused: fused ?? null,
         ring: ring ?? null,
+        ringReason: ringReason ?? null,
         camera: camera ?? null,
         cameraReason: cameraReason ?? null,
         displacement: displacement == null ? null : Number(displacement.toFixed(3)),
@@ -78,6 +79,11 @@ export function createGestureLog() {
       // and "the room is too dark".
       const silence = {}
       for (const stroke of matched) if (!stroke.camera && stroke.cameraReason) silence[stroke.cameraReason] = (silence[stroke.cameraReason] ?? 0) + 1
+      // The same for the ring. Measured so far, every stroke it declined was early — mean -124ms
+      // against +6ms for the ones it classified — so the reason is what distinguishes a detector
+      // warmup from a direction window that could not be filled.
+      const ringSilence = {}
+      for (const stroke of matched) if (!stroke.ring && stroke.ringReason) ringSilence[stroke.ringReason] = (ringSilence[stroke.ringReason] ?? 0) + 1
       return {
         level,
         cues: this.cues.length,
@@ -90,6 +96,7 @@ export function createGestureLog() {
         fused: score("fused"),
         confusion,
         cameraSilence: silence,
+        ringSilence,
         timing: offsets.length ? {
           median: Number(offsets[Math.floor(offsets.length / 2)].toFixed(3)),
           mean: Number((offsets.reduce((sum, value) => sum + value, 0) / offsets.length).toFixed(3)),

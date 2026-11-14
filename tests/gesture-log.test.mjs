@@ -109,3 +109,21 @@ const cues = [
 }
 
 console.log('gesture log tests passed')
+
+// Why the ring declined, kept apart from why the camera did. Measured over two sessions every
+// declined stroke was early - mean -124ms against +6ms for classified ones - and the reason is
+// what separates a detector warmup from a direction window that could not be filled. Without it
+// those four declines could not be explained at all.
+{
+  const log = createGestureLog()
+  log.begin(study, cues)
+  log.record({ at: 3.00, fused: 'down', ring: null, ringReason: '数据不足或断帧', camera: null, cameraReason: '位移过小' })
+  log.record({ at: 3.75, fused: 'left', ring: null, ringReason: '数据不足或断帧', camera: 'left', displacement: 0.12 })
+  log.record({ at: 4.50, fused: 'right', ring: 'right', camera: 'right', displacement: 0.12 })
+  const s = log.summary()
+  assert.deepEqual(s.ringSilence, { '数据不足或断帧': 2 })
+  assert.deepEqual(s.cameraSilence, { '位移过小': 1 }, 'the two sensors silence separately and for different reasons')
+  assert.equal(JSON.parse(log.toJSON()).strokes[0].ringReason, '数据不足或断帧', 'the per-stroke reason survives export')
+}
+
+console.log('ring silence tests passed')
