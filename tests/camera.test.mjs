@@ -6,6 +6,7 @@ import { cameraDirection, CAMERA_WINDOW, MIN_FRAMES } from '../src/camera/direct
 import { fuseDirection } from '../src/camera/fuse.js'
 import { readFile } from 'node:fs/promises'
 import { createRingInput } from '../src/ring/input.js'
+import { createCameraLog, LOG_CAP } from '../src/camera/log.js'
 
 // Screen coordinates, MediaPipe's convention: x and y normalised 0-1, y growing *downward*.
 const frames = (points, { t0 = 1.0, step = 0.033, inFrame = true } = {}) =>
@@ -201,3 +202,52 @@ async function drive(options = {}) {
 }
 
 console.log('ring wiring tests passed')
+
+// ---------- the persisted disagreement log ----------
+
+const fakeStorage = () => {
+  const store = new Map()
+  return { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: k => store.delete(k) }
+}
+const entry = (t) => ({ t, hand: 'right', axis: 'vertical', ring: 'up', cam: 'down', source: 'camera', earned: true, frames: [] })
+
+// The point of persisting: playing the game accumulates the labelled data the repo does not have,
+// and a log that died on refresh could never do that.
+{
+  const storage = fakeStorage()
+  const log = createCameraLog({ storage, cap: 3 })
+  for (const t of [1, 2, 3, 4]) log.record(entry(t))
+  assert.deepEqual(log.entries().map(e => e.t), [2, 3, 4], 'the cap drops the oldest, never the newest')
+  assert.equal(createCameraLog({ storage, cap: 3 }).entries().length, 3, 'the log must survive a refresh')
+}
+
+// Private mode throws on getItem, a full quota throws on setItem, and neither may cost a beat.
+{
+  const hostile = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('quota exceeded') } }
+  const log = createCameraLog({ storage: hostile })
+  assert.doesNotThrow(() => log.record(entry(1)))
+  assert.equal(log.entries().length, 1, 'the session log still works when storage does not')
+}
+assert.doesNotThrow(() => createCameraLog({ storage: null }).record(entry(1)))
+
+// Export has to produce something a person can actually take away and label.
+{
+  const log = createCameraLog({ storage: fakeStorage() })
+  log.record(entry(1))
+  const parsed = JSON.parse(log.toJSON())
+  assert.equal(parsed.entries.length, 1)
+  assert.ok(parsed.version && parsed.exported, 'an exported log carries its own version and date')
+}
+
+// Clearing is explicit and total - this is webcam-derived data, so there must be a way out.
+{
+  const storage = fakeStorage()
+  const log = createCameraLog({ storage })
+  log.record(entry(1))
+  log.clear()
+  assert.deepEqual(log.entries(), [])
+  assert.deepEqual(createCameraLog({ storage }).entries(), [], 'clearing reaches storage, not just memory')
+}
+
+assert.equal(LOG_CAP, 500)
+console.log('camera log tests passed')
