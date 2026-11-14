@@ -57,6 +57,9 @@ export function createCameraTracker({
   let running = false
   let frameTimes = []
   let contradicted = 0
+  let lastSignature = ""
+  let lastEmit = 0
+  let failures = 0
 
   function emit() {
     for (const listener of listeners) listener({ ...state, hands: { ...state.hands } })
@@ -108,15 +111,23 @@ export function createCameraTracker({
     }
 
     contradicted = rolesContradicted(seen) ? contradicted + 1 : 0
-    const mismatch = contradicted >= MISMATCH_FRAMES
-    if (mismatch !== state.mismatch) {
-      state.mismatch = mismatch
-      emit()
-    }
+    state.mismatch = contradicted >= MISMATCH_FRAMES
 
     frameTimes.push(t)
     while (frameTimes.length && frameTimes[0] < t - 1) frameTimes.shift()
     state.fps = frameTimes.length
+
+    // Tell the page when a hand appears or disappears, and otherwise about twice a second so the
+    // frame rate reading stays honest. Emitting on every frame would re-render the panel 30 times
+    // a second for nothing; emitting only on the mismatch flag — which is what this did at first —
+    // left the chip frozen on whatever it said when the camera was switched on, so a player with
+    // their hands up in plain view still read 手不在画面内.
+    const signature = `${state.hands.left}|${state.hands.right}|${state.mismatch}`
+    if (signature !== lastSignature || t - lastEmit > 0.5) {
+      lastSignature = signature
+      lastEmit = t
+      emit()
+    }
   }
 
   function loop() {
@@ -135,9 +146,13 @@ export function createCameraTracker({
       // page-clock time is what the buffers are stamped with, since that is the clock ring events
       // are comparable on.
       observe(landmarker.detectForVideo(video, performance.now()), t)
-    } catch {
-      // A single bad frame is not worth tearing the tracker down for. A persistent failure shows
-      // up as the buffers going stale, which declines verdicts anyway.
+      failures = 0
+    } catch (error) {
+      // A single bad frame is not worth tearing the tracker down for. A persistent failure is a
+      // different thing and must not stay silent: swallowing it would look identical to "your
+      // hands are not in frame", and send the player hunting for a problem that is not theirs.
+      failures += 1
+      if (failures === 30) setState("error", `识别失败：${error?.message ?? error}`)
     }
     schedule()
   }
@@ -166,6 +181,14 @@ export function createCameraTracker({
           baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
           runningMode: "VIDEO",
           numHands: 2,
+          // Below MediaPipe's 0.5 defaults. A conducting hand is moving, often motion-blurred,
+          // and lit by whatever the room has, so the default thresholds drop it on exactly the
+          // frames that matter. A false hand costs little here — cameraDirection still demands
+          // real displacement before it will overrule anything — while a missed hand costs the
+          // verdict entirely.
+          minHandDetectionConfidence: 0.3,
+          minHandPresenceConfidence: 0.3,
+          minTrackingConfidence: 0.3,
         })
       } catch (error) {
         stream?.getTracks().forEach((track) => track.stop())
@@ -208,6 +231,10 @@ export function createCameraTracker({
       if (!running) return null
       return cameraDirection(buffers[hand], pageTime)
     },
+
+    // Test seam: the frame loop needs a camera, but what it does with a result does not. This is
+    // how the "a hand appeared" notification is exercised without hardware.
+    __observe: observe,
 
     // The frames behind a verdict, trimmed to what the log stores.
     framesFor(hand, pageTime, window = 0.3) {

@@ -59,12 +59,19 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
 
   function render() {
     const status = tracker.status()
-    chip.dataset.state = status.state === "on" ? (status.hands.right ? "on" : "wait") : "off"
-    chip.textContent = status.state === "on" && !status.hands.right ? "摄像头 · 手不在画面内" : STATE_LABEL[status.state]
+    const count = (status.hands.left ? 1 : 0) + (status.hands.right ? 1 : 0)
+    // The chip reports what the camera can see, not what the ring roles expect. A player with one
+    // hand up is being tracked, and saying otherwise would send them hunting for a problem that is
+    // not there.
+    chip.dataset.state = status.state === "on" ? (count ? "on" : "wait") : "off"
+    chip.textContent = status.state === "on"
+      ? (count ? `摄像头 · 看到 ${count} 只手` : "摄像头 · 没看到手")
+      : STATE_LABEL[status.state]
     chip.hidden = false
     toggle.textContent = status.state === "on" || status.state === "starting" ? "关闭摄像头" : "开启摄像头"
+    const hands = count === 2 ? "双手都在画面内" : status.hands.right ? "只看到右手" : status.hands.left ? "只看到左手" : "没看到手，请把手抬进画面"
     statusEl.textContent = status.state === "on"
-      ? `已开启 · ${status.fps} fps · ${status.hands.right ? "右手在画面内" : "右手不在画面内"}${status.hands.left ? "，左手在画面内" : ""}`
+      ? `已开启 · ${status.fps} fps · ${hands}`
       : status.state === "denied" ? "浏览器拒绝了摄像头权限。游戏仍可正常进行。"
       : status.state === "error" ? `无法启动：${status.error ?? "未知错误"}。游戏仍可正常进行。`
       : status.state === "starting" ? "正在启动…" : "未开启。开启后上下挥拍的识别会更准。"

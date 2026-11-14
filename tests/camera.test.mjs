@@ -7,7 +7,7 @@ import { fuseDirection } from '../src/camera/fuse.js'
 import { readFile } from 'node:fs/promises'
 import { createRingInput } from '../src/ring/input.js'
 import { createCameraLog, LOG_CAP } from '../src/camera/log.js'
-import { handedToRole, rolesContradicted } from '../src/camera/tracker.js'
+import { handedToRole, rolesContradicted, createCameraTracker } from '../src/camera/tracker.js'
 
 // Screen coordinates, MediaPipe's convention: x and y normalised 0-1, y growing *downward*.
 const frames = (points, { t0 = 1.0, step = 0.033, inFrame = true } = {}) =>
@@ -274,3 +274,22 @@ assert.equal(rolesContradicted({ right: { x: 0.8 }, left: null }), false, 'one h
 assert.equal(rolesContradicted({ right: null, left: null }), false)
 
 console.log('tracker helper tests passed')
+
+// A hand appearing or disappearing must reach the page. The first version only emitted when the
+// role-mismatch flag flipped, so the chip froze on whatever it said when the camera was switched
+// on and a player with their hands plainly up still read 手不在画面内.
+{
+  const tracker = createCameraTracker({ now: () => 0 })
+  const seen = []
+  tracker.onStatus(s => seen.push(s.hands))
+  const landmark = (x, y) => ({ x, y, z: 0 })
+  const hand = (x, y) => Array.from({ length: 21 }, () => landmark(x, y))
+  // observe() is internal, so drive it the way the loop does: through the exported test seam.
+  tracker.__observe({ handedness: [[{ categoryName: 'Right' }]], landmarks: [hand(0.4, 0.5)] }, 0.1)
+  assert.ok(seen.length >= 1, 'a hand appearing must notify the page')
+  assert.equal(seen[seen.length - 1].right, true)
+  tracker.__observe({ handedness: [], landmarks: [] }, 0.2)
+  assert.equal(seen[seen.length - 1].right, false, 'a hand disappearing must notify the page too')
+}
+
+console.log('tracker notification tests passed')
