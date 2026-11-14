@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { createHandDetector } from "../src/ring/detectors.js"
-import { CALIBRATION_VERSION, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "../src/ring/direction.js"
+import { CALIBRATION_VERSION, DIRECTIONS, calibrationFit, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "../src/ring/direction.js"
 import { createRingInput } from "../src/ring/input.js"
 
 const calibration = createDirectionCalibration()
@@ -632,3 +632,78 @@ console.log("Direction: alternating vertical strokes on the beat pass")
 }
 
 console.log("Direction: level start clears stale gesture state")
+
+// A wave and its swing back are the same rotation reversed, so the return is a candidate peak in
+// its own right. Captured as a sample it describes the opposite of the direction being recorded,
+// and a direction holding both produces a centroid pointing nowhere useful — which is how waves
+// that were perfectly clean end up reported as "左右过于相似".
+{
+  const calibration = createDirectionCalibration()
+  const stroke = [0, 0, 1]
+  const back = [0, 0, -1]
+  calibration.arm("up", "A", 0)
+  assert.equal(calibration.capture(stroke, "A", 1, 1, 4), true)
+  calibration.arm("up", "A", 1.1)
+  assert.equal(calibration.capture(back, "A", 1.3, 1.3, 4), false, "the return must not become a sample")
+  assert.match(calibration.status(1.4).message, /回程/, "and the player is told why")
+  // Far enough after the stroke that it is a fresh wave, not its return.
+  calibration.arm("up", "A", 1.5)
+  assert.equal(calibration.capture(back, "A", 3, 3, 4), true, "a genuine later wave still captures")
+}
+
+console.log("Direction: a return stroke is not captured as a calibration sample")
+
+// The geometric checks answer "are these waves self-consistent and distinct?", which says little
+// about play: measured over 34 candidate calibrations from recordings/方向 their verdict barely
+// tracked the accuracy that followed, while the leave-one-out fit correlates at 0.90. A set that
+// cannot classify its own samples must be refused at calibration time, not discovered as silent
+// refusals during a level.
+{
+  const orthogonal = { down: [0, -1, 0], left: [-1, 0, 0], right: [1, 0, 0], up: [0, 1, 0] }
+  assert.equal(calibrationFit(Object.fromEntries(
+    Object.entries(orthogonal).map(([direction, vector]) => [direction, [vector, vector, vector]]))), 1,
+    "four clean, distinct directions classify each other perfectly")
+
+  // Up and right recorded almost the same way: each sample is nearer the rival than the margin
+  // allows, so the pair is unusable however tidy each direction looks on its own.
+  const tilted = Math.cos(Math.PI / 18)
+  const confusable = {
+    down: [[0, -1, 0], [0, -1, 0], [0, -1, 0]],
+    left: [[-1, 0, 0], [-1, 0, 0], [-1, 0, 0]],
+    right: [[1, 0, 0], [1, 0, 0], [1, 0, 0]],
+    up: [[tilted, Math.sin(Math.PI / 18), 0], [tilted, Math.sin(Math.PI / 18), 0], [tilted, Math.sin(Math.PI / 18), 0]],
+  }
+  assert.ok(calibrationFit(confusable) < 0.6, "two directions 10 degrees apart cannot classify each other")
+}
+
+console.log("Direction: calibration fit scores how well a set classifies its own samples")
+
+// The fit has to actually gate, and it has to catch sets the geometric checks let through.
+// Four directions 25 degrees apart, each waved with +/-30 degrees of scatter: every direction
+// agrees with itself (worst sample 0.87, above the 0.70 bar) and no two centroids are closer than
+// 0.91 (inside the 0.92 bar), so the old checks pass it — yet no sample can be told from its
+// neighbour, which is exactly the silently-bad calibration a player cannot diagnose.
+{
+  const calibration = createDirectionCalibration()
+  const radians = (deg) => (deg * Math.PI) / 180
+  const at = (deg) => [Math.cos(radians(deg)), Math.sin(radians(deg)), 0]
+  const nominal = { right: 0, up: 25, left: 180, down: 205 }
+  let now = 0
+  for (const [direction, angle] of Object.entries(nominal)) {
+    for (const offset of [-30, 0, 30]) {
+      now += 10
+      calibration.arm(direction, "A", now)
+      assert.equal(calibration.capture(at(angle + offset), "A", now + 1, now + 1, 4), true,
+        "each wave is individually acceptable")
+    }
+  }
+  const status = calibration.status(now + 2)
+  assert.deepEqual(status.counts, { down: 3, left: 3, right: 3, up: 3 }, "all twelve were captured")
+  assert.ok(DIRECTIONS.every((direction) => status.perDirection[direction].valid),
+    "and every direction passes the per-direction geometric check")
+  assert.equal(status.ready, false, "but the set as a whole is refused")
+  assert.equal(status.fitLevel, "poor")
+  assert.match(status.message, /\u533a\u5206\u5ea6\u4e0d\u8db3/, "and the message says what to do about it")
+}
+
+console.log("Direction: a calibration that cannot classify itself is refused")

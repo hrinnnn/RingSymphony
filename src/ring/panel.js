@@ -210,7 +210,13 @@ export function createRingPanel({ button, panel, input }) {
     palmCalibrationEl.textContent = palmCalibrationError || palm.message
     stopRerecordEl.hidden = !automatic.target
     rerecordStatus.textContent = calibrationError || (automatic.target ? automatic.message : automatic.message || calibration.message)
-    calibrationEl.textContent = calibrationError || (automatic.active ? automatic.message : calibration.ready ? "校准完成" : automatic.message || calibration.message)
+    // 校准完成 on its own told the player nothing about whether the calibration would actually
+    // work — a set that goes on to refuse most strokes reported exactly the same words as a good
+    // one. The fit says how well these waves classify each other, which is what predicts play.
+    const fitNote = calibration.fitLevel === "marginal"
+      ? `校准完成（区分度一般 ${Math.round(calibration.fit * 100)}%，如常被判「方向不确定」可重新采集）`
+      : "校准完成"
+    calibrationEl.textContent = calibrationError || (automatic.active ? automatic.message : calibration.ready ? fitNote : automatic.message || calibration.message)
     compEl.textContent = `${Math.round(input.compensation * 1000)} ms`
     const stats = snap.directionStats
     statsEl.textContent = `右手候选：有方向 ${stats.accepted} · 数据不足或断帧 ${stats.data} · 信号弱 ${stats.weak} · 校准差异大（无明显间断 ${stats.mismatch}，有间断 ${stats.mismatchGap}） · 方向相近 ${stats.ambiguous} · 未校准 ${stats.uncalibrated} · 回程抑制 ${stats.suppressed}`
