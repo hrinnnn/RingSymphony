@@ -114,12 +114,21 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
       if (status.state === "on" || status.state === "starting") disable()
       else await enable()
     } else if (act === "camera-export") {
+      const entries = log.entries().length
+      if (!entries) { logNote.textContent = "还没有可导出的记录：需要戒指和摄像头判断不一致时才会记录"; return }
       const url = URL.createObjectURL(new Blob([log.toJSON()], { type: "application/json" }))
       const link = document.createElement("a")
       link.href = url
-      link.download = `camera-log-${new Date().toISOString().slice(0, 10)}.json`
+      link.download = `camera-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`
+      // The link has to be in the document for the download attribute to be honoured, and the
+      // object URL has to outlive the click. Revoking it immediately — which is what this did at
+      // first — leaves the browser saving a UUID-named empty file, since by the time it reads the
+      // blob the blob is gone.
+      document.body.append(link)
       link.click()
-      URL.revokeObjectURL(url)
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+      logNote.textContent = `已导出 ${entries} 条记录`
     } else if (act === "camera-clear") {
       log.clear()
       render()
