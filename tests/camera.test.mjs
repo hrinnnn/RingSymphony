@@ -3,7 +3,7 @@
 // mid-stroke, frame rate collapsing, a stalled video — are exercised deterministically.
 import assert from 'node:assert/strict'
 import { cameraDirection, CAMERA_WINDOW, MIN_FRAMES } from '../src/camera/direction.js'
-import { fuseDirection } from '../src/camera/fuse.js'
+import { createFusion, fuseDirection } from '../src/camera/fuse.js'
 import { readFile } from 'node:fs/promises'
 import { createRingInput } from '../src/ring/input.js'
 import { createCameraLog, LOG_CAP } from '../src/camera/log.js'
@@ -189,6 +189,67 @@ assert.deepEqual(fuseDirection(null, null), { dir: null, source: 'ring', disagre
 // Agreement is not disagreement, and must not be logged as one.
 assert.deepEqual(fuseDirection('up', up), { dir: 'up', source: 'ring', disagreed: false })
 assert.deepEqual(fuseDirection('left', left), { dir: 'left', source: 'ring', disagreed: false })
+
+// ---------- adaptive authority ----------
+//
+// Neither fixed rule wins in both regimes. Across eight labelled sessions the ring's accuracy when
+// it answered never fell below 77%, but how OFTEN it answered swung between 34% and 100% depending
+// on which calibration the player happened to record. With a good one, ring-decides scored 28/31;
+// with a bad one it scored 10/35 while camera-overrules scored 16/35. So authority follows the
+// evidence rather than being fixed.
+{
+  const fusion = createFusion({ window: 4, enter: 0.6, leave: 0.1 })
+  // A healthy ring keeps the call, even against a confident camera.
+  assert.equal(fusion.fuse('up', down).source, 'ring')
+  assert.equal(fusion.distrusted, false)
+
+  // Four refusals running: the ring is no longer describing this player's conducting.
+  for (let i = 0; i < 4; i += 1) fusion.fuse(null, noVerdict)
+  assert.equal(fusion.distrusted, true, 'a sustained refusal rate flips authority to the camera')
+
+  // Now the camera leads, and on a weaker displacement than it would need otherwise.
+  assert.deepEqual(fusion.fuse('up', down), { dir: 'down', source: 'camera', disagreed: true })
+  assert.equal(fusion.fuse(null, { dir: 'left', axis: 'horizontal', displacement: 0.05 }).source, 'camera')
+}
+
+// Hysteresis: the mode must not oscillate around the threshold, or two identical strokes seconds
+// apart would be judged differently.
+{
+  const fusion = createFusion({ window: 4, enter: 0.6, leave: 0.1 })
+  for (let i = 0; i < 4; i += 1) fusion.fuse(null, noVerdict)
+  assert.equal(fusion.distrusted, true)
+  // A rate between leave and enter leaves the mode alone rather than flipping it back.
+  fusion.fuse('up', noVerdict)
+  fusion.fuse('up', noVerdict)
+  assert.equal(fusion.distrusted, true, 'recovery needs a clearly healthy ring, not merely a less bad one')
+  fusion.fuse('up', noVerdict)
+  fusion.fuse('up', noVerdict)
+  assert.equal(fusion.distrusted, false, 'four clean strokes in a row restore the ring')
+}
+
+// The decision is taken before the stroke updates the rate, so replaying the same strokes always
+// yields the same answers.
+{
+  const run = () => {
+    const f = createFusion({ window: 4, enter: 0.6, leave: 0.1 })
+    return ['up', null, null, null, null, 'up'].map((r) => f.fuse(r, down).source).join(',')
+  }
+  assert.equal(run(), run())
+}
+
+// A camera that never answers leaves the pipeline byte-identical regardless of mode: the
+// no-camera path must not depend on how the ring has been behaving.
+{
+  const fusion = createFusion({ window: 4, enter: 0.6, leave: 0.1 })
+  for (let i = 0; i < 6; i += 1) fusion.fuse(null, null)
+  assert.equal(fusion.distrusted, true)
+  assert.deepEqual(fusion.fuse('up', null), { dir: 'up', source: 'ring', disagreed: false })
+  assert.deepEqual(fusion.fuse(null, null), { dir: null, source: 'ring', disagreed: false })
+}
+
+// The stateless form still exists for the left hand's palm gestures, which are far rarer than
+// beats and never accumulate a meaningful rate.
+assert.deepEqual(fuseDirection('up', down), { dir: 'up', source: 'ring', disagreed: true })
 
 console.log('fusion tests passed')
 

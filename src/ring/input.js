@@ -2,7 +2,7 @@
 // Gesture events carry `age`: seconds between the gesture happening and "now", so the game can place it on its own clock.
 import { createBeatDetector, createHandDetector } from "./detectors.js"
 import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION, MAX_SHORT_GAP, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "./direction.js"
-import { fuseDirection } from "../camera/fuse.js"
+import { createFusion, fuseDirection } from "../camera/fuse.js"
 
 const ROLE_KEY = "ringsymphony.roles.v2"
 const COMP_KEY = "ringsymphony.compensation"
@@ -56,6 +56,8 @@ export function createRingInput({
   const link = { open: false, studio: false }
   const errors = []
   const direction = createDirectionCalibration()
+  // Right-hand beats only: the rate it tracks is meaningless for the left hand's rarer palm events.
+  const fusion = createFusion()
   let palmCalibration = { samples: { up: [], down: [] }, ready: false, upObserved: null, message: "请先校准左手抬掌/压掌" }
   let palmAutomatic = null
   let automatic = null
@@ -198,7 +200,7 @@ export function createRingInput({
     if (automatic && (ring.hand === "right" || hand === "right")) stopAutomatic("右手指环改变，连续校准已停止")
     const palmHandChanged = ring.hand === "left" || hand === "left"
     if (palmHandChanged) clearPalmCalibration(palmAutomatic ? "左手指环改变，校准已停止" : undefined)
-    if (ring.hand === "right" || hand === "right") direction.reset()
+    if (ring.hand === "right" || hand === "right") { direction.reset(); fusion.reset() }
     if (ring.hand) lastByHand[ring.hand] = null
     if (hand) lastByHand[hand] = null
     ring.hand = hand
@@ -353,7 +355,7 @@ export function createRingInput({
         const feature = directionFeature(ring.history, candidate.t)
         const captured = direction.capture(feature, ring.address, arrival, arrival, candidate.peakSpeed)
         const calibration = direction.status(arrival)
-        if (captured) saveCalibration("right")
+        if (captured) { saveCalibration("right"); fusion.reset() }
         if (captured && calibration.ready) {
           ring.detector = createHandDetector("right", { beatFloor: calibration.beatFloor })
         }
@@ -408,7 +410,7 @@ export function createRingInput({
         // up-stroke are the same rotation. Fusing afterwards would leave the filter reading the
         // ring's blind guess and suppressing beats on a direction already overruled.
         const verdict = askCamera("right", event.t + ring.offset)
-        const fused = fuseDirection(classified.direction, verdict)
+        const fused = fusion.fuse(classified.direction, verdict)
         event.dir = fused.dir
         event.directionSource = fused.source
         // Both sensors' raw answers ride along with the event, so the game can record what each
@@ -623,6 +625,9 @@ export function createRingInput({
     // player's own.
     resetGestureState() {
       for (const ring of rings.values()) ring.returnFilter.reset()
+      // Not the fusion state. Whether the ring's calibration matches how this player conducts is a
+      // property of the calibration, not of the level, so it carries across — clearing it would
+      // make every level start by re-learning the same thing over its first ten strokes.
     },
     get compensation() { return compensation },
     set compensation(value) {
@@ -639,7 +644,7 @@ export function createRingInput({
         errors: [...errors],
         direction: direction.status(t),
         directionStats: { ...directionStats },
-        cameraStats: { ...cameraStats },
+        cameraStats: { ...cameraStats, ringDistrusted: fusion.distrusted },
         automaticCalibration: autoStatus(t),
         palmCalibration: palmStatus(),
         last: last && t - last.at < 2 ? { ...last } : null,
