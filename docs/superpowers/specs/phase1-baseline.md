@@ -148,3 +148,43 @@ The adaptive floor constants (`restTau: 4`, `floorRest: 2.2`, clamp
 recording exists. The "does not break what works" side is bounded by real data;
 the "catches soft beats" side is not. If gentle play still under-registers,
 `floorRest` is the first constant to try lowering.
+
+## Phase 2: what the camera layer does not prove (2026-11-14)
+
+The camera landed on `feat/camera-tracking`. What follows is what it is and
+is not evidence for, in the same spirit as the Phase 1 section above.
+
+**The regression guard holds.** `npm run eval` is byte-identical with the
+camera code in place, and the controller tests show that with `cameraVerdict`
+returning null — or throwing — the emitted events are deep-equal to the
+pre-camera pipeline. A player without a webcam provably gets Phase 1.
+
+**Nothing here measures accuracy.** The 24 recordings carry no video, so they
+cannot validate fusion at all; they can only prove it was not disturbed. The
+hardware baseline table above is **still unfilled**, and the camera does not
+change that — if anything it adds rows, since a gentle conductor with and
+without the camera are now different configurations.
+
+**What would count as evidence.** Only playing. Specifically:
+
+- Does 有方向 rise and 未校准 / 校准差异大 fall with the camera on? The new
+  `cameraStats` counters (`fills`, `overrides`, `disagreements`) separate the
+  camera filling a gap from the camera contradicting the ring.
+- Do vertical cues stop being Missed on strokes the player believes they
+  conducted correctly? This is the subjective measure, and it remains the one
+  that matters most.
+
+**The exported log is the intended route to a labelled dataset.** Every
+disagreement is recorded with both verdicts and the landmark frames behind it,
+persisted across refreshes, exportable as JSON from the ring panel. This is
+the first mechanism in the repo capable of producing per-stroke labels — but
+it produces them only from disagreements, so it is a biased sample by
+construction and cannot be read as an accuracy rate.
+
+**If a labelled dataset is collected deliberately instead**, the flaw to avoid
+is the one that invalidated the earlier figures: every prompted wave contains
+a return stroke, and assuming stroke *i* is direction *i mod 4* is what
+produced numbers the baseline above calls meaningless. Prompt one direction,
+record, require a pause, and label the stroke *and* its return as separate
+events. The prompt is the ground truth and is free to record at capture time,
+impossible to recover afterwards.
