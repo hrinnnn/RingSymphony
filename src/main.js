@@ -231,6 +231,7 @@ function onRing(event) {
     gestureLog.record({
       at, fused: event.dir, ring: event.ringDir, ringReason: event.ringReason, camera: event.cameraDir,
       cameraReason: event.cameraReason, displacement: event.cameraDisplacement,
+      angle: event.cameraAngle, margin: event.cameraMargin,
       source: event.directionSource, tier: event.tier,
     })
     playBeat(event.dir, at, true, event.tier)
@@ -330,6 +331,21 @@ function finish() {
 // The per-sensor report on the result screen. Scoring tells the player how they did; this tells
 // them whether the equipment agreed with them, which is a different question and the one that
 // matters while the detection is still being tuned.
+// The transitions detection does worst on. A conductor shapes each stroke from where the last
+// one left their hand, so failures often cluster on specific pairs rather than on a direction —
+// "up after left" cuts back toward centre and arrives diagonal, while "up after up" does not.
+function worstTransitions(summary) {
+  const rows = Object.entries(summary.transitions ?? {})
+    .map(([key, row]) => ({ key, ...row, wrong: row.n - row.ringRight }))
+    .filter((row) => row.n >= 2 && row.wrong)
+    .sort((a, b) => b.wrong / b.n - a.wrong / a.n)
+    .slice(0, 3)
+  if (!rows.length) return ""
+  const label = (key) => key.split("->").map((d) => DIR_LABEL[d] ?? d).join("→")
+  const detail = (row) => `${label(row.key)} ${row.ringRight}/${row.n}${row.meanAngle != null ? ` <small>(${row.meanAngle}°)</small>` : ""}`
+  return `<p class="report-confusion">最难的转换：${rows.map(detail).join(" · ")}</p>`
+}
+
 function showGestureReport() {
   const summary = gestureLog.summary()
   if (!reportEl) return
@@ -352,6 +368,7 @@ function showGestureReport() {
     <div class="report-row">${line("戒指方向", summary.ring)}${line("摄像头", summary.camera)}${line("最终采用", summary.fused)}</div>
     <div class="report-row"><span><b>时间</b> ${timingText}</span><span><b>击拍</b> ${summary.matched}/${summary.cues}</span></div>
     ${worst.length ? `<p class="report-confusion">常见误判：${worst.map((w) => `${DIR_LABEL[w.want]}→${DIR_LABEL[w.got]} ${w.n} 次`).join(" · ")}</p>` : ""}
+    ${worstTransitions(summary)}
     ${Object.keys(summary.ringSilence).length ? `<p class="report-confusion">戒指未作答：${Object.entries(summary.ringSilence).map(([k, n]) => `${k} ${n}`).join(" · ")}</p>` : ""}
     ${Object.keys(summary.cameraSilence).length ? `<p class="report-confusion">摄像头未作答：${Object.entries(summary.cameraSilence).map(([k, n]) => `${k} ${n}`).join(" · ")}</p>` : ""}
     <button type="button" id="export-gestures" class="candy plain">导出本关记录</button>`

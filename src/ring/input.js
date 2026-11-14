@@ -419,6 +419,9 @@ export function createRingInput({
         event.cameraDir = verdict?.dir ?? null
         event.cameraReason = verdict?.dir ? null : verdict?.reason ?? "摄像头未开启"
         event.cameraDisplacement = verdict?.displacement ?? null
+        // The stroke's raw geometry, so a near-diagonal can be told from a clean single-axis move.
+        event.cameraAngle = verdict?.angle ?? null
+        event.cameraMargin = verdict?.margin ?? null
         event.peakSpeed = event.peakSpeed ?? null
         if (fused.source === "camera") cameraStats[classified.direction ? "overrides" : "fills"] += 1
         if (fused.disagreed) {

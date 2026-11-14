@@ -103,8 +103,23 @@ export function cameraDirection(frames, beatTime) {
   const displacement = Math.max(Math.abs(dx), Math.abs(dy))
   if (displacement < MIN_DISPLACEMENT) return decline("位移过小")
 
-  // The dominant component decides. A conducting stroke always carries some of both.
-  return Math.abs(dy) >= Math.abs(dx)
-    ? { dir: dy < 0 ? "up" : "down", axis: "vertical", displacement: Math.abs(dy) }
-    : { dir: dx > 0 ? "right" : "left", axis: "horizontal", displacement: Math.abs(dx) }
+  // The dominant component decides, which is a hard boundary at 45 degrees. A stroke the player
+  // means as "up" but shapes as up-and-right sits near that boundary, and a few degrees either
+  // side flips the answer between `up` and `right` with no change in intent.
+  //
+  // So the raw geometry travels with the verdict rather than being discarded: `angle` is the
+  // stroke's direction in degrees (0 = player's right, 90 = up, measured in the player's frame,
+  // not the image's), and `margin` is how far the dominant axis led the other, as a ratio of the
+  // displacement. A margin near 0 means a diagonal that could have gone either way; near 1 means
+  // a clean single-axis stroke. Neither changes the verdict — they make its confidence legible.
+  const vertical = Math.abs(dy) >= Math.abs(dx)
+  const magnitude = Math.hypot(dx, dy)
+  return {
+    dir: vertical ? (dy < 0 ? "up" : "down") : (dx > 0 ? "right" : "left"),
+    axis: vertical ? "vertical" : "horizontal",
+    displacement: vertical ? Math.abs(dy) : Math.abs(dx),
+    // dy is screen-down-positive; negate so that 90 degrees means the player moved up.
+    angle: Math.round((Math.atan2(-dy, dx) * 180) / Math.PI),
+    margin: magnitude > 0 ? Number(((Math.abs(Math.abs(dy) - Math.abs(dx))) / magnitude).toFixed(3)) : 0,
+  }
 }

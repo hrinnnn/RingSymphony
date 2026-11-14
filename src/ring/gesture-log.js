@@ -22,12 +22,14 @@ const emptyMatrix = () => Object.fromEntries(DIRECTIONS.map((want) => [want, Obj
 export function createGestureLog() {
   let strokes = []
   let level = null
+  let previousWant = null
 
   return {
     // Called at level start. The chart's cues are the ground truth for everything that follows.
     begin(study, cues) {
       level = { title: study?.title ?? "?", bpm: study?.bpm ?? null, meter: study?.meter ?? null, startedAt: new Date().toISOString() }
       strokes = []
+      previousWant = null
       this.cues = cues.filter((cue) => cue.hand === "right" && cue.kind === "beat").map((cue) => ({ time: cue.time, direction: cue.direction }))
     },
 
@@ -35,7 +37,7 @@ export function createGestureLog() {
 
     // Called for every right-hand beat that reached the game, whether or not it scored. `at` is on
     // the song clock, the same clock the cues use.
-    record({ at, fused, ring, ringReason, camera, cameraReason, displacement, source, tier }) {
+    record({ at, fused, ring, ringReason, camera, cameraReason, displacement, angle, margin, source, tier }) {
       if (!level) return
       // The nearest unused cue, by time alone. Deliberately not by direction: matching on
       // direction would quietly discard every misread, which is the thing being measured.
@@ -44,6 +46,8 @@ export function createGestureLog() {
         const gap = Math.abs(at - cue.time)
         if (gap <= MATCH_WINDOW && (!best || gap < best.gap)) best = { cue, gap }
       }
+      const from = previousWant
+      if (best) previousWant = best.cue.direction
       strokes.push({
         at: Number(at.toFixed(3)),
         want: best?.cue.direction ?? null,
@@ -54,6 +58,12 @@ export function createGestureLog() {
         camera: camera ?? null,
         cameraReason: cameraReason ?? null,
         displacement: displacement == null ? null : Number(displacement.toFixed(3)),
+        angle: angle ?? null,
+        margin: margin ?? null,
+        // What the chart asked for on the PREVIOUS beat. A conductor shapes each stroke from where
+        // the last one left their hand, so "up after left" and "up after up" are different
+        // motions, and only the pairing makes that visible.
+        from,
         source: source ?? null,
         tier: tier ?? null,
       })
@@ -84,9 +94,52 @@ export function createGestureLog() {
       // warmup from a direction window that could not be filled.
       const ringSilence = {}
       for (const stroke of matched) if (!stroke.ring && stroke.ringReason) ringSilence[stroke.ringReason] = (ringSilence[stroke.ringReason] ?? 0) + 1
+      // Accuracy per transition: what the previous cue asked for, then what this one did. A
+      // conductor shapes each stroke from where the last one left their hand, so an `up` after a
+      // `left` is a different motion from an `up` after an `up` - the first tends to cut back
+      // toward centre and arrive diagonal. If detection is failing on specific pairs rather than
+      // uniformly, that is the shape of the problem and no per-direction total will show it.
+      const transitions = {}
+      for (const stroke of matched) {
+        if (!stroke.from) continue
+        const key = `${stroke.from}->${stroke.want}`
+        const row = transitions[key] ??= { n: 0, ringRight: 0, ringSilent: 0, cameraRight: 0, cameraSilent: 0, angles: [], margins: [] }
+        row.n += 1
+        if (!stroke.ring) row.ringSilent += 1
+        else if (stroke.ring === stroke.want) row.ringRight += 1
+        if (!stroke.camera) row.cameraSilent += 1
+        else if (stroke.camera === stroke.want) row.cameraRight += 1
+        if (stroke.angle != null) row.angles.push(stroke.angle)
+        if (stroke.margin != null) row.margins.push(stroke.margin)
+      }
+      for (const row of Object.values(transitions)) {
+        // The mean of a set of angles is meaningless across the +-180 wrap, so average the unit
+        // vectors instead and read the direction back off the result.
+        if (row.angles.length) {
+          const x = row.angles.reduce((sum, a) => sum + Math.cos((a * Math.PI) / 180), 0)
+          const y = row.angles.reduce((sum, a) => sum + Math.sin((a * Math.PI) / 180), 0)
+          row.meanAngle = Math.round((Math.atan2(y, x) * 180) / Math.PI)
+          // How tightly the strokes agree, 0 to 1. A low value means the player shaped that
+          // transition differently each time, which no threshold can rescue.
+          row.consistency = Number((Math.hypot(x, y) / row.angles.length).toFixed(2))
+        }
+        if (row.margins.length) row.meanMargin = Number((row.margins.reduce((a, b) => a + b, 0) / row.margins.length).toFixed(2))
+        delete row.angles
+        delete row.margins
+      }
+
+      // Strokes the camera called within 15 degrees of the 45-degree boundary between two
+      // directions: a few degrees either way flips the verdict with no change in intent.
+      const nearBoundary = matched.filter((s) => s.margin != null && s.margin < 0.26)
       return {
         level,
         cues: this.cues.length,
+        transitions,
+        nearBoundary: {
+          count: nearBoundary.length,
+          cameraRight: nearBoundary.filter((s) => s.camera === s.want).length,
+          cameraAnswered: nearBoundary.filter((s) => s.camera).length,
+        },
         strokes: strokes.length,
         matched: matched.length,
         unmatched: strokes.length - matched.length,

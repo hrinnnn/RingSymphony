@@ -127,3 +127,60 @@ console.log('gesture log tests passed')
 }
 
 console.log('ring silence tests passed')
+
+// ---------- transition analysis ----------
+//
+// The player's hypothesis: a conductor shapes each stroke from where the last one left their hand,
+// so "up after left" tends to cut back toward centre and arrive diagonal, while "up after up" is a
+// clean vertical. If detection fails on specific pairs rather than uniformly, that is the shape of
+// the problem, and no per-direction total can show it.
+{
+  const log = createGestureLog()
+  log.begin(study, cues)
+  // left -> up arrives diagonal (angle 55, low margin) and the camera calls it right.
+  log.record({ at: 3.00, fused: 'down', ring: 'down', camera: 'down', angle: -88, margin: 0.9 })
+  log.record({ at: 3.75, fused: 'left', ring: 'left', camera: 'left', angle: 178, margin: 0.88 })
+  log.record({ at: 4.50, fused: 'right', ring: 'right', camera: 'right', angle: 3, margin: 0.9 })
+  log.record({ at: 5.25, fused: 'up', ring: 'up', camera: 'right', angle: 44, margin: 0.02 })
+  const s = log.summary()
+  assert.equal(s.transitions['down->left'].n, 1)
+  assert.equal(s.transitions['right->up'].n, 1)
+  assert.equal(s.transitions['right->up'].cameraRight, 0, 'the diagonal up was called right')
+  assert.ok(Math.abs(s.transitions['right->up'].meanAngle - 44) <= 1, 'the raw angle survives, not just the quantised direction')
+  assert.ok(s.transitions['right->up'].meanMargin < 0.1, 'a near-diagonal has almost no margin between the axes')
+  // The first stroke has no predecessor and must not invent one.
+  assert.equal(s.transitions['null->down'], undefined)
+}
+
+// Near-boundary strokes are counted apart, because a 45-degree stroke is not a detection failure -
+// it is a stroke that genuinely points between two directions.
+{
+  const log = createGestureLog()
+  log.begin(study, cues)
+  log.record({ at: 3.00, fused: 'down', ring: 'down', camera: 'down', angle: -90, margin: 0.95 })
+  log.record({ at: 3.75, fused: 'left', ring: 'left', camera: 'up', angle: 130, margin: 0.05 })
+  log.record({ at: 4.50, fused: 'right', ring: 'right', camera: 'right', angle: 0, margin: 0.99 })
+  const s = log.summary()
+  assert.equal(s.nearBoundary.count, 1, 'only the diagonal counts as near the boundary')
+  assert.equal(s.nearBoundary.cameraAnswered, 1)
+  assert.equal(s.nearBoundary.cameraRight, 0)
+}
+
+// Angles average correctly across the +-180 wrap, where an arithmetic mean would give 0 for two
+// strokes that both went left.
+{
+  const log = createGestureLog()
+  log.begin(study, cues)
+  log.record({ at: 3.00, fused: 'down', ring: 'down', camera: 'down', angle: -90, margin: 0.9 })
+  log.record({ at: 3.75, fused: 'left', ring: 'left', camera: 'left', angle: 179, margin: 0.9 })
+  log.record({ at: 4.50, fused: 'right', ring: 'right', camera: 'right', angle: 0, margin: 0.9 })
+  log.record({ at: 5.25, fused: 'up', ring: 'up', camera: 'up', angle: 90, margin: 0.9 })
+  log.record({ at: 6.00, fused: 'down', ring: 'down', camera: 'down', angle: -90, margin: 0.9 })
+  log.record({ at: 6.75, fused: 'left', ring: 'left', camera: 'left', angle: -179, margin: 0.9 })
+  const s = log.summary()
+  assert.ok(Math.abs(Math.abs(s.transitions['down->left'].meanAngle) - 180) <= 1,
+    'two strokes at +179 and -179 average to 180, not to 0')
+  assert.ok(s.transitions['down->left'].consistency > 0.99, 'and they are consistent with each other')
+}
+
+console.log('transition analysis tests passed')
