@@ -7,6 +7,7 @@ import { fuseDirection } from '../src/camera/fuse.js'
 import { readFile } from 'node:fs/promises'
 import { createRingInput } from '../src/ring/input.js'
 import { createCameraLog, LOG_CAP } from '../src/camera/log.js'
+import { handedToRole, rolesContradicted } from '../src/camera/tracker.js'
 
 // Screen coordinates, MediaPipe's convention: x and y normalised 0-1, y growing *downward*.
 const frames = (points, { t0 = 1.0, step = 0.033, inFrame = true } = {}) =>
@@ -251,3 +252,25 @@ assert.doesNotThrow(() => createCameraLog({ storage: null }).record(entry(1)))
 
 assert.equal(LOG_CAP, 500)
 console.log('camera log tests passed')
+
+// ---------- tracker helpers ----------
+//
+// Only the pure parts are testable here: the tracker imports MediaPipe lazily, inside enable(),
+// precisely so that importing this module under Node does not drag in the wasm runtime.
+
+assert.equal(handedToRole('Right'), 'right')
+assert.equal(handedToRole('Left'), 'left')
+assert.equal(handedToRole('nonsense'), null)
+assert.equal(handedToRole(undefined), null)
+
+// Facing an unmirrored camera, the subject's right hand appears on the *left* of the image, at low
+// x. So right-at-high-x means either the pixels are mirrored (handedness inverts, and every
+// verdict would be attributed to the wrong hand) or the rings are worn opposite to their roles.
+// Reported, never silently corrected - auto-swapping would hide a real setup problem and make the
+// symptom look like a fusion bug.
+assert.equal(rolesContradicted({ right: { x: 0.8 }, left: { x: 0.2 } }), true)
+assert.equal(rolesContradicted({ right: { x: 0.2 }, left: { x: 0.8 } }), false)
+assert.equal(rolesContradicted({ right: { x: 0.8 }, left: null }), false, 'one hand cannot contradict an ordering')
+assert.equal(rolesContradicted({ right: null, left: null }), false)
+
+console.log('tracker helper tests passed')
