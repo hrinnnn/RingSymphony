@@ -213,6 +213,8 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: 
    hands while everything still appeared to work. */
 .camera-frame { position: relative; aspect-ratio: 4 / 3; margin: 8px 0 6px; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: #05070f; }
 .camera-frame video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+/* The overlay is drawn already mirrored, so it must NOT be flipped again by CSS. */
+.camera-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
 /* The target box spans the whole stroke range rather than where the hand rests: a full
    down-stroke is what leaves a laptop lid webcam's view, and the player can only see that here. */
 .camera-frame::after { content: ""; position: absolute; inset: 8% 12%; border: 1px dashed #35e0ff66; border-radius: 4px; pointer-events: none; }

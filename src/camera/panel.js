@@ -39,7 +39,7 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
       <button type="button" data-act="camera-toggle">开启摄像头</button>
       <p class="ring-camera-status" aria-live="polite"></p>
       <div class="camera-preview" hidden>
-        <div class="camera-frame"></div>
+        <div class="camera-frame"><canvas class="camera-overlay"></canvas></div>
         <p class="camera-hint">把双手放进框内，并试着完整地挥一次下拍：如果手挥到框外，把屏幕往后仰一点。</p>
       </div>
       <p class="camera-mismatch" hidden>左右手似乎反了：画面里的左右与戒指的左右不一致，请检查戒指戴在哪只手上，或点「交换左右」。</p>
@@ -61,6 +61,7 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
   const frame = host.querySelector(".camera-frame")
   const mismatchEl = host.querySelector(".camera-mismatch")
   const reasonsEl = host.querySelector(".camera-reasons")
+  const overlay = host.querySelector(".camera-overlay")
   const logNote = host.querySelector(".camera-log-note")
 
   function render() {
@@ -137,6 +138,60 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
       render()
     }
   })
+
+  // Boxes over the preview, so the player can see which hand the tracker thinks is which.
+  //
+  // This is not decoration. The tracker maps MediaPipe's anatomical label onto the game's ring
+  // roles, and when that mapping is wrong one hand's strokes land in the other's buffer - which
+  // showed up in the logs as a camera answering "down" nine times in a row on a chart cycling
+  // through four directions. A label the player can read catches that in a second.
+  const ROLE_TEXT = { right: "右手 RIGHT", left: "左手 LEFT" }
+  const ROLE_COLOUR = { right: "#35e0ff", left: "#ffd98a" }
+
+  function drawOverlay() {
+    if (!overlay || !tracker.video) return
+    const frame = overlay.parentElement
+    const width = frame.clientWidth
+    const height = frame.clientHeight
+    if (!width || !height) return
+    if (overlay.width !== width || overlay.height !== height) {
+      overlay.width = width
+      overlay.height = height
+    }
+    const context = overlay.getContext("2d")
+    context.clearRect(0, 0, width, height)
+    for (const box of tracker.status().boxes ?? []) {
+      // The video is mirrored by CSS for display while inference runs on unmirrored pixels, so the
+      // box has to be mirrored here to land on the hand the player sees. Mirroring the pixels
+      // instead would invert MediaPipe's handedness and cause the very bug this is meant to show.
+      const left = (1 - box.x1) * width
+      const top = box.y0 * height
+      const w = (box.x1 - box.x0) * width
+      const h = (box.y1 - box.y0) * height
+      const colour = ROLE_COLOUR[box.role] ?? "#ffffff"
+      context.strokeStyle = colour
+      context.lineWidth = 2
+      context.setLineDash(box.inFrame ? [] : [4, 3])
+      context.strokeRect(left, top, w, h)
+      const label = `${ROLE_TEXT[box.role] ?? box.role}${box.confidence ? ` ${Math.round(box.confidence * 100)}%` : ""}`
+      context.font = "600 11px system-ui, sans-serif"
+      const textWidth = context.measureText(label).width
+      const labelTop = Math.max(0, top - 16)
+      context.fillStyle = colour
+      context.fillRect(left, labelTop, textWidth + 8, 15)
+      context.fillStyle = "#05070f"
+      context.fillText(label, left + 4, labelTop + 11)
+    }
+  }
+
+  // Driven on its own frame loop rather than from onStatus: boxes move every frame, while status
+  // changes only when a hand appears or leaves.
+  let overlayFrame = 0
+  function overlayLoop() {
+    if (tracker.status().state === "on" && !host.closest("[hidden]")) drawOverlay()
+    overlayFrame = requestAnimationFrame(overlayLoop)
+  }
+  overlayLoop()
 
   tracker.onStatus(render)
   // Verdicts happen on beats, which produce no status change, so the counts would otherwise sit

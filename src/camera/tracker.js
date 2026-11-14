@@ -49,7 +49,7 @@ export function createCameraTracker({
 } = {}) {
   const buffers = { left: [], right: [] }
   const listeners = new Set()
-  const state = { state: "off", fps: 0, hands: { left: false, right: false }, mismatch: false, error: null }
+  const state = { state: "off", fps: 0, hands: { left: false, right: false }, mismatch: false, error: null, boxes: [] }
 
   let video = null
   let stream = null
@@ -80,6 +80,7 @@ export function createCameraTracker({
     buffers.right = []
     state.hands.left = false
     state.hands.right = false
+    state.boxes = []
     state.mismatch = false
     contradicted = 0
     frameTimes = []
@@ -89,8 +90,10 @@ export function createCameraTracker({
   function observe(result, t) {
     const seen = { left: null, right: null }
     const hands = result?.handedness ?? []
+    const boxes = []
     for (let i = 0; i < hands.length; i += 1) {
-      const role = handedToRole(hands[i][0]?.categoryName)
+      const label = hands[i][0]?.categoryName
+      const role = handedToRole(label)
       const points = result.landmarks?.[i]
       if (!role || !points) continue
       const wrist = points[WRIST]
@@ -101,9 +104,24 @@ export function createCameraTracker({
       // MediaPipe extrapolates landmarks beyond the image rather than clamping them, so a hand
       // half out of frame reports coordinates outside 0-1. That is the signal, not an error.
       const inFrame = x >= 0 && x <= 1 && y >= 0 && y <= 1
+      // The full landmark extent, for the overlay. Drawn from every point rather than the two the
+      // verdict uses, so the box traces the whole hand the player can see.
+      const xs = points.map((p) => p.x)
+      const ys = points.map((p) => p.y)
+      boxes.push({
+        role,
+        confidence: hands[i][0]?.score ?? null,
+        x0: Math.min(...xs), x1: Math.max(...xs),
+        y0: Math.min(...ys), y1: Math.max(...ys),
+        inFrame,
+      })
+      // Last writer wins when MediaPipe reports the same label twice, which it does when it
+      // flickers. The overlay shows both boxes, so the player can see it happening.
       seen[role] = { x, y }
       buffers[role].push({ t, x, y, inFrame, w: [wrist.x, wrist.y], m: [middle.x, middle.y] })
     }
+    // Only the newest frame is kept: the overlay draws live and never replays.
+    state.boxes = boxes
 
     for (const role of ["left", "right"]) {
       const buffer = buffers[role]
@@ -160,7 +178,7 @@ export function createCameraTracker({
 
   return {
     get video() { return video },
-    status: () => ({ ...state, hands: { ...state.hands } }),
+    status: () => ({ ...state, hands: { ...state.hands }, boxes: state.boxes.map((b) => ({ ...b })) }),
     onStatus(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

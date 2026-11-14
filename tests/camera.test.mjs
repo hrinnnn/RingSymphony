@@ -352,3 +352,46 @@ console.log('tracker helper tests passed')
 }
 
 console.log('tracker notification tests passed')
+
+// ---------- overlay boxes ----------
+//
+// The tracker reports a box per detected hand so the preview can label them. This is not
+// decoration: the tracker maps MediaPipe's anatomical label onto the game's ring roles, and when
+// that mapping is wrong one hand's strokes land in the other's buffer. In the measured sessions
+// that showed up as the camera answering 'down' nine times running on a chart cycling through
+// four directions, with the other hand's buffer empty in between.
+{
+  const tracker = createCameraTracker({ now: () => 0 })
+  const hand = (x0, x1, y0, y1) => Array.from({ length: 21 }, (_, i) => ({
+    x: i % 2 ? x0 : x1, y: i % 3 ? y0 : y1, z: 0,
+  }))
+  tracker.__observe({
+    handedness: [[{ categoryName: 'Right', score: 0.93 }], [{ categoryName: 'Left', score: 0.88 }]],
+    landmarks: [hand(0.10, 0.30, 0.40, 0.60), hand(0.60, 0.80, 0.35, 0.55)],
+  }, 0.1)
+  const boxes = tracker.status().boxes
+  assert.equal(boxes.length, 2, 'both hands get a box')
+  const right = boxes.find(b => b.role === 'right')
+  const left = boxes.find(b => b.role === 'left')
+  assert.ok(right && left)
+  assert.equal(right.confidence, 0.93, 'the label carries MediaPipe\'s own confidence, so a flickering one is visible')
+  // The box spans the whole hand, not the two landmarks the verdict uses.
+  assert.ok(Math.abs(right.x0 - 0.10) < 1e-9 && Math.abs(right.x1 - 0.30) < 1e-9)
+  // Facing an unmirrored camera the subject's right hand is at LOW image x. The preview mirrors
+  // for display, so the overlay must mirror too or the boxes land on the wrong hands - the same
+  // trap that inverts handedness if the pixels themselves are mirrored.
+  const mirrorLeftEdge = (b) => 1 - b.x1
+  assert.ok(mirrorLeftEdge(right) > mirrorLeftEdge(left),
+    'after mirroring, the right hand must appear on the right of the preview')
+}
+
+// Boxes clear when the camera stops, so a frozen overlay cannot outlive the stream.
+{
+  const tracker = createCameraTracker({ now: () => 0 })
+  tracker.__observe({ handedness: [[{ categoryName: 'Right', score: 0.9 }]], landmarks: [Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5, z: 0 }))] }, 0.1)
+  assert.equal(tracker.status().boxes.length, 1)
+  tracker.disable()
+  assert.deepEqual(tracker.status().boxes, [])
+}
+
+console.log('overlay box tests passed')
