@@ -67,7 +67,47 @@ const falling = [...rising].reverse()
 // from a single bad landmark, so the camera declines rather than guessing.
 {
   assert.equal(cameraDirection(frames([[0.5, 0.60], [0.5, 0.30]]), 1.07).dir, null, 'two frames cannot distinguish a stroke from an outlier')
-  assert.ok(MIN_FRAMES >= 4)
+  // Three frames do answer: at 30fps a 300ms window yields ~6 arrived frames, and in a dim room
+  // ~3. Requiring four declined every verdict in poor light - the conditions the camera is most
+  // needed in - and declining is silent, indistinguishable from having no camera.
+  assert.equal(MIN_FRAMES, 3)
+  assert.equal(cameraDirection(frames([[0.5, 0.60], [0.5, 0.45], [0.5, 0.30]]), 1.07).dir, 'up')
+}
+
+// A full vertical stroke reaches the top of a laptop webcam's view. The first version required
+// every frame to be clear of the edges, so one clipped frame at the end of a good stroke threw the
+// whole stroke away - which systematically killed the vertical verdicts the camera exists for, and
+// reached a player as "it struggles with ups and downs". The frames before the hand left still
+// prove which way it was going.
+{
+  const exits = frames([[0.5, 0.45], [0.5, 0.33], [0.5, 0.22], [0.5, 0.10], [0.5, 0.02]])
+  assert.equal(cameraDirection(exits, 1.14).dir, 'up', 'a stroke that leaves the frame still has a measurable beginning')
+}
+// The same for a down-stroke leaving the bottom.
+{
+  const exits = frames([[0.5, 0.55], [0.5, 0.67], [0.5, 0.78], [0.5, 0.90], [0.5, 0.99]])
+  assert.equal(cameraDirection(exits, 1.14).dir, 'down')
+}
+// But a hand that is *only* ever at the edge has nothing measurable, and says so distinctly.
+{
+  const pinned = frames([[0.5, 0.02], [0.5, 0.01], [0.5, 0.02], [0.5, 0.01], [0.5, 0.02]])
+  const verdict = cameraDirection(pinned, 1.14)
+  assert.equal(verdict.dir, null)
+  assert.equal(verdict.reason, '手在画面边缘', 'the reason has to name the fix: move back into frame')
+}
+// Displacement is never measured across a tracking dropout: the frames either side are two
+// separate observations, and joining them would describe a motion nobody made.
+{
+  // Low in frame, then tracking is lost, then high in frame and barely moving. Joined across the
+  // gap this reads as a big up-stroke; measured honestly, neither run carries enough motion.
+  const split = [
+    ...frames([[0.5, 0.80], [0.5, 0.79], [0.5, 0.78]], { t0: 1.00 }),
+    ...frames([[0.5, 0.50], [0.5, 0.40]], { t0: 1.10, inFrame: false }),
+    ...frames([[0.5, 0.21], [0.5, 0.20], [0.5, 0.20]], { t0: 1.20 }),
+  ]
+  const verdict = cameraDirection(split, 1.28)
+  assert.equal(verdict.dir, null, 'a gap must not be read as one long stroke')
+  assert.equal(verdict.reason, '位移过小')
 }
 
 // Tracking lost, and a hand pinned at the frame edge: positions are reported but not measured.

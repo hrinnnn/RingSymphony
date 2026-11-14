@@ -19,12 +19,21 @@
 // window would start reaching back into the previous stroke.
 export const CAMERA_WINDOW = 0.30
 
-// Below this, the fit is a line through too few points to be worth overruling a sensor with.
-export const MIN_FRAMES = 4
+// Three, with MIN_SPAN doing the real work of rejecting a fit through too little motion.
+//
+// It was four, which was wrong once latency is accounted for. At 30fps a 300ms window holds ~9
+// frames but only ~6 have cleared the ~75ms pipeline when the ring fires; in a dim room the rate
+// often halves to 15fps, leaving ~3. Four therefore declined *every* verdict in poor light — the
+// exact conditions the camera is most needed in, and a silent failure, since declining looks
+// identical to having no camera.
+export const MIN_FRAMES = 3
 
 // A hand this close to a border is being clipped, so its reported position is pinned by the frame
-// rather than measured. Vertical strokes are what the camera is for, and the bottom edge is where
-// a full down-stroke leaves a laptop lid webcam's view.
+// rather than measured. Frames like that are dropped from the measurement — not used to reject it.
+// Rejecting the whole window was the first version's behaviour and it systematically killed the
+// vertical verdicts the camera exists to provide: a full up-stroke on a laptop webcam reaches the
+// top of the image, so one clipped frame at the end of a perfectly good stroke threw the stroke
+// away. The frames before the hand left still prove which way it was going.
 export const EDGE_MARGIN = 0.04
 
 // Normalised units: ~3.5% of the frame. Below this the hand is holding still and any direction
@@ -32,10 +41,21 @@ export const EDGE_MARGIN = 0.04
 // confidence model to keep calibrated.
 export const MIN_DISPLACEMENT = 0.035
 
-// The axis the ring cannot resolve. Fusion treats it specially; see fuse.js.
+// The usable frames must cover at least this much time. This, rather than the frame count, is what
+// stops two adjacent samples being fitted into a confident direction: at 30fps three frames span
+// 66ms, which is a real motion, while three frames spanning 250ms with a gap in the middle are two
+// unrelated observations.
+export const MIN_SPAN = 0.06
+
+// The axis the ring cannot resolve. Kept for callers that reason about the vertical pair.
 export const VERTICAL = ["up", "down"]
 
 const decline = (reason) => ({ dir: null, reason })
+
+const usable = (frame) =>
+  frame.inFrame &&
+  frame.x >= EDGE_MARGIN && frame.x <= 1 - EDGE_MARGIN &&
+  frame.y >= EDGE_MARGIN && frame.y <= 1 - EDGE_MARGIN
 
 // `frames` are { t, x, y, inFrame } with x and y normalised 0-1 and y growing downward, matching
 // MediaPipe. `beatTime` is on the same clock as `t` — the uncompensated page clock, because this
@@ -46,20 +66,34 @@ export function cameraDirection(frames, beatTime) {
   // Strictly before the beat: the return stroke falls after it and must never be examined. That
   // asymmetry is what lets the camera sidestep the return-stroke problem entirely.
   const window = frames.filter((frame) => frame.t > beatTime - CAMERA_WINDOW && frame.t <= beatTime)
-  if (window.length < MIN_FRAMES) return decline("画面帧数不足")
+  if (!window.length) return decline("没有画面数据")
 
   // A stalled stream or a backgrounded tab leaves old frames in the buffer. They would pass the
   // count check while describing a motion from seconds ago, so the span itself has to be recent.
   if (beatTime - window[window.length - 1].t > CAMERA_WINDOW) return decline("画面数据过旧")
 
-  if (window.some((frame) => !frame.inFrame)) return decline("手不在画面内")
-  if (window.some((frame) => frame.x < EDGE_MARGIN || frame.x > 1 - EDGE_MARGIN ||
-                             frame.y < EDGE_MARGIN || frame.y > 1 - EDGE_MARGIN)) {
-    return decline("手在画面边缘")
+  // The longest unbroken run of measurable frames. A run rather than every usable frame, because
+  // frames either side of a tracking dropout are two separate observations, and a displacement
+  // measured across the gap would describe a motion nobody made.
+  let best = []
+  let run = []
+  for (const frame of window) {
+    if (usable(frame)) run.push(frame)
+    else {
+      if (run.length > best.length) best = run
+      run = []
+    }
+  }
+  if (run.length > best.length) best = run
+
+  if (best.length < MIN_FRAMES) {
+    return decline(window.some(usable) ? "画面帧数不足" : window.some((f) => f.inFrame) ? "手在画面边缘" : "手不在画面内")
   }
 
-  const first = window[0]
-  const last = window[window.length - 1]
+  const first = best[0]
+  const last = best[best.length - 1]
+  if (last.t - first.t < MIN_SPAN) return decline("画面帧数不足")
+
   // Image x grows rightward *in the image*, and the player faces the camera unmirrored, so their
   // left hand appears on the image's right. A stroke the player makes to their left therefore
   // travels toward increasing x. Flipping here — rather than mirroring the pixels — keeps

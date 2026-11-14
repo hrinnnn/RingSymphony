@@ -60,6 +60,7 @@ export function createCameraTracker({
   let lastSignature = ""
   let lastEmit = 0
   let failures = 0
+  const reasons = new Map()
 
   function emit() {
     for (const listener of listeners) listener({ ...state, hands: { ...state.hands } })
@@ -229,8 +230,17 @@ export function createCameraTracker({
     // Synchronous and cheap: nothing in the beat path may wait for a frame.
     verdict(hand, pageTime) {
       if (!running) return null
-      return cameraDirection(buffers[hand], pageTime)
+      const result = cameraDirection(buffers[hand], pageTime)
+      // Why the camera did or did not answer, for the panel. Without this, a declining camera is
+      // indistinguishable from no camera at all, and the player has nothing to act on.
+      const key = result.dir ? result.dir : result.reason
+      reasons.set(key, (reasons.get(key) ?? 0) + 1)
+      return result
     },
+
+    // Counts of what the camera concluded, newest-first, for 诊断信息.
+    reasons: () => [...reasons.entries()].sort((a, b) => b[1] - a[1]),
+    clearReasons: () => reasons.clear(),
 
     // Test seam: the frame loop needs a camera, but what it does with a result does not. This is
     // how the "a hand appeared" notification is exercised without hardware.

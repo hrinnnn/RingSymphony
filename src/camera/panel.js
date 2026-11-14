@@ -43,6 +43,11 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
         <p class="camera-hint">把双手放进框内，并试着完整地挥一次下拍：如果手挥到框外，把屏幕往后仰一点。</p>
       </div>
       <p class="camera-mismatch" hidden>左右手似乎反了：画面里的左右与戒指的左右不一致，请检查戒指戴在哪只手上，或点「交换左右」。</p>
+      <details class="camera-debug">
+        <summary>摄像头判断统计</summary>
+        <p class="camera-reasons">还没有击拍</p>
+        <button type="button" data-act="camera-clear-reasons">清零</button>
+      </details>
       <div class="camera-log-actions">
         <button type="button" data-act="camera-export">导出对比记录</button>
         <button type="button" data-act="camera-clear">清除记录</button>
@@ -55,6 +60,7 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
   const preview = host.querySelector(".camera-preview")
   const frame = host.querySelector(".camera-frame")
   const mismatchEl = host.querySelector(".camera-mismatch")
+  const reasonsEl = host.querySelector(".camera-reasons")
   const logNote = host.querySelector(".camera-log-note")
 
   function render() {
@@ -77,6 +83,11 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
       : status.state === "starting" ? "正在启动…" : "未开启。开启后上下挥拍的识别会更准。"
     preview.hidden = status.state !== "on"
     mismatchEl.hidden = !status.mismatch
+    // What the camera concluded on recent beats. A declining camera looks exactly like no camera
+    // from the outside, so without this the player has nothing to act on: 手在画面边缘 means move
+    // back, 画面帧数不足 means more light, and a direction name means it is working.
+    const reasons = tracker.reasons?.() ?? []
+    reasonsEl.textContent = reasons.length ? reasons.map(([k, n]) => `${k} ${n}`).join(" · ") : "还没有击拍"
     logNote.textContent = log.entries().length ? `已记录 ${log.entries().length} 次戒指与摄像头判断不一致` : ""
     // Mirroring is CSS only, and must stay that way: MediaPipe inverts its handedness output on a
     // horizontally mirrored image, so mirroring the pixels fed to inference would silently swap
@@ -112,10 +123,16 @@ export function createCameraPanel({ tracker, log, chip, host, offer, storage = g
     } else if (act === "camera-clear") {
       log.clear()
       render()
+    } else if (act === "camera-clear-reasons") {
+      tracker.clearReasons?.()
+      render()
     }
   })
 
   tracker.onStatus(render)
+  // Verdicts happen on beats, which produce no status change, so the counts would otherwise sit
+  // stale while the player watched them. Cheap: text in an open panel, twice a second.
+  setInterval(() => { if (!host.closest("[hidden]")) render() }, 500)
 
   return {
     render,
