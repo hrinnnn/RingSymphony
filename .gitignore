@@ -8,3 +8,6 @@ __pycache__/
 .env.*
 !.env.example
 .DS_Store
+
+# Exported camera disagreement logs hold webcam-derived hand positions; keep them local.
+camera-log-*.json
