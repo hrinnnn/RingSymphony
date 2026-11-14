@@ -6,6 +6,9 @@ import { lassoParts, pathLength } from "./lasso.js"
 import { createMixer, PART_INFO, PARTS } from "./mixer.js"
 import { createLane } from "./lane.js"
 import { startRing } from "./ring/index.js"
+import { createCameraTracker } from "./camera/tracker.js"
+import { createCameraLog } from "./camera/log.js"
+import { createCameraPanel } from "./camera/panel.js"
 import { LOOP_BARS } from "./score.js"
 import { createSettings } from "./settings.js"
 import { createTempo } from "./tempo.js"
@@ -39,6 +42,10 @@ const progressEl = document.querySelector("#progress-fill")
 const cueHintEl = document.querySelector("#cue-hint")
 const tallyEl = document.querySelector("#tally")
 const hud = createMixerHud(document.querySelector("#mixer"), pickCard)
+// The camera is optional and additive. With it off, verdict() returns null and every beat takes
+// exactly the path it took before the camera existed.
+const camera = createCameraTracker()
+const cameraLog = createCameraLog()
 
 let chart = null
 let cues = []
@@ -226,6 +233,11 @@ function onRing(event) {
 
 const ring = startRing({
   onGesture: onRing,
+  // The camera answers where the ring is blind: up and down sit about 166 degrees apart in the
+  // ring's own axes, so no threshold separates a down-stroke from the return of an up-stroke.
+  // Synchronous and cheap — nothing in the beat path waits for a frame.
+  cameraVerdict: (hand, at) => camera.verdict(hand, at),
+  onDisagreement: (entry) => cameraLog.record({ ...entry, frames: camera.framesFor(entry.hand, entry.t) }),
   onPreview: (event) => {
     if (mode === "playing" || mode === "count-in") world.previewRight(event.dir)
   },
@@ -237,6 +249,17 @@ const ring = startRing({
     return Boolean(found && found.cue.direction === direction && found.distance <= GOOD)
   },
 })
+
+const cameraPanel = createCameraPanel({
+  tracker: camera,
+  log: cameraLog,
+  chip: document.querySelector("#camera-btn"),
+  host: ring.cameraHost,
+  offer: document.querySelector("#camera-offer"),
+})
+// A stored "on" is honoured without asking again; anything else leaves getUserMedia uncalled.
+cameraPanel.resume()
+cameraPanel.offerIfUnasked()
 
 function timingSummary() {
   if (!deltas.length) { timingEl.innerHTML = ""; settings.suggest(null); return }

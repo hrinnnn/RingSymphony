@@ -38,6 +38,7 @@ export function createRingPanel({ button, panel, input }) {
       <p class="ring-palm-status" aria-live="polite"></p>
       <button type="button" data-act="reset-palm-calibration">重来</button>
     </div>
+    <div class="ring-camera-host"></div>
     <div class="ring-comp">
       <span>延迟补偿</span>
       <button type="button" data-act="comp-down">−</button>
@@ -241,6 +242,9 @@ export function createRingPanel({ button, panel, input }) {
   return {
     open() { setOpen(true); render() },
     close() { setOpen(false) },
+    // Where the camera section mounts. The camera layer owns its own markup; the ring panel only
+    // lends it a place to live, so the two stay separable.
+    cameraHost: panel.querySelector(".ring-camera-host"),
     // Signed timing error of an accepted ring beat, seconds; positive = late.
     report(error) {
       errors.push(error)

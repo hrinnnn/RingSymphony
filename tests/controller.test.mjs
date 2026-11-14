@@ -42,6 +42,11 @@ globalThis.__controller = {
   transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .25, PERFECT: .12, createWorld: () => world, createLane: () => lane, createSettings: () => settings,
   startRing: ({ onGesture, onPreview }) => { ringGesture = onGesture; ringPreview = onPreview; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
   createMixerHud: () => ({ update() {} }), lassoParts, pathLength, createMixer, PART_INFO, PARTS, LOOP_BARS, createTempo,
+  // The camera is optional and the controller must work with it absent, which is what these
+  // inert stubs represent: a tracker that never has a verdict is the no-camera path.
+  createCameraTracker: () => ({ verdict: () => null, framesFor: () => [], status: () => ({ state: 'off', fps: 0, hands: { left: false, right: false }, mismatch: false }), onStatus() {}, enable: async () => false, disable() {}, video: null }),
+  createCameraLog: () => ({ record() {}, entries: () => [], clear() {}, toJSON: () => '{}' }),
+  createCameraPanel: () => ({ render() {}, offerIfUnasked() {}, resume: async () => {} }),
 }
 const names = Object.keys(globalThis.__controller).join(',')
 const source=(await readFile(new URL('../src/main.js',import.meta.url),'utf8')).replace(/^import .* from .*\r?\n/gm,'')

@@ -40,12 +40,12 @@ header { position: absolute; left: 0; top: 0; right: 0; z-index: 6; display: fle
 .logo { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--sky); border-radius: 50%; background: transparent; color: var(--sky); font-style: normal; font-size: 16px; box-shadow: 0 0 14px #35e0ff55, inset 0 0 10px #35e0ff33; }
 .header-right { display: flex; gap: 8px; align-items: center; }
 #status { padding: 7px 14px; font-size: 11px; font-weight: 600; letter-spacing: .14em; }
-#exit, #ring-btn, #settings-btn { pointer-events: auto; cursor: pointer; padding: 7px 14px; font-size: 11px; font-weight: 600; letter-spacing: .1em; border-radius: 3px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(10px); transition: border-color .15s, box-shadow .15s; }
-#exit:hover, #ring-btn:hover, #settings-btn:hover { border-color: var(--sky); box-shadow: 0 0 14px #35e0ff44; }
-#ring-btn { position: relative; padding-left: 28px; }
-#ring-btn::before { content: ""; position: absolute; left: 12px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: #4a526b; }
-#ring-btn[data-state="wait"]::before { background: var(--butter); box-shadow: 0 0 8px var(--butter); }
-#ring-btn[data-state="on"]::before { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
+#exit, #ring-btn, #camera-btn, #settings-btn { pointer-events: auto; cursor: pointer; padding: 7px 14px; font-size: 11px; font-weight: 600; letter-spacing: .1em; border-radius: 3px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(10px); transition: border-color .15s, box-shadow .15s; }
+#exit:hover, #ring-btn:hover, #camera-btn:hover, #settings-btn:hover { border-color: var(--sky); box-shadow: 0 0 14px #35e0ff44; }
+#ring-btn, #camera-btn { position: relative; padding-left: 28px; }
+#ring-btn::before, #camera-btn::before { content: ""; position: absolute; left: 12px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: #4a526b; }
+#ring-btn[data-state="wait"]::before, #camera-btn[data-state="wait"]::before { background: var(--butter); box-shadow: 0 0 8px var(--butter); }
+#ring-btn[data-state="on"]::before, #camera-btn[data-state="on"]::before { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
 
 #ring-panel, #settings-panel { position: absolute; right: 30px; top: 66px; z-index: 20; width: 320px; max-width: calc(100vw - 32px); max-height: calc(100vh - 86px); overflow-y: auto; padding: 14px 16px 12px; background: #090e1cf2; border: 1px solid var(--line); border-radius: 3px; box-shadow: var(--shadow); backdrop-filter: blur(14px); font-size: 12px; }
 #settings-panel { z-index: 21; width: 300px; }
@@ -205,3 +205,24 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: 
   #hint { font-size: 10px; gap: 6px; }
   .conducting-hud { top: 20%; }
 }
+
+/* ---------- Camera ---------- */
+
+/* The preview is mirrored so it reads like a mirror. CSS only, never the pixels fed to
+   inference: MediaPipe inverts its handedness output on a mirrored image, which would swap the
+   hands while everything still appeared to work. */
+.camera-frame { position: relative; aspect-ratio: 4 / 3; margin: 8px 0 6px; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: #05070f; }
+.camera-frame video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+/* The target box spans the whole stroke range rather than where the hand rests: a full
+   down-stroke is what leaves a laptop lid webcam's view, and the player can only see that here. */
+.camera-frame::after { content: ""; position: absolute; inset: 8% 12%; border: 1px dashed #35e0ff66; border-radius: 4px; pointer-events: none; }
+.camera-hint { margin: 0 0 6px; font-size: 11px; color: var(--dim); line-height: 1.5; }
+.camera-mismatch { margin: 6px 0; padding: 6px 8px; font-size: 11px; line-height: 1.5; color: var(--butter); border: 1px solid #ffd98a44; border-radius: 3px; background: #ffd98a11; }
+.camera-log-actions { display: flex; gap: 6px; margin-top: 8px; }
+.camera-log-note { margin: 6px 0 0; font-size: 11px; color: var(--dim); }
+
+#camera-offer { margin-top: 18px; }
+.camera-offer-card { max-width: 520px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 4px; background: var(--card); box-shadow: var(--shadow); backdrop-filter: blur(10px); }
+.camera-offer-card strong { display: block; margin-bottom: 6px; font-size: 13px; letter-spacing: .08em; color: var(--sky); }
+.camera-offer-card p { margin: 0 0 12px; font-size: 12px; line-height: 1.6; color: var(--dim); }
+.camera-offer-actions { display: flex; gap: 8px; }
