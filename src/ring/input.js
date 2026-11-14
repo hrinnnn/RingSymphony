@@ -2,6 +2,7 @@
 // Gesture events carry `age`: seconds between the gesture happening and "now", so the game can place it on its own clock.
 import { createBeatDetector, createHandDetector } from "./detectors.js"
 import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION, MAX_SHORT_GAP, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "./direction.js"
+import { fuseDirection } from "../camera/fuse.js"
 
 const ROLE_KEY = "ringsymphony.roles.v2"
 const COMP_KEY = "ringsymphony.compensation"
@@ -26,6 +27,13 @@ export function createRingInput({
   // Asked whether a right-hand cue is due near a gesture time, so a reversal the music called for
   // is not mistaken for a return stroke. Kept as a callback to leave this module chart-agnostic.
   cueDue = () => false,
+  // Asked what the camera saw for a hand at a page-clock time, returning a verdict or null.
+  // A callback for the same reason as cueDue: this module stays free of the DOM and of MediaPipe,
+  // so it still runs under Node for the replay tests.
+  cameraVerdict = () => null,
+  // Called when the two sensors contradicted each other, so the page can record it for later
+  // labelling. Injected rather than imported to keep storage out of this module.
+  onDisagreement = () => {},
 } = {}) {
   const rings = new Map()
   // Only roles the player chose explicitly are stored; automatic ones are re-derived from who is online.
@@ -40,6 +48,11 @@ export function createRingInput({
   const lastByHand = { left: null, right: null }
   const eventCounts = { left: 0, right: 0 }
   const directionStats = { accepted: 0, data: 0, weak: 0, mismatch: 0, mismatchGap: 0, ambiguous: 0, uncalibrated: 0, suppressed: 0 }
+  // How often the camera contributed. `fills` is the common case — the ring had no answer and the
+  // camera supplied one. `overrides` is the camera contradicting a ring classification, which only
+  // happens on the vertical pair. `disagreements` counts every contradiction, including the ones
+  // the ring won, which is what the exported log is built from.
+  const cameraStats = { fills: 0, overrides: 0, disagreements: 0 }
   const link = { open: false, studio: false }
   const errors = []
   const direction = createDirectionCalibration()
@@ -161,6 +174,17 @@ export function createRingInput({
 
   // Ring Studio lists every ring it has ever seen; only one that is connected and streaming counts.
   const present = (ring) => ring.connected && ring.lastSeen > 0 && now() - ring.lastSeen < 2
+
+  // The camera is optional and may fail at any moment — permission revoked, the tracker crashing,
+  // the model never loading. A throw here would take the beat with it, so every failure becomes
+  // "no verdict", which is the same path as having no camera at all.
+  function askCamera(hand, pageTime) {
+    try {
+      return cameraVerdict(hand, pageTime)
+    } catch {
+      return null
+    }
+  }
 
   function assign(ring, hand) {
     if (ring.hand === hand) return
@@ -348,13 +372,41 @@ export function createRingInput({
       if (event.hand === "left" && event.type === "palm") {
         if (capturePalmCalibration(event, ring)) continue
         if (palmCalibration.ready) event.dir = event.dir === palmCalibration.upObserved ? "up" : "down"
+        // The left hand's 渐强/渐弱 has its own wearer-dependent sign, learned from its own
+        // calibration, and a wrong sign scores nothing and says nothing (main.js playPalm simply
+        // returns). The camera sees both hands, so it corrects this one too.
+        const ringPalm = palmCalibration.ready ? event.dir : null
+        const fusedPalm = fuseDirection(ringPalm, askCamera("left", event.t + ring.offset))
+        if (fusedPalm.dir) event.dir = fusedPalm.dir
+        event.directionSource = fusedPalm.source
+        if (fusedPalm.source === "camera") cameraStats[ringPalm ? "overrides" : "fills"] += 1
+        if (fusedPalm.disagreed) {
+          cameraStats.disagreements += 1
+          onDisagreement({ t: event.t + ring.offset, hand: "left", ring: ringPalm, source: fusedPalm.source })
+        }
       }
       if (event.type === "beat" && ring.hand === "right") {
         if (capturing) continue
         const { feature, reason, hasGap } = directionFeatureResult(ring.history, event.t)
         const classified = direction.classifyDetailed(feature, ring.address)
-        event.dir = classified.direction
-        event.directionReason = reason || classified.reason
+        // The camera decides vertical direction, because the ring cannot: up and down sit about
+        // 166 degrees apart in its own axes (direction.js:37). Asked on the uncompensated page
+        // clock — compensation is a judgement offset, not a measure of when the hand moved, and at
+        // its ±300ms clamp it would slide the camera's window onto the return stroke.
+        //
+        // This runs *before* the return filter deliberately. Vertical confusion and return-stroke
+        // confusion are one phenomenon with one cause: a down-stroke and the return of an
+        // up-stroke are the same rotation. Fusing afterwards would leave the filter reading the
+        // ring's blind guess and suppressing beats on a direction already overruled.
+        const fused = fuseDirection(classified.direction, askCamera("right", event.t + ring.offset))
+        event.dir = fused.dir
+        event.directionSource = fused.source
+        if (fused.source === "camera") cameraStats[classified.direction ? "overrides" : "fills"] += 1
+        if (fused.disagreed) {
+          cameraStats.disagreements += 1
+          onDisagreement({ t: event.t + ring.offset, hand: "right", ring: classified.direction, source: fused.source })
+        }
+        event.directionReason = event.dir ? null : (reason || classified.reason)
         // An unclassified beat is not recorded as a stroke, but it can still be the return of one.
         // A reversal that lands where a cue is due is a real stroke: up and down are near-opposites,
         // so geometry alone cannot tell a down-beat from the return of an up-beat.
@@ -561,6 +613,7 @@ export function createRingInput({
         errors: [...errors],
         direction: direction.status(t),
         directionStats: { ...directionStats },
+        cameraStats: { ...cameraStats },
         automaticCalibration: autoStatus(t),
         palmCalibration: palmStatus(),
         last: last && t - last.at < 2 ? { ...last } : null,
@@ -573,6 +626,9 @@ export function createRingInput({
             address: ring.address,
             name: ring.name,
             hand: ring.hand,
+            // The camera stamps its frames on the page clock, so it needs this to compare them
+            // against ring events, which carry device time.
+            offset: ring.offset,
             connected: present(ring),
             rate: present(ring) ? ring.rate : 0,
             activity: ring.activity,
