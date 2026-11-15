@@ -156,10 +156,19 @@ for (const [direction, [, , [time]]] of Object.entries(files)) {
 console.log("Direction: calibration, ambiguity, gaps, and separate candidate strokes from four recordings pass")
 
 // Exercise the real input path: guided calibration consumes IMU frames, then a later stroke emits its direction.
+//
+// Every hub below drives the template path deliberately. It is no longer the default — input.js
+// starts calibration-free — so these tests ask for it by name rather than inheriting it, which is
+// what keeps them a test of calibration rather than of whichever mode happens to ship.
+const template = (options) => {
+  const hub = createRingInput(options)
+  hub.setDirectionMode("template")
+  return hub
+}
 let clock = 100
 let sequence = 0
 const emitted = []
-const hub = createRingInput({
+const hub = template({
   now: () => clock,
   onEvent: (event) => emitted.push(event),
   WebSocketImpl: null,
@@ -213,7 +222,7 @@ let palmClock = 1200
 let palmDevice = 0
 let palmSequence = 0
 const palmEvents = []
-const palms = createRingInput({
+const palms = template({
   now: () => palmClock,
   onEvent: (event) => palmEvents.push(event),
   WebSocketImpl: null,
@@ -257,7 +266,7 @@ let device = 0
 let seq = 0
 const gentleEvents = []
 const gentlePreviews = []
-const gentle = createRingInput({
+const gentle = template({
   now: () => wall,
   onEvent: (event) => gentleEvents.push(event),
   onPreview: (event) => gentlePreviews.push({ ...event, eventCount: gentleEvents.length, ready: gentle.snapshot().direction.ready }),
@@ -337,7 +346,7 @@ console.log("Direction: immediate gentle strokes, latency, gaps and clock restar
 let autoClock = 500
 let autoSeq = 0
 const autoEvents = []
-const auto = createRingInput({
+const auto = template({
   now: () => autoClock,
   onEvent: (event) => autoEvents.push(event),
   WebSocketImpl: null,
@@ -435,7 +444,7 @@ console.log("Direction: one-click calibration, fast returns, timeout and disconn
 let dualClock = 800
 let rightSeq = 0
 let leftSeq = 0
-const dual = createRingInput({
+const dual = template({
   now: () => dualClock,
   WebSocketImpl: null,
   storage: { getItem: () => null, setItem() {} },
@@ -547,7 +556,7 @@ console.log("Direction: persistence pass")
     let wall = 200
     let device = 0
     let seq = 0
-    const input = createRingInput({ now: () => wall, onEvent: () => {}, onPreview: () => {}, WebSocketImpl: null, storage })
+    const input = template({ now: () => wall, onEvent: () => {}, onPreview: () => {}, WebSocketImpl: null, storage })
     input.feed({ type: "status", rings: [{ address: "G", connected: true }] })
     const frame = (gyr = [0, 0, 0]) => {
       input.feed({ type: "imu", address: "G", timestamp: device, sequence: seq++, acc: [0, 0, 9.81], gyr })

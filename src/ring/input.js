@@ -13,7 +13,12 @@ const CAL_KEY = "ringsymphony.calibration.v1"
 // Stored rather than hardcoded so the two can be compared on the same hardware and the same hand
 // without a rebuild — the absolute path measures better on the recordings, but "better on 160
 // recorded strokes" and "better in play" are different claims and only the second one matters.
-const MODE_KEY = "ringsymphony.direction-mode"
+//
+// Versioned: the key is only ever written when a player explicitly picks a mode, so anyone who
+// tried the switch before the default changed has "template" pinned and would never meet the new
+// default. The bump clears those stored choices once. A choice made after this point persists
+// normally, which is what keeps the panel a working rollback.
+const MODE_KEY = "ringsymphony.direction-mode.v2"
 export const DIRECTION_MODES = ["template", "absolute"]
 
 function readJson(storage, key, fallback) {
@@ -67,7 +72,15 @@ export function createRingInput({
   // Which right-hand classifier is live. Read once at startup; changing it resets the per-ring
   // filters so a stroke is never judged by one path's history under the other's rules.
   // Stored as a bare string, not JSON, so it is read directly rather than through readJson.
-  let directionMode = "template"
+  //
+  // The default is the calibration-free path. Measured against the labelled recordings with the
+  // project's own stroke/return splitter (tests/absolute.test.mjs) it scores 162/164, against
+  // roughly 70% for the template path over the gameplay logs it was diagnosed on — and it holds
+  // that accuracy through dropped frames (99% at 10% and 20% loss, 98% at 30%), which was the
+  // main risk in defaulting to it. The template path stays reachable from the 指环 panel, because
+  // "better on 164 recorded strokes" and "better in play" remain different claims and only the
+  // second one matters; the first session played this way is the measurement, not a confirmation.
+  let directionMode = "absolute"
   try {
     const stored = storage?.getItem(MODE_KEY)
     if (DIRECTION_MODES.includes(stored)) directionMode = stored
@@ -459,17 +472,20 @@ export function createRingInput({
         const classified = absolute
           ? classifyAbsolute(gravityFrame(ring.history, event.t))
           : direction.classifyDetailed(feature, ring.address)
-        // The camera decides vertical direction, because the ring cannot: up and down sit about
-        // 166 degrees apart in its own axes (direction.js:37). Asked on the uncompensated page
-        // clock — compensation is a judgement offset, not a measure of when the hand moved, and at
-        // its ±300ms clamp it would slide the camera's window onto the return stroke.
+        // The camera decides vertical direction when the template classifier is live, because
+        // there the ring cannot: up and down sit about 166 degrees apart in its own axes
+        // (direction.js:37). That premise is false in the gravity frame — absolute.js reads
+        // vertical off the hand's acceleration along gravity — so under the absolute path the
+        // camera fills in declines but never overrules. Asked on the uncompensated page clock:
+        // compensation is a judgement offset, not a measure of when the hand moved, and at its
+        // ±300ms clamp it would slide the camera's window onto the return stroke.
         //
         // This runs *before* the return filter deliberately. Vertical confusion and return-stroke
         // confusion are one phenomenon with one cause: a down-stroke and the return of an
         // up-stroke are the same rotation. Fusing afterwards would leave the filter reading the
         // ring's blind guess and suppressing beats on a direction already overruled.
         const verdict = askCamera("right", event.t + ring.offset)
-        const fused = fusion.fuse(classified.direction, verdict)
+        const fused = fusion.fuse(classified.direction, verdict, { allowDistrust: !absolute })
         event.dir = fused.dir
         event.directionSource = fused.source
         // Both sensors' raw answers ride along with the event, so the game can record what each

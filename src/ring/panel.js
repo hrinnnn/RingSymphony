@@ -16,8 +16,8 @@ export function createRingPanel({ button, panel, input }) {
     <div class="ring-calibration">
       <strong>右手方向识别</strong>
       <div class="ring-mode">
-        <label><input type="radio" name="direction-mode" value="absolute"><span>免校准（重力坐标）</span></label>
-        <label><input type="radio" name="direction-mode" value="template"><span>校准模板（原有方式）</span></label>
+        <label><input type="radio" name="direction-mode" value="absolute"><span>免校准（重力坐标，默认）</span></label>
+        <label><input type="radio" name="direction-mode" value="template"><span>校准模板（备用方式）</span></label>
       </div>
       <p class="ring-mode-note"></p>
       <div class="ring-calibration-body">
@@ -231,8 +231,8 @@ export function createRingPanel({ button, panel, input }) {
       ? "免校准模式下左手也无需采集，抬掌/压掌直接可用。"
       : "按提示分别上抬、下压手掌，各 3 次；不需要先完成右手校准。"
     modeNoteEl.textContent = absolute
-      ? "直接开始，双手都无需采集动作。方向由重力方向推算，换手或戒指转动都不受影响。"
-      : "需要每个方向挥动 3 次。若识别不准，可改用免校准模式。"
+      ? "默认方式，直接开始，双手都无需采集动作。方向由重力方向推算，换手或戒指转动都不受影响。"
+      : "备用方式，需要每个方向挥动 3 次。仅在免校准模式识别不准时改用。"
     const hasRight = snap.rings.some((ring) => ring.connected && ring.hand === "right")
     const hasLeft = snap.rings.some((ring) => ring.connected && ring.hand === "left")
     const automatic = snap.automaticCalibration

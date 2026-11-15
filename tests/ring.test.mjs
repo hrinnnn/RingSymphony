@@ -199,3 +199,64 @@ console.log('Input hub: offline rings ignored, auto left/right, swap, persisted 
   ws.close(); bridge.close(); studioSocket.destroy(); studio.close()
 }
 console.log('Bridge: relays Ring Studio lines to WebSocket clients, subscribes, refuses foreign origins: pass')
+
+// The calibration-free classifier is what a new player gets, and the camera cannot outrank it.
+//
+// Both halves are wiring, not logic: absolute.js is measured in tests/absolute.test.mjs and the
+// distrust guard in tests/camera.test.mjs. What is untested without this is whether the default
+// actually reaches a fresh page, and whether input.js passes the guard down to the fusion at all.
+{
+  const empty = { getItem: () => null, setItem() {} }
+  const fresh = createRingInput({ onEvent() {}, now: () => 0, WebSocketImpl: null, storage: empty })
+  assert.equal(fresh.snapshot().directionMode, 'absolute',
+    'a page with no stored choice starts calibration-free')
+
+  // A choice made in the panel still wins, which is what makes the switch a working rollback.
+  const store = new Map()
+  const storage = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) }
+  const picked = createRingInput({ onEvent() {}, now: () => 0, WebSocketImpl: null, storage })
+  picked.setDirectionMode('template')
+  assert.equal(store.get('ringsymphony.direction-mode.v2'), 'template', 'the choice persists')
+  const reopened = createRingInput({ onEvent() {}, now: () => 0, WebSocketImpl: null, storage })
+  assert.equal(reopened.snapshot().directionMode, 'template', 'and survives a reload')
+
+  // A value stored under the pre-default key is ignored, or the flip would never reach anyone who
+  // had tried the switch before it changed.
+  const stale = { getItem: k => (k === 'ringsymphony.direction-mode' ? 'template' : null), setItem() {} }
+  const migrated = createRingInput({ onEvent() {}, now: () => 0, WebSocketImpl: null, storage: stale })
+  assert.equal(migrated.snapshot().directionMode, 'absolute', 'the old key no longer pins the mode')
+}
+console.log('Ring input: starts calibration-free, honours an explicit choice, ignores the old key: pass')
+
+// The distrust guard reaches the fusion from input.js. Driven through a real recording so the
+// assertion is about the wiring under load, not a hand-made event.
+{
+  const seen = []
+  let clock = 100
+  const input = createRingInput({
+    onEvent: e => { if (e.type === 'beat') seen.push(e) },
+    now: () => clock,
+    WebSocketImpl: null,
+    storage: { getItem: () => null, setItem() {} },
+    // A camera that always answers 'down' confidently. Under distrust this would overrule the
+    // ring; under the absolute path it must only ever fill in a decline.
+    cameraVerdict: () => ({ dir: 'down', axis: 'vertical', displacement: 0.3, angle: -90, margin: 0.9 }),
+  })
+  input.feed({ type: 'status', rings: [{ address: 'A', name: 'Ringo-A', connected: true }] })
+  const frames = await recording('四拍', 'yyh')
+  // A lone ring waits briefly before it takes the right hand, so the clock has to move first.
+  clock += 0.6
+  frames.forEach((f, i) => {
+    clock = 100 + f.t + 0.02
+    input.feed({ type: 'imu', address: 'A', name: 'Ringo-A', timestamp: f.t, sequence: i, acc: f.acc, gyr: f.gyr })
+  })
+  assert.equal(input.snapshot().directionMode, 'absolute')
+  assert.ok(seen.length > 20, `the recording still produces beats (${seen.length})`)
+  const overruled = seen.filter(e => e.ringDir && e.directionSource === 'camera')
+  assert.equal(overruled.length, 0,
+    `the camera never overrules a ring answer in absolute mode (${overruled.length} did)`)
+  // The fill-in path is still live, which is the half that can only help.
+  assert.ok(seen.every(e => e.directionSource !== 'camera' || !e.ringDir),
+    'any camera-sourced direction came from a stroke the ring declined')
+}
+console.log('Ring input: the camera fills in but never overrules the gravity-frame classifier: pass')

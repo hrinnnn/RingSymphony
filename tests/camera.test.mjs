@@ -251,6 +251,47 @@ assert.deepEqual(fuseDirection('left', left), { dir: 'left', source: 'ring', dis
 // beats and never accumulate a meaningful rate.
 assert.deepEqual(fuseDirection('up', down), { dir: 'up', source: 'ring', disagreed: true })
 
+// Distrust is disabled under the calibration-free classifier. It was measured and tuned on the
+// template path, where a poor calibration could push refusals past 60% and the camera was the
+// better of two bad sensors. The gravity-frame path scores 162/164 on the labelled recordings and
+// declines about 1% of strokes, so the trigger should never be met — but if it ever were, a camera
+// measured at 53% would silently start overruling a ring measured at 99%.
+{
+  const fusion = createFusion({ window: 4, enter: 0.6, leave: 0.1 })
+  for (let i = 0; i < 4; i += 1) fusion.fuse(null, noVerdict, { allowDistrust: false })
+  assert.equal(fusion.distrusted, true,
+    'the refusal rate is still tracked, so the panel readout means the same thing in both modes')
+
+  // The ring answered, so the ring decides — the opposite of what the same state does above.
+  assert.deepEqual(fusion.fuse('up', down, { allowDistrust: false }),
+    { dir: 'up', source: 'ring', disagreed: true },
+    'a distrusted ring still outranks the camera when distrust is not allowed')
+
+  // A weak verdict that distrust mode would have accepted is not enough on its own.
+  assert.equal(fusion.fuse(null, { dir: 'left', axis: 'horizontal', displacement: 0.05 }, { allowDistrust: false }).dir,
+    null, 'the lowered distrust bar does not apply either')
+
+  // Filling in a declined stroke still works: that can only turn a no-score into a score.
+  assert.deepEqual(fusion.fuse(null, down, { allowDistrust: false }),
+    { dir: 'down', source: 'camera', disagreed: false },
+    'the camera still fills in a stroke the ring declined')
+}
+
+// Omitting the option keeps the template path byte-identical, so the default cannot silently
+// change behaviour for the mode distrust was tuned on.
+{
+  const withFlag = createFusion({ window: 4, enter: 0.6, leave: 0.1 })
+  const without = createFusion({ window: 4, enter: 0.6, leave: 0.1 })
+  const strokes = ['up', null, null, null, null, 'up', null]
+  for (const ring of strokes) {
+    assert.deepEqual(
+      withFlag.fuse(ring, down, { allowDistrust: true }),
+      without.fuse(ring, down),
+      'allowDistrust defaults to true',
+    )
+  }
+}
+
 console.log('fusion tests passed')
 
 // ---------- cameraVerdict wired through the ring pipeline ----------
@@ -264,12 +305,17 @@ const recording = async (cls, person) => {
 }
 
 // Feeds one recording through a hub built with the given options, returning the events it emitted.
-async function drive(options = {}) {
+// `mode` is explicit on every driven case below. The fill-in and override rules are asymmetric
+// between the two classifiers — the camera may fill a decline in either, but may only overrule in
+// the template path — so a test that inherited whichever mode happens to be the default would be
+// testing the default rather than the rule.
+async function drive({ mode = 'template', ...options } = {}) {
   let clock = 100
   const events = []
   const store = new Map()
   const storage = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) }
   const input = createRingInput({ onEvent: e => events.push(e), now: () => clock, WebSocketImpl: null, storage, ...options })
+  input.setDirectionMode(mode)
   input.feed({ type: 'status', rings: [{ address: 'A', name: 'Ringo-A', connected: true }] })
   for (const [i, f] of (await recording('四拍', 'yyh')).entries()) {
     clock = 100 + f.t + 0.02
@@ -295,8 +341,8 @@ async function drive(options = {}) {
   assert.deepEqual(thrown.events, bare.events, 'a throwing camera must degrade to no camera, not break the beat path')
 }
 
-// The camera fills in where the ring declined. The recording is uncalibrated, so every beat comes
-// through with dir null - which is exactly the 方向不确定 case the fill-in rule targets.
+// The camera fills in where the ring declined. In the template path an uncalibrated recording
+// declines every beat, which is exactly the 方向不确定 case the fill-in rule targets.
 {
   const { events, input } = await drive({ cameraVerdict: () => ({ dir: 'up', axis: 'vertical', displacement: 0.3 }) })
   const beats = events.filter(e => e.type === 'beat')

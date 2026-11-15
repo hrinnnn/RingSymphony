@@ -56,11 +56,21 @@ export function createFusion({ window = WINDOW, enter = ENTER_DISTRUST, leave = 
     // or null when there is no camera at all. The two null cases are deliberately identical: every
     // degradation path — no hardware, denied permission, lost tracking, dim room, stalled stream —
     // converges here, so the fallback is one well-exercised path rather than a rare second branch.
-    fuse(ringDir, verdict) {
+    //
+    // `allowDistrust` is false when the calibration-free classifier is live. Distrust was measured
+    // and tuned on the template path, where a poor calibration could push refusals past 60% and
+    // the camera was genuinely the better of two bad sensors. The gravity-frame path declines
+    // around 1% of strokes, so the trigger should never be met — but if it ever were, a camera
+    // measured at 53% would start overruling a ring measured at 99%, and it would do so silently.
+    // Filling in a declined stroke stays enabled either way: that can only turn a guaranteed
+    // no-score into a score.
+    fuse(ringDir, verdict, { allowDistrust = true } = {}) {
       // Decided before this stroke updates the rate, so the decision never depends on its own
       // outcome and a replay of the same strokes always yields the same answers.
-      const result = decide(ringDir, verdict, distrusted)
+      const result = decide(ringDir, verdict, distrusted && allowDistrust)
 
+      // The rate is tracked regardless, so the panel's readout keeps meaning the same thing in
+      // both modes and switching paths mid-session does not restart the measurement.
       recent.push(ringDir ? 0 : 1)
       if (recent.length > window) recent.shift()
       if (recent.length === window) {
