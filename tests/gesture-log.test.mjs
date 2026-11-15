@@ -184,3 +184,61 @@ console.log('ring silence tests passed')
 }
 
 console.log('transition analysis tests passed')
+
+// The absolute classifier's measurements ride along with each stroke, and the summary separates
+// the two failure modes they distinguish. A direction failing because its strokes sit just under
+// the accept bar needs a lower bar; one failing because they point the wrong way does not, and no
+// per-direction accuracy can tell those apart.
+{
+  const log = createGestureLog()
+  // One `left` cue per log, so each stroke below is scored against the direction it was meant for.
+  const leftOnly = [{ hand: 'right', kind: 'beat', time: 3.75, direction: 'left' }]
+  const scored = (stroke) => {
+    const one = createGestureLog()
+    one.begin(study, leftOnly)
+    one.record({ at: 3.75, ...stroke })
+    return one.summary().axes.left
+  }
+  log.begin(study, leftOnly)
+  log.record({ at: 3.75, fused: 'left', ring: 'left', yaw: 0.92, vertical: 0.1, mode: 'absolute', peakSpeed: 6.2 })
+
+  const stroke = log.strokes()[0]
+  assert.equal(stroke.yaw, 0.92, 'the yaw that decided the verdict is recorded')
+  assert.equal(stroke.vertical, 0.1)
+  assert.equal(stroke.peakSpeed, 6.2)
+  assert.equal(log.summary().mode, 'absolute', 'the session records which classifier produced it')
+
+  // Right sign, under the bar: a lower threshold would have scored this one.
+  const near = scored({ fused: null, ring: null, yaw: 0.22, vertical: 0.05, mode: 'absolute' })
+  assert.equal(near.nearMiss, 1, 'an under-the-bar stroke is a near miss')
+  assert.equal(near.confidentlyWrong, 0)
+
+  // Wrong sign and confident: the motion or the frame is wrong, not the bar.
+  const reversed = scored({ fused: 'right', ring: 'right', yaw: -0.81, vertical: 0, mode: 'absolute' })
+  assert.equal(reversed.confidentlyWrong, 1, 'a reversed stroke is not a near miss')
+  assert.equal(reversed.nearMiss, 0)
+  assert.equal(reversed.medianYaw, -0.81, 'the median yaw for this direction is reported')
+}
+
+// A vertical cue is judged on its vertical measurement, not its yaw.
+{
+  const log = createGestureLog()
+  log.begin(study, cues)
+  log.record({ at: 3.00, fused: null, ring: null, yaw: 0.05, vertical: -0.9, mode: 'absolute' })
+  const s = log.summary()
+  assert.equal(s.axes.down.confidentlyWrong, 0, 'down wants a negative vertical, and this one is')
+  assert.equal(s.axes.down.nearMiss, 0, 'and it is not faint either')
+}
+
+// Template mode produces no such numbers, and the log must not invent any.
+{
+  const log = createGestureLog()
+  log.begin(study, cues)
+  log.record({ at: 3.75, fused: 'left', ring: 'left' })
+  assert.equal(log.strokes()[0].yaw, null)
+  assert.equal(log.strokes()[0].vertical, null)
+  assert.deepEqual(log.summary().axes, {}, 'no measurements, no axes section')
+  assert.equal(log.summary().mode, null)
+}
+
+console.log('absolute measurement logging tests passed')

@@ -14,7 +14,13 @@ export function createRingPanel({ button, panel, input }) {
     <ul class="ring-list"></ul>
     <div class="ring-actions"><button type="button" data-act="swap">交换左右</button></div>
     <div class="ring-calibration">
-      <strong>右手方向校准</strong>
+      <strong>右手方向识别</strong>
+      <div class="ring-mode">
+        <label><input type="radio" name="direction-mode" value="absolute"><span>免校准（重力坐标）</span></label>
+        <label><input type="radio" name="direction-mode" value="template"><span>校准模板（原有方式）</span></label>
+      </div>
+      <p class="ring-mode-note"></p>
+      <div class="ring-calibration-body">
       <p>按提示向各方向挥动，每个方向 3 次。</p>
       <button type="button" data-act="auto-calibrate">开始校准</button>
       <div class="ring-directions"></div>
@@ -29,14 +35,17 @@ export function createRingPanel({ button, panel, input }) {
         <button type="button" data-act="stop-rerecord">停止补录</button>
         <button type="button" data-act="close-rerecord">关闭</button>
       </dialog>
+      </div>
     </div>
     <div class="ring-calibration ring-palm-calibration">
       <strong>左手抬掌/压掌校准</strong>
-      <p>按提示分别上抬、下压手掌，各 3 次；不需要先完成右手校准。</p>
+      <p class="ring-palm-note">按提示分别上抬、下压手掌，各 3 次；不需要先完成右手校准。</p>
+      <div class="ring-palm-body">
       <button type="button" data-act="palm-calibrate">开始左手校准</button>
       <span class="ring-palm-counts"></span>
       <p class="ring-palm-status" aria-live="polite"></p>
       <button type="button" data-act="reset-palm-calibration">重来</button>
+      </div>
     </div>
     <div class="ring-camera-host"></div>
     <div class="ring-comp">
@@ -74,6 +83,11 @@ export function createRingPanel({ button, panel, input }) {
   const palmCountsEl = panel.querySelector(".ring-palm-counts")
   const palmAutoEl = panel.querySelector('[data-act="palm-calibrate"]')
   const palmResetEl = panel.querySelector('[data-act="reset-palm-calibration"]')
+  const modeInputs = [...panel.querySelectorAll('input[name="direction-mode"]')]
+  const modeNoteEl = panel.querySelector(".ring-mode-note")
+  const calibrationBodyEl = panel.querySelector(".ring-calibration-body")
+  const palmBodyEl = panel.querySelector(".ring-palm-body")
+  const palmNoteEl = panel.querySelector(".ring-palm-note")
   let calibrationError = ""
   let palmCalibrationError = ""
   const GESTURE = { beat: "击拍", fist: "握拳", strike: "向前一指", palm: "掌" }
@@ -99,6 +113,18 @@ export function createRingPanel({ button, panel, input }) {
     closeRerecord()
     render()
   })
+  for (const radio of modeInputs) {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return
+      try {
+        input.setDirectionMode(radio.value)
+        calibrationError = ""
+      } catch (error) {
+        calibrationError = error.message
+      }
+      render()
+    })
+  }
   function setOpen(next) {
     open = next
     panel.hidden = !open
@@ -193,6 +219,20 @@ export function createRingPanel({ button, panel, input }) {
     }))
     if (!snap.rings.length) listEl.innerHTML = "<li class=\"empty\">还没有收到戒指数据</li>"
     const calibration = snap.direction
+    const absolute = snap.directionMode === "absolute"
+    for (const radio of modeInputs) radio.checked = radio.value === snap.directionMode
+    // The calibration controls stay in the DOM but go away visually: in absolute mode there is
+    // nothing to calibrate, and leaving a dozen waves' worth of UI on screen would imply otherwise.
+    calibrationBodyEl.hidden = absolute
+    // The left hand follows the same flag: its palm detector is already absolute, so in this mode
+    // there is nothing for it to calibrate either.
+    palmBodyEl.hidden = absolute
+    palmNoteEl.textContent = absolute
+      ? "免校准模式下左手也无需采集，抬掌/压掌直接可用。"
+      : "按提示分别上抬、下压手掌，各 3 次；不需要先完成右手校准。"
+    modeNoteEl.textContent = absolute
+      ? "直接开始，双手都无需采集动作。方向由重力方向推算，换手或戒指转动都不受影响。"
+      : "需要每个方向挥动 3 次。若识别不准，可改用免校准模式。"
     const hasRight = snap.rings.some((ring) => ring.connected && ring.hand === "right")
     const hasLeft = snap.rings.some((ring) => ring.connected && ring.hand === "left")
     const automatic = snap.automaticCalibration

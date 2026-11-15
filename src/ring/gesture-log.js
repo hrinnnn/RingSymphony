@@ -23,6 +23,9 @@ export function createGestureLog() {
   let strokes = []
   let level = null
   let previousWant = null
+  // Which classifier produced this session's strokes. Set from the first stroke that reports one,
+  // since the mode cannot change mid-level (switching it resets gesture state).
+  let mode = null
 
   return {
     // Called at level start. The chart's cues are the ground truth for everything that follows.
@@ -30,6 +33,7 @@ export function createGestureLog() {
       level = { title: study?.title ?? "?", bpm: study?.bpm ?? null, meter: study?.meter ?? null, startedAt: new Date().toISOString() }
       strokes = []
       previousWant = null
+      mode = null
       this.cues = cues.filter((cue) => cue.hand === "right" && cue.kind === "beat").map((cue) => ({ time: cue.time, direction: cue.direction }))
     },
 
@@ -37,8 +41,9 @@ export function createGestureLog() {
 
     // Called for every right-hand beat that reached the game, whether or not it scored. `at` is on
     // the song clock, the same clock the cues use.
-    record({ at, fused, ring, ringReason, camera, cameraReason, displacement, angle, margin, source, tier }) {
+    record({ at, fused, ring, ringReason, camera, cameraReason, displacement, angle, margin, source, tier, yaw, vertical, mode: modeName, peakSpeed }) {
       if (!level) return
+      if (mode === null && modeName) mode = modeName
       // The nearest unused cue, by time alone. Deliberately not by direction: matching on
       // direction would quietly discard every misread, which is the thing being measured.
       let best = null
@@ -66,6 +71,15 @@ export function createGestureLog() {
         from,
         source: source ?? null,
         tier: tier ?? null,
+        // The absolute classifier's two measurements, rounded to the precision that is meaningful
+        // for a unit projection. These are what the verdict was actually made from: `yaw` is how
+        // much of the rotation was about the vertical axis (+left/−right) and `vertical` how much
+        // of the hand's drive was along gravity (+up/−down). A stroke that failed is only
+        // diagnosable with them — "declined at 0.28" and "called right at −0.71" are different
+        // problems. Null in template mode, which produces no such numbers.
+        yaw: yaw == null ? null : Number(yaw.toFixed(3)),
+        vertical: vertical == null ? null : Number(vertical.toFixed(3)),
+        peakSpeed: peakSpeed == null ? null : Number(peakSpeed.toFixed(2)),
       })
     },
 
@@ -131,10 +145,58 @@ export function createGestureLog() {
       // Strokes the camera called within 15 degrees of the 45-degree boundary between two
       // directions: a few degrees either way flips the verdict with no change in intent.
       const nearBoundary = matched.filter((s) => s.margin != null && s.margin < 0.26)
+      // What the classifier measured, grouped by what the chart asked for. This is the view that
+      // says *why* a direction is failing rather than just how often: a direction whose strokes
+      // cluster just under the accept bar needs a different fix from one whose strokes point
+      // confidently the wrong way, and the per-direction accuracy alone cannot tell them apart.
+      //
+      // `axis` is whichever measurement decided the verdict — yaw for a horizontal call, vertical
+      // for a vertical one — so "how close was this to being read correctly" is one number.
+      const axes = {}
+      for (const stroke of matched) {
+        if (stroke.yaw == null && stroke.vertical == null) continue
+        const row = axes[stroke.want] ??= { n: 0, yaw: [], vertical: [], nearMiss: 0, confident: 0 }
+        row.n += 1
+        if (stroke.yaw != null) row.yaw.push(stroke.yaw)
+        if (stroke.vertical != null) row.vertical.push(stroke.vertical)
+        if (stroke.ring === stroke.want) continue
+        // The decisive measurement for the direction the chart wanted. A left/right cue is decided
+        // on yaw, an up/down cue on vertical.
+        const decisive = stroke.want === "left" || stroke.want === "right" ? stroke.yaw : stroke.vertical
+        if (decisive == null) continue
+        const wanted = stroke.want === "left" || stroke.want === "up" ? 1 : -1
+        // Right sign, too small to clear the bar: the stroke was read correctly but faintly, and a
+        // lower threshold would have scored it.
+        if (Math.sign(decisive) === wanted && Math.abs(decisive) < 0.3) row.nearMiss += 1
+        // Wrong sign and not faint: the measurement genuinely pointed the other way, which no
+        // threshold can fix — that is the motion or the frame, not the bar.
+        else if (Math.sign(decisive) !== wanted && Math.abs(decisive) >= 0.3) row.confident += 1
+      }
+      const median = (list) => {
+        if (!list.length) return null
+        const sorted = [...list].sort((a, b) => a - b)
+        return Number(sorted[Math.floor(sorted.length / 2)].toFixed(3))
+      }
+      for (const [want, row] of Object.entries(axes)) {
+        axes[want] = {
+          n: row.n,
+          medianYaw: median(row.yaw),
+          medianVertical: median(row.vertical),
+          // Failures that a lower accept bar would have rescued.
+          nearMiss: row.nearMiss,
+          // Failures where the measurement pointed the wrong way outright.
+          confidentlyWrong: row.confident,
+        }
+      }
+
       return {
         level,
+        // Which classifier produced these numbers. A session's accuracy is uninterpretable without
+        // it, since the two paths fail in entirely different ways.
+        mode: mode ?? null,
         cues: this.cues.length,
         transitions,
+        axes,
         nearBoundary: {
           count: nearBoundary.length,
           cameraRight: nearBoundary.filter((s) => s.camera === s.want).length,

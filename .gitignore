@@ -11,3 +11,6 @@ __pycache__/
 
 # Exported camera disagreement logs hold webcam-derived hand positions; keep them local.
 camera-log-*.json
+
+# Scratch analysis scripts, not part of the project.
+tools/_r*.mjs

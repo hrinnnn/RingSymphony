@@ -212,11 +212,12 @@ function pickCard(part) {
 function onRing(event) {
   if (mode === "free") {
     if (event.hand !== "left") return
-    const calibration = ring.input.snapshot().palmCalibration
+    const snapshot = ring.input.snapshot()
+    const calibration = snapshot.palmCalibration
     if (calibration.active) return
     if (event.type === "strike") freeStart()
     else if (event.type === "palm") {
-      if (calibration.ready) playPalm(event.dir)
+      if (calibration.ready || snapshot.directionMode === "absolute") playPalm(event.dir)
       else toast("请先校准左手抬掌/压掌")
     }
     return
@@ -233,6 +234,10 @@ function onRing(event) {
       cameraReason: event.cameraReason, displacement: event.cameraDisplacement,
       angle: event.cameraAngle, margin: event.cameraMargin,
       source: event.directionSource, tier: event.tier,
+      // What the absolute classifier measured, and which classifier it was. Carried so an exported
+      // log can say why a stroke failed, not only that it did.
+      yaw: event.ringYaw, vertical: event.ringVertical, peakSpeed: event.peakSpeed,
+      mode: event.directionMode,
     })
     playBeat(event.dir, at, true, event.tier)
   }
@@ -391,12 +396,17 @@ function showGestureReport() {
 
 async function begin(study = lastStudy) {
   const ringSnapshot = ring.input?.snapshot()
-  if (ring.input?.live("right") && !ringSnapshot.direction.ready) {
+  // Only the template classifier needs calibration; the absolute one has nothing to be ready for,
+  // so gating on it would make the no-calibration mode impossible to actually start a level in.
+  if (ring.input?.live("right") && ringSnapshot.directionMode !== "absolute" && !ringSnapshot.direction.ready) {
     ring.openPanel()
     toast("请先完成右手四个方向的校准")
     return
   }
-  if (ring.input?.live("left") && !ringSnapshot.palmCalibration.ready) {
+  // Neither hand needs calibration in absolute mode: the right hand reads direction off gravity,
+  // and the left hand's palm detector already integrates along gravity, so its calibration was
+  // only ever learning a sign that does not vary between wearers.
+  if (ring.input?.live("left") && ringSnapshot.directionMode !== "absolute" && !ringSnapshot.palmCalibration.ready) {
     ring.openPanel()
     toast("请先完成左手抬掌/压掌校准")
     return

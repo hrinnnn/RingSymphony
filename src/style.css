@@ -63,6 +63,10 @@ header { position: absolute; left: 0; top: 0; right: 0; z-index: 6; display: fle
 .setting-note { font-size: 11px; }
 .setting-suggest { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid #ffb43c55; background: #ffb43c14; }
 .ring-calibration { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.ring-mode { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.ring-mode label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.ring-mode input { accent-color: var(--accent, currentColor); }
+.ring-mode-note { margin: 0 0 8px; color: var(--ink-soft); }
 .ring-directions { display: flex; flex-wrap: wrap; gap: 6px; }
 .ring-palm-counts { display: block; margin-top: 5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .ring-rerecord { width: 340px; max-width: calc(100vw - 40px); padding: 18px; border: 1px solid var(--line); border-radius: 3px; background: #0a0f1e; box-shadow: var(--shadow); color: var(--ink); }
