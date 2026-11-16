@@ -631,6 +631,8 @@ export function createWorld(canvas, laneCanvas) {
   box(scene, [2.72, 0.012, 0.025], glow(0xe6c98a, 0.8), 0, 0.2, 1.23)
   const desk = stand(scene, 0, 2.6, 1.18)
   desk.rotation.y = Math.PI
+  let conductorPage = null
+  desk.traverse((obj) => { if (obj.material?.map === paper) conductorPage = obj })
   const players = []
   // Fan, left to right as the conductor sees it: violins, flutes, horns, cellos, piano.
   const layout = [
@@ -685,6 +687,39 @@ export function createWorld(canvas, laneCanvas) {
   let lastFrame = performance.now() / 1000
 
   const cueRings = []
+  const ghost = new THREE.Group()
+  scene.add(ghost)
+  const ghostSkin = glow(0xe6c98a, 0.9)
+  const ghostPalm = box(ghost, [0.16, 0.035, 0.22], ghostSkin)
+  const ghostFinger = box(ghost, [0.028, 0.028, 0.16], ghostSkin, 0, 0.01, -0.16)
+  ghostPalm.castShadow = false
+  ghostFinger.castShadow = false
+  ghost.visible = false
+  const band = mesh(scene, new THREE.PlaneGeometry(1.4, 1.6), glow(0xe6c98a, 0))
+  band.castShadow = false
+  band.receiveShadow = false
+  band.visible = false
+  const scoreCanvas = document.createElement("canvas")
+  scoreCanvas.width = 512
+  scoreCanvas.height = 256
+  const scoreContext = scoreCanvas.getContext("2d")
+  const scoreTexture = new THREE.CanvasTexture(scoreCanvas)
+  scoreTexture.colorSpace = THREE.SRGBColorSpace
+  if (conductorPage) {
+    conductorPage.material = conductorPage.material.clone()
+    conductorPage.material.map = scoreTexture
+  }
+  function paintScore(line) {
+    if (!scoreContext) return
+    scoreContext.fillStyle = "#f7f1e6"
+    scoreContext.fillRect(0, 0, 512, 256)
+    scoreContext.fillStyle = "#4a4d5e"
+    scoreContext.font = '28px "Iowan Old Style", Palatino, serif'
+    scoreContext.textAlign = "center"
+    scoreContext.fillText(line || "指挥谱", 256, 148)
+    scoreTexture.needsUpdate = true
+  }
+  paintScore("指挥谱")
   function resize() {
     const rect = canvas.getBoundingClientRect()
     if (!rect.width || !rect.height) return
@@ -847,15 +882,39 @@ export function createWorld(canvas, laneCanvas) {
       }
     })
     const asked = sections.prompt
+    const askedNames = asked ? (asked.parts === "all" ? Object.keys(SECTION_COLOR) : [].concat(asked.part || asked.parts || [])) : []
     if (asked) {
-      const names = asked.parts === "all" ? Object.keys(SECTION_COLOR) : [].concat(asked.part || asked.parts || [])
       halos.forEach((disc) => {
-        if (!names.includes(disc.userData.of)) return
-        const lifted = asked.kind === "swell" ? 0.2 + (asked.progress || 0) * 0.55 : 0.72
+        if (!askedNames.includes(disc.userData.of)) return
+        const lifted = asked.kind === "swell" ? 0.2 + (asked.lift ?? asked.progress ?? 0) * 0.55 : 0.72
         disc.material.opacity = Math.max(disc.material.opacity, lifted)
         disc.userData.ring.material.opacity = 0.95
       })
     }
+    const targets = players.filter((person) => askedNames.includes(person.userData.part))
+    if (!asked || !targets.length && asked.kind !== "cut") {
+      ghost.visible = false
+      band.visible = false
+    } else {
+      const center = targets.length
+        ? targets.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / targets.length)
+        : new THREE.Vector3(0, 0, -3)
+      const lift = asked.lift ?? asked.progress ?? 0
+      ghost.visible = true
+      ghost.position.set(center.x, 2.15 + (asked.kind === "swell" && asked.dir !== "down" ? lift * 0.45 : asked.dir === "down" ? (1 - lift) * 0.2 : 0), center.z + 0.8)
+      ghost.lookAt(camera.position)
+      const pointing = asked.kind === "point" || asked.kind === "cue"
+      ghostFinger.scale.z = (pointing || asked.kind === "circle") ? 1 : asked.kind === "cut" ? 0.25 : 0.35
+      ghostFinger.position.z = pointing ? -0.18 : -0.08
+      if (asked.kind === "circle") ghost.position.x += Math.sin(t * 2.2) * 0.55
+      if (asked.kind === "swell") {
+        band.visible = true
+        band.position.set(center.x, 0.35 + Math.max(0.15, lift) * 0.8, center.z + 0.35)
+        band.scale.set(Math.max(1.2, targets.length * 0.7), Math.max(0.15, lift), 1)
+        band.material.opacity = 0.14 + lift * 0.28
+      } else band.visible = false
+    }
+    if (sections.score !== undefined) paintScore(sections.score)
     for (let i = cueRings.length - 1; i >= 0; i--) {
       const { cue, rings } = cueRings[i], remain = cue.time - seconds
       if (remain < -0.25 || cue.result) { rings.forEach(remove); cueRings.splice(i, 1); continue }

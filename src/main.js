@@ -45,6 +45,9 @@ const beatDots = [...document.querySelectorAll(".beat-dot")]
 const progressEl = document.querySelector("#progress-fill")
 const cueHintEl = document.querySelector("#cue-hint")
 const tallyEl = document.querySelector("#tally")
+const conductEl = document.querySelector("#conduct")
+const conductTitle = document.querySelector("#conduct-title")
+const conductMarks = document.querySelector("#conduct-marks")
 const hud = createMixerHud(document.querySelector("#mixer"), pickCard)
 // The camera is optional and additive. With it off, verdict() returns null and every beat takes
 // exactly the path it took before the camera existed.
@@ -103,6 +106,7 @@ function setMode(next) {
   hintEl.hidden = next === "home" || next === "result"
   toolsEl.hidden = next !== "free"
   exitEl.hidden = next === "home"
+  if (conductEl && next !== "playing" && next !== "count-in") conductEl.hidden = true
   document.body.dataset.mode = next
   if (next === "home") { statusEl.textContent = "选关"; world.resize() }
 }
@@ -728,17 +732,20 @@ function loop() {
   const pending = new Map(cues.filter((cue) => (cue.kind === "cue" || cue.kind === "circle") && !cue.result && cue.time - now < 2).flatMap((cue) => (cue.parts || [cue.part]).map((part) => [part, "in"])))
   const soon = cues.find((cue) => !cue.result && cue.kind !== "beat" && now >= cue.time - 1.6 && now <= (cue.until ?? cue.time + 0.4))
   const aimed = aimedSection()
+  const lift = handLift()
   const prompt = soon && {
-    kind: soon.kind === "cue" ? "point" : soon.kind,
+    kind: soon.kind === "cue" ? "point" : soon.kind === "dynamics" ? "swell" : soon.kind,
     part: soon.part,
-    parts: soon.parts || (soon.part ? [soon.part] : soon.parts),
+    parts: soon.parts || (soon.part ? [soon.part] : "all"),
     dir: soon.direction,
     progress: soon.until ? Math.min(1, Math.max(0, (now - soon.time) / (soon.until - soon.time))) : 1,
+    lift: lift == null ? undefined : soon.direction === "down" ? 1 - lift : lift,
   }
+  const scoreLine = conductLine(now)
   lane.update(now, chart, cues)
   const selected = new Set()
   if (aimed) selected.add(aimed)
-  world.update(now, playing, { selected, pending, solo: null, prompt })
+  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine })
 }
 
 // In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.
@@ -750,6 +757,33 @@ function aimedSection() {
   const x = seen ? (1 - seen.x) * view.clientWidth : mouseX
   if (x == null) return null
   return world.sectionAt?.(x) || null
+}
+
+// Camera y grows downward. A raised hand is the filled part of a swell; without a camera the band follows the clock.
+function handLift() {
+  const seen = camera.hand?.("left")
+  if (!seen) return null
+  return Math.min(1, Math.max(0, (0.72 - seen.y) / 0.4))
+}
+
+const HAND_WORD = { right: "右手打拍", left: "左手打拍", both: "双手重音", free: "放手", cut: "收束" }
+const HAND_MARK = { right: "右", left: "左", both: "双", free: "—", cut: "收" }
+function conductLine(now) {
+  if (!conductEl) return ""
+  const phrases = chart?.phrases
+  if (!phrases) { conductEl.hidden = true; return "" }
+  const bar = Math.max(0, Math.min(chart.bars - 1, Math.floor((now - chart.countIn) / (chart.meter * chart.beat))))
+  const phrase = phrases.find((item) => bar >= item.bar && bar < item.bar + item.bars) || phrases[0]
+  const note = (phrase.cues || []).map((cue) => cue.kind === "point" ? `指${PART_INFO[cue.part].name}` : cue.kind === "circle" ? "画圈" : cue.dir === "up" ? "渐强" : "渐弱").join(" · ")
+  const title = `第 ${bar + 1} 小节 · ${HAND_WORD[phrase.hand]}${note ? ` · ${note}` : ""}`
+  conductEl.hidden = false
+  conductTitle.textContent = title
+  conductMarks.innerHTML = Array.from({ length: Math.min(8, chart.bars - bar) }, (_, i) => {
+    const at = bar + i
+    const here = phrases.find((item) => at >= item.bar && at < item.bar + item.bars)
+    return `<i class="${i === 0 ? "now" : ""}">${HAND_MARK[here?.hand] || ""}</i>`
+  }).join("")
+  return title
 }
 
 window.addEventListener("keydown", (event) => {

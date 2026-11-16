@@ -164,5 +164,6 @@ export function buildPieceChart(piece = PIECES[0]) {
     duration: countIn + piece.bars * piece.meter * beat,
     study: piece,
     entries: ENTRIES[piece.id],
+    phrases: PHRASES[piece.id],
   }
 }
