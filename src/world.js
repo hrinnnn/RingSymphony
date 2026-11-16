@@ -18,28 +18,28 @@ const toonRamp = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 215, 
 toonRamp.minFilter = THREE.NearestFilter
 toonRamp.magFilter = THREE.NearestFilter
 toonRamp.needsUpdate = true
-const material = (color, _roughness, _metalness, emissive = 0x000000) => new THREE.MeshToonMaterial({ color, emissive, gradientMap: toonRamp })
+const material = (color, roughness = 0.65, metalness = 0, emissive = 0x000000) => new THREE.MeshStandardMaterial({ color, roughness, metalness, emissive })
 const shade = (hex, k) => new THREE.Color(hex).multiplyScalar(k).getHex()
-const black = material(0x4a4d5e)
-const shoe = material(0x33364a)
-const white = material(0xfffaf2)
-const brass = material(BUTTER)
-const silver = material(0xe3eef7)
-const oak = material(0xd98b52)
-const bowWood = material(0xf2b56b)
+const black = material(0x161a23)
+const shoe = material(0x090c12, 0.3)
+const white = material(0xf5eee0)
+const brass = material(0xbb9353, 0.35, 0.7)
+const silver = material(0xc5d8df, 0.24, 0.8)
+const oak = material(0x743d1d, 0.4)
+const bowWood = material(0xe0a85a, 0.38, 0.05, 0x3a240c)
 const glow = (color, opacity = 1) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide })
 const ivory = material(0xfffaf2)
 const gilt = material(BUTTER, 0, 0, 0x3a2a00)
 const lip = material(0xa8585f)
 const eyeInk = material(0x2b2d3a)
 const blush = glow(0xe39a96, 0.3)
-const skins = [0xf3cdb3, 0xd9a47f, 0xf7dcc8, 0xc58d68].map((color) => material(color))
-const hairColors = [0x3a2a26, 0x6e4a34, 0xc9a46a, 0x2b2a35, 0x8f5a3e].map((color) => material(color))
+const skins = [0xd7a784, 0xa36d4d, 0xf0c7a6, 0xc48b62].map((color) => material(color, 0.8))
+const hairColors = [0x1b140f, 0x6a432c, 0xb7aea4, 0x241816, 0x3a2418].map((color) => material(color, 0.5, 0.08))
 const suits = Object.fromEntries(Object.entries(SECTION_COLOR).map(([part, color]) => [part, {
   color: new THREE.Color(color),
-  coat: material(0x1a1c24),
-  deep: material(0x101218),
-  pants: material(0x14161c),
+  coat: material(0x1a1e28, 0.55, 0.06),
+  deep: material(0x10131a, 0.7),
+  pants: material(0x14161c, 0.6),
 }]))
 const sectionMat = Object.fromEntries(Object.entries(SECTION_COLOR).map(([part, color]) => [part, material(color)]))
 
@@ -154,7 +154,7 @@ function stand(parent, x, z, scale = 1) {
   return group
 }
 function chair(parent, accent) {
-  const seatMat = material(0x8a5a44)
+  const seatMat = material(0x44212a, 0.9)
   box(parent, [0.43, 0.09, 0.43], seatMat, 0, 0.46)
   const back = box(parent, [0.43, 0.35, 0.07], seatMat, 0, 0.77, -0.2); back.rotation.x = -0.1
   for (const x of [-0.17, 0.17]) for (const z of [-0.17, 0.17]) rod(parent, [x, 0.45, z], [x * 1.2, 0.02, z * 1.2], 0.018, black)
@@ -165,7 +165,7 @@ function chair(parent, accent) {
   }
 }
 function bench(parent) {
-  box(parent, [0.72, 0.07, 0.34], material(0x8a5a44), 0, 0.48)
+  box(parent, [0.72, 0.07, 0.34], material(0x3a2428, 0.85), 0, 0.48)
   for (const x of [-0.28, 0.28]) for (const z of [-0.12, 0.12]) rod(parent, [x, 0.45, z], [x, 0.03, z], 0.02, black)
 }
 function stringInstrument(parent, cello) {
@@ -325,7 +325,7 @@ function musician(part, x, z, index) {
   if (part !== "flute") buildLegs(group, part)
   const body = new THREE.Group(); group.add(body)
   buildTorso(body, part, accent, skin, index)
-  const head = new THREE.Group(); head.position.y = 1.36; head.scale.setScalar(1.25); body.add(head)
+  const head = new THREE.Group(); head.position.y = 1.31; head.scale.setScalar(1); body.add(head)
   buildHead(head, skin, hair, index, part)
   const rig = {}
   let moving = null
@@ -464,7 +464,12 @@ function animatePlayers(players, seconds, playing, sections, wall) {
     const stroke = person.userData.stroke
     const age = stroke ? wall - stroke.start : 0
     const sounding = Boolean(stroke) && age >= 0 && age <= stroke.dur
-    const along = sounding ? Math.sin((age / stroke.dur) * Math.PI) * (0.35 + 0.65 * stroke.vel) : 0
+    // A sounding note is one bow. Between notes an active player keeps a smaller stroke,
+    // so the last bars do not freeze just because a long note has reached its end.
+    const phrase = Math.sin(seconds * Math.PI * 2 * hz + index * 0.4)
+    const along = sounding
+      ? Math.sin((age / stroke.dur) * Math.PI) * (0.45 + 0.55 * stroke.vel)
+      : active ? phrase * 0.42 : 0
     // Waiting players hop in their seats; the entrance itself is a little bounce.
     const eager = sections.pending.has(part) ? Math.abs(Math.sin(wall * 9 + index)) * 0.05 : 0
     const bounce = active ? entrance * Math.abs(Math.sin(since * 14)) * 0.06 : 0
@@ -558,77 +563,74 @@ export function createWorld(canvas, laneCanvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.NoToneMapping
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.35
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   const scene = new THREE.Scene()
-  scene.background = texture((g, w, h) => bands(g, w, h, [0x03050b, 0x0a1022, 0x121a33]), 4, 256)
-  scene.fog = new THREE.FogExp2(0x070b17, 0.028)
+  scene.background = new THREE.Color(0x080b12)
+  scene.fog = new THREE.FogExp2(0x0c0e16, 0.036)
   const camera = new THREE.PerspectiveCamera(53, 1, 0.05, 60)
   camera.position.set(0, 2.2, 4.7)
   camera.lookAt(0, 1.25, -3)
   scene.add(camera)
-  scene.add(new THREE.HemisphereLight(0x8fa6dc, 0x161222, 1.05))
-  const key = new THREE.DirectionalLight(0xd8e6ff, 1.25); key.position.set(-3, 7, 4)
+  scene.add(new THREE.HemisphereLight(0xd9e6ff, 0x6d4224, 1.65))
+  const key = new THREE.DirectionalLight(0xffdfad, 3.3); key.position.set(-3, 7, 4)
   key.castShadow = true; key.shadow.mapSize.set(2048, 2048)
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 25 })
   key.shadow.bias = -0.001; scene.add(key)
-  const rim = new THREE.DirectionalLight(0xe6c98a, 1.5); rim.position.set(4, 4, -7); scene.add(rim)
-  const rimWarm = new THREE.DirectionalLight(0xff4f8b, 0.9); rimWarm.position.set(-5, 3, -6); scene.add(rimWarm)
+  const rim = new THREE.DirectionalLight(0x8baaff, 1.8); rim.position.set(4, 4, -7); scene.add(rim)
   for (const x of [-4, 0, 4]) {
-    const spot = new THREE.SpotLight(0xcfe0ff, 16, 18, 0.55, 0.9, 1.5)
+    const spot = new THREE.SpotLight(0xffd3a0, 45, 18, 0.51, 0.8, 1.5)
     spot.position.set(x, 6, -1); spot.target.position.set(x * 0.7, 0, -3)
     scene.add(spot, spot.target)
-    oval(scene, [0.09, 0.045, 0.09], glow(0xdff0ff), x, 5.8, -1)
+    oval(scene, [0.09, 0.045, 0.09], glow(0xffe9bd), x, 5.8, -1)
   }
   const floorMap = texture((g, w, h) => {
-    g.fillStyle = '#151a2a'; g.fillRect(0, 0, w, h)
+    g.fillStyle = '#84502e'; g.fillRect(0, 0, w, h)
     let seed = 42
     const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296 }
     for (let row = 0; row < 8; row++) {
-      g.fillStyle = `hsl(${222 + rand() * 8} 26% ${14 + rand() * 5}%)`; g.fillRect(0, row * 64, w, 63)
-      g.fillStyle = '#0b0f1c'; g.fillRect(0, row * 64, w, 3)
-      for (let n = 0; n < 18; n++) {
-        g.strokeStyle = `rgba(120,150,220,${rand() * 0.08})`; g.beginPath()
+      g.fillStyle = `hsl(29 38% ${32 + rand() * 11}%)`; g.fillRect(0, row * 64, w, 63)
+      g.fillStyle = '#372519'; g.fillRect(0, row * 64, w, 2)
+      for (let n = 0; n < 45; n++) {
+        g.strokeStyle = `rgba(32,18,9,${rand() * 0.15})`; g.beginPath()
         const y = row * 64 + rand() * 64
         g.moveTo(0, y); g.bezierCurveTo(150, y + rand() * 7, 340, y - rand() * 7, w, y); g.stroke()
       }
-      g.fillStyle = '#0b0f1c'; g.fillRect(row % 2 ? 120 : 360, row * 64, 3, 64)
+      g.fillStyle = '#46301f'; g.fillRect(row % 2 ? 120 : 360, row * 64, 2, 64)
     }
   })
   floorMap.wrapS = floorMap.wrapT = THREE.RepeatWrapping; floorMap.repeat.set(4, 5); floorMap.anisotropy = renderer.capabilities.getMaxAnisotropy()
-  const floor = mesh(scene, new THREE.PlaneGeometry(19, 23, 19, 23), new THREE.MeshToonMaterial({ map: floorMap, gradientMap: toonRamp }), 0, -0.01, -3)
+  const floor = mesh(scene, new THREE.PlaneGeometry(19, 23, 19, 23), new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.48 }), 0, -0.01, -3)
   floor.rotation.x = -Math.PI / 2
-  box(scene, [19, 0.35, 20], material(0x0d1120), 0, -0.2, -4)
-  // Dark hall: charcoal panels, dim steel organ pipes, wine-black curtains, thin cyan light strips.
-  box(scene, [18, 7, 0.3], material(0x1a2033), 0, 3.4, -10)
+  box(scene, [19, 0.35, 20], material(0x38251c), 0, -0.2, -4)
+  // Timber hall, brass organ pipes, burgundy curtains. The first version of the room.
+  box(scene, [18, 7, 0.3], material(0x241c1a), 0, 3.4, -10)
   for (let i = -8; i <= 8; i++) {
-    box(scene, [0.79, 5.4, 0.15], material(i % 2 ? 0x222a42 : 0x1c233a), i * 0.96, 2.8, -9.75)
-    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.02, glow(0xe6c98a, 0.55))
+    box(scene, [0.79, 5.4, 0.15], material(i % 2 ? 0x4e3426 : 0x5e3e2c), i * 0.96, 2.8, -9.75)
+    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.023, brass)
   }
-  const pipeColors = [0x4a5470, 0x3d465f]
   for (let i = -10; i <= 10; i++) {
     const h = 2.3 + (1 - Math.abs(i) / 11) * 1.9
-    const pipeMat = material(pipeColors[(i + 10) % pipeColors.length])
-    rod(scene, [i * 0.17, 1.5, -9.35], [i * 0.17, 1.5 + h, -9.35], 0.064, pipeMat)
-    oval(scene, [0.07, 0.035, 0.07], material(0x8f9bbd), i * 0.17, 1.5 + h, -9.35)
+    rod(scene, [i * 0.17, 1.5, -9.35], [i * 0.17, 1.5 + h, -9.35], 0.064, material(0xa99c7c, 0.37, 0.65))
   }
   for (const s of [-1, 1]) {
     for (let i = 0; i < 18; i++) {
-      const curtain = mesh(scene, new THREE.CylinderGeometry(0.22, 0.24, 7.5, 12), material(i % 2 ? 0x2a1020 : 0x220c19), s * (6.3 + i * 0.16), 3.5, -7.6 + Math.sin(i) * 0.12)
+      const curtain = mesh(scene, new THREE.CylinderGeometry(0.22, 0.24, 7.5, 12), material(i % 2 ? 0x401624 : 0x591e2d), s * (6.3 + i * 0.16), 3.5, -7.6 + Math.sin(i) * 0.12)
       curtain.scale.z = 0.8
     }
-    box(scene, [0.6, 6, 15], material(0x141a2c), s * 9, 3, -2)
+    box(scene, [0.6, 6, 15], material(0x171620), s * 9, 3, -2)
     for (const y of [2.9, 5.1]) {
-      box(scene, [0.7, 0.2, 14], material(0x1c2338), s * 8.4, y, -2.5)
-      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.03, glow(0xe6c98a, 0.7))
-      for (let z = -9; z < 4; z += 0.5) rod(scene, [s * 8, y, z], [s * 8, y + 0.55, z], 0.012, material(0x2c3552))
+      box(scene, [0.7, 0.2, 14], oak, s * 8.4, y, -2.5)
+      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.035, brass)
+      for (let z = -9; z < 4; z += 0.5) rod(scene, [s * 8, y, z], [s * 8, y + 0.55, z], 0.014, brass)
     }
   }
-  const podium = box(scene, [2.8, 0.19, 4.2], material(0x1c2238), 0, 0.095, 3.3)
-  box(podium, [2.64, 0.018, 4.03], material(0x2a1226), 0, 0.105, 0)
-  for (const x of [-1.35, 1.35]) box(scene, [0.025, 0.012, 4.15], glow(0xe6c98a, 0.8), x, 0.2, 3.3)
-  box(scene, [2.72, 0.012, 0.025], glow(0xe6c98a, 0.8), 0, 0.2, 1.23)
+  const podium = box(scene, [2.8, 0.19, 4.2], oak, 0, 0.095, 3.3)
+  box(podium, [2.64, 0.018, 4.03], material(0x5f2630), 0, 0.105, 0)
+  for (const x of [-1.35, 1.35]) box(scene, [0.025, 0.012, 4.15], brass, x, 0.2, 3.3)
+  box(scene, [2.72, 0.012, 0.025], brass, 0, 0.2, 1.23)
   const desk = stand(scene, 0, 2.6, 1.18)
   desk.rotation.y = Math.PI
   let conductorPage = null

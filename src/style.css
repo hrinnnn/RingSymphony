@@ -99,18 +99,9 @@ header { position: absolute; left: 0; top: 0; right: 0; z-index: 6; display: fle
 
 #home {
   position: relative; min-height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 96px 24px 56px; text-align: center; overflow: hidden;
-  background-color: #090c12;
-  background-image: url("data:image/svg+xml;charset=UTF-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1400 900'><g font-family='Palatino, Songti SC, serif'><text x='80' y='160' fill='%23e6c98a' font-size='54' opacity='.28'>♪</text><text x='250' y='640' fill='%23c4a15a' font-size='72' opacity='.22'>♫</text><text x='1080' y='190' fill='%23b7c4c9' font-size='48' opacity='.26'>♩</text><text x='1160' y='560' fill='%23e6c98a' font-size='78' opacity='.2'>♬</text><text x='820' y='760' fill='%23d9cbb6' font-size='42' opacity='.24'>♪</text><text x='430' y='130' fill='%238d3a45' font-size='36' opacity='.45'>♫</text><text x='60' y='460' fill='%23c4a15a' font-size='40' opacity='.28'>♩</text><text x='960' y='100' fill='%23e6c98a' font-size='34' opacity='.22'>♪</text></g></svg>");
-  background-repeat: no-repeat;
-  background-size: 118% 118%;
-  background-position: 50% 42%;
-  animation: float 14s ease-in-out infinite;
+  background: #090c12;
 }
-#home::before, #home::after { position: absolute; z-index: 0; pointer-events: none; font-family: var(--serif); line-height: 1; }
-#home::before { content: "♩"; left: 6%; top: 18%; font-size: 68px; color: #e6c98a; opacity: .22; animation: note-a 9s ease-in-out infinite; }
-#home::after { content: "♫"; right: 7%; bottom: 10%; font-size: 76px; color: #c4a15a; opacity: .2; animation: note-b 11s ease-in-out infinite; }
-.floaties { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
-.floaties i { position: absolute; font-style: normal; font-weight: 400; font-size: 34px; color: #e6c98a; opacity: .28; animation: note-a 9s ease-in-out infinite; }
+.floaties { display: none; }
 .floaties i:nth-child(1) { left: 8%; top: 18%; color: #e6c98a; }
 .floaties i:nth-child(2) { left: 18%; top: 72%; color: #c4a15a; animation-delay: -1.4s; font-size: 48px; }
 .floaties i:nth-child(3) { left: 78%; top: 16%; color: #d9cbb6; animation-delay: -2.2s; }

@@ -4,7 +4,7 @@
 // Left column = left hand (section entrances, swell / fade); centre = right hand (directional beats).
 import { GOOD } from "./judge.js"
 
-export const DIRECTION_COLOR = { up: "#e6c98a", down: "#c4a15a", left: "#b7c4c9", right: "#d9cbb6" }
+export const DIRECTION_COLOR = { up: "#f8eee0", down: "#e6c98a", left: "#f8eee0", right: "#f8eee0" }
 const PART_COLOR = { violin: "#e6c98a", flute: "#b7c4c9", horn: "#c4a15a", cello: "#8d3a45", piano: "#d9cbb6" }
 const PART_NAME = { violin: "小提琴", cello: "大提琴", flute: "长笛", piano: "钢琴" }
 const PART_BADGE = { violin: "VN", cello: "VC", flute: "FL", piano: "PF" }
