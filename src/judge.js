@@ -1,5 +1,6 @@
-export const PERFECT = 0.12
-export const GOOD = 0.25
+// Wide on purpose: this is conducting, not a rhythm game. Half a beat still counts.
+export const PERFECT = 0.15
+export const GOOD = 0.4
 
 export function createJudge(level) {
   const beatSec = 60 / level.bpm

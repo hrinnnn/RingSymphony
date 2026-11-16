@@ -10,10 +10,9 @@
 //
 // Pure: no DOM, no storage. The page feeds it strokes; tests feed it synthetic ones.
 
-// How far from a cue a stroke may land and still be taken as an attempt at it. Wider than the Good
-// window (±250ms) on purpose: a stroke 300ms late is a timing error, not a different gesture, and
-// counting it as "unmatched" would hide exactly the timing data this is meant to expose.
-export const MATCH_WINDOW = 0.4
+// Wider than the Good window (400ms) on purpose: a late stroke is a timing error, not a different
+// gesture, and counting it as unmatched would hide the timing data this log is meant to expose.
+export const MATCH_WINDOW = 0.5
 
 const DIRECTIONS = ["up", "down", "left", "right"]
 

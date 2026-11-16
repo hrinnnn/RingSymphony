@@ -175,7 +175,7 @@ for (const cue of chart.cues.filter(c=>c.hand==='left')) {
   assert.ok(chart.cues.some(c=>c.hand==='right'&&Math.abs(c.time-cue.time)<1e-9),
     `left-hand ${cue.kind} at ${cue.time}s must share a beat with a right-hand cue`)
 }
-assert.equal(PERFECT,.12); assert.equal(GOOD,.25)
+assert.equal(PERFECT,.15); assert.equal(GOOD,.4)
 console.log('Chart I, cue positions, 120 ms / 250 ms windows: pass')
 for (const study of STUDIES) {
   const built = buildChart(study)

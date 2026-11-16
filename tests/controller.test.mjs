@@ -40,7 +40,7 @@ globalThis.__controller = {
   queuePart: (part, gain, quantum, landed) => { audio.queued.push({ part, gain, quantum, landed }) },
   setPartGain: (part, gain) => { audio.gains[part] = gain }, setTempo: bpm => { audio.tempo = bpm },
   partLevels: () => ({}), transportBeats: () => 0,
-  transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .25, PERFECT: .12, createWorld: () => world, createLane: () => lane, createSettings: () => settings,
+  transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .4, PERFECT: .15, createWorld: () => world, createLane: () => lane, createSettings: () => settings, startPiece: async () => ({ duration: 1, countIn: 1 }), buildPieceChart: () => ({ cues: [], meter: 4, beat: 1, countIn: 1, duration: 1, bars: 1 }), PIECES: [],
   startRing: ({ onGesture, onPreview }) => { ringGesture = onGesture; ringPreview = onPreview; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
   createMixerHud: () => ({ update() {} }), lassoParts, pathLength, createMixer, PART_INFO, PARTS, LOOP_BARS, createTempo,
   // The camera is optional and the controller must work with it absent, which is what these
@@ -91,9 +91,9 @@ await node('#retry').handlers.click()
 assert.equal(audio.dynamics,1)
 tick(chart.cues[0].time+.1199); key('ArrowDown')
 tick(chart.cues[1].time+.2499); key('ArrowLeft')
-tick(chart.cues[2].time); key('ArrowLeft') // wrong direction
+tick(chart.cues[2].time); key('ArrowLeft') // wrong direction, but the time is exact
 tick(chart.duration)
-assert.equal(counts(),'Perfect 1 Good 1 Miss 34')
+assert.equal(counts(),'Perfect 1 Good 2 Miss 33')
 assert.match(node('#timing').innerHTML, /偏晚 2/, 'the result screen counts late hits')
 assert.equal(settings.bias, null, 'two hits are too few to suggest a delay')
 assert.deepEqual(pageHits.at(-1).slice(1, 2), ['miss'])
@@ -220,13 +220,14 @@ await node('#retry').handlers.click()
 ringLive.add('right')
 tick(ringStudy.cues[0].time)
 gesture('beat', 'right', { dir: null })
-assert.equal(node('#tally').textContent, '0000', 'unknown direction cannot score')
+assert.equal(node('#tally').textContent, '0100', 'an unclear direction is judged on time alone')
 const previousErrors = ringErrors.length
+await node('#retry').handlers.click()
+ringLive.add('right')
+tick(ringStudy.cues[0].time)
 gesture('beat', 'right', { dir: 'up' })
 assert.equal(ringErrors.length, previousErrors, 'a wrong-direction beat must not be used for latency compensation')
-tick(ringStudy.duration)
-assert.match(counts(), /Miss/, 'wrong direction is a miss')
-assert.equal(node('#tally').textContent, '0000')
+assert.equal(node('#tally').textContent, '0050', 'a wrong direction on time is Good, not a miss')
 ringLive.clear()
 await node('#back').handlers.click()
 

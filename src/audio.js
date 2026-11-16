@@ -1,5 +1,7 @@
 import * as Tone from "tone"
 import { PARTS } from "./mixer.js"
+import { ENTRIES } from "./orchestra.js"
+import { eventsFor as pieceEvents } from "./repertoire.js"
 import { eventsFor, LOOP_BARS, loopEvents } from "./score.js"
 
 let parts
@@ -31,6 +33,22 @@ function ensure() {
       envelope: { attack: 0.08, decay: 0.2, sustain: 0.6, release: 0.4 },
     }),
   }
+  const samples = {
+    violin: ["G3", "C4", "E4", "G4", "C5", "E5", "G5", "C6"],
+    flute: ["C4", "E4", "C5", "E5", "C6", "E6", "A6"],
+    horn: ["C4"],
+    cello: ["C2", "E2", "G2", "C3", "E3", "G3", "C4", "E4"],
+    piano: ["C2", "E2", "G2", "C3", "E3", "G3", "C4", "E4", "G4", "C5", "E5", "G5", "C6"],
+  }
+  const samplers = {}
+  for (const part of PARTS) {
+    samplers[part] = new Tone.Sampler({
+      urls: Object.fromEntries(samples[part].map((note) => [note, `${note}.mp3`])),
+      baseUrl: `/samples/${part}/`,
+      release: 0.8,
+      onerror: () => {},
+    })
+  }
   synths.piano.volume.value = -12
   synths.cello.volume.value = -6
   synths.violin.volume.value = -8
@@ -42,6 +60,7 @@ function ensure() {
     const gate = new Tone.Gain(0)
     const meter = new Tone.Meter({ normalRange: true, smoothing: 0.82 })
     synths[part].connect(gate)
+    samplers[part].connect(gate)
     gate.connect(master)
     gate.connect(meter)
     gates[part] = gate
@@ -54,7 +73,12 @@ function ensure() {
   synths.tick.volume.value = -24
   synths.kick.toDestination()
   synths.tick.toDestination()
-  parts = { synths, gates, meters, master }
+  parts = { synths, samplers, gates, meters, master }
+}
+
+function voice(part) {
+  const sampler = parts.samplers[part]
+  return sampler?.loaded ? sampler : parts.synths[part]
 }
 
 function scheduleEvents(events, hooks) {
@@ -64,9 +88,11 @@ function scheduleEvents(events, hooks) {
     Tone.Transport.schedule((time) => {
       const at = Math.max(time, (lastStart[event.part] ?? -Infinity) + 0.001)
       lastStart[event.part] = at
-      parts.synths[event.part].triggerAttackRelease(event.note, event.dur, at, event.vel)
+      voice(event.part).triggerAttackRelease(event.note, event.dur, at, event.vel)
       if (!parts.gates[event.part]) return
       Tone.Draw.schedule(() => {
+        const dur = Tone.Time(event.dur).toSeconds()
+        hooks.onNote?.({ part: event.part, note: event.note, dur, vel: event.vel })
         if (parts.gates[event.part].gain.value > 0.05) hooks.onVoice(event.part)
       }, time)
     }, Tone.Time(event.time).toSeconds())
@@ -110,6 +136,25 @@ export async function startLevel(chart, hooks) {
     Tone.Draw.schedule(() => hooks.onDone(), time)
   }, chart.duration)
   Tone.Transport.start()
+}
+
+export async function startPiece(piece, hooks) {
+  await Tone.start()
+  ensure()
+  resetTransport(piece.bpm, piece.meter)
+  const open = new Set(ENTRIES[piece.id].on)
+  PARTS.forEach((part) => setPart(part, open.has(part)))
+  const bar = Tone.Time("1m").toSeconds()
+  scheduleEvents(pieceEvents(piece.id).map((event) => ({
+    ...event,
+    time: Tone.Time(event.time).toSeconds() + bar,
+  })), hooks)
+  const duration = bar * (piece.bars + 1)
+  Tone.Transport.schedule((time) => {
+    Tone.Draw.schedule(() => hooks.onDone?.(), time)
+  }, duration)
+  Tone.Transport.start()
+  return { duration, countIn: bar }
 }
 
 export async function startFree(hooks) {

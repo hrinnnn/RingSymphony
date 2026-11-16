@@ -4,11 +4,11 @@
 // Left column = left hand (section entrances, swell / fade); centre = right hand (directional beats).
 import { GOOD } from "./judge.js"
 
-export const DIRECTION_COLOR = { up: "#35e0ff", down: "#ff4f8b", left: "#ffb43c", right: "#9b7bff" }
-const PART_COLOR = { violin: "#ff4f8b", cello: "#9b7bff", flute: "#2fe0b4", piano: "#ffb43c" }
+export const DIRECTION_COLOR = { up: "#e6c98a", down: "#c4a15a", left: "#b7c4c9", right: "#d9cbb6" }
+const PART_COLOR = { violin: "#e6c98a", flute: "#b7c4c9", horn: "#c4a15a", cello: "#8d3a45", piano: "#d9cbb6" }
 const PART_NAME = { violin: "小提琴", cello: "大提琴", flute: "长笛", piano: "钢琴" }
 const PART_BADGE = { violin: "VN", cello: "VC", flute: "FL", piano: "PF" }
-const GRADE = { perfect: { text: "PERFECT", color: "#35e0ff" }, good: { text: "GOOD", color: "#9be86a" }, miss: { text: "MISS", color: "#7b8299" } }
+const GRADE = { perfect: { text: "PERFECT", color: "#e6c98a" }, good: { text: "GOOD", color: "#d9cbb6" }, miss: { text: "MISS", color: "#7b8299" } }
 const FONT = '"Segoe UI", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif'
 const VECTOR = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
 const ROTATION = { up: 0, right: Math.PI / 2, down: Math.PI, left: -Math.PI / 2 }
@@ -186,7 +186,7 @@ export function createLane(canvas) {
     if (fade <= 0.01) return
     const { x, y, scale } = place(cue, remain, lead)
     const r = layout.r * scale * (cue.hand === "left" ? 1.1 : 1)
-    const color = missed ? "#7b8299" : cue.kind === "cue" ? PART_COLOR[cue.part] : cue.kind === "dynamics" ? (cue.direction === "up" ? "#ffb43c" : "#35e0ff") : DIRECTION_COLOR[cue.direction]
+    const color = missed ? "#7b8299" : cue.kind === "cue" ? PART_COLOR[cue.part] : cue.kind === "dynamics" ? (cue.direction === "up" ? "#e6c98a" : "#b7c4c9") : DIRECTION_COLOR[cue.direction]
     if (cue.direction && !missed) tail(cue, remain, lead, color, fade)
     if (cue.hand === "left") leftNote(x, y, r, color, fade)
     else disc(x, y, r, color, fade)
@@ -209,7 +209,7 @@ export function createLane(canvas) {
     const phase = ((now / chart.beat) % 1 + 1) % 1
     const pulse = Math.exp(-phase * 5)
     g.save()
-    g.shadowColor = "#35e0ff"
+    g.shadowColor = "#e6c98a"
     g.shadowBlur = 8 + 18 * pulse
     g.lineWidth = 2
     g.strokeStyle = alpha("#e8f1ff", 0.85)
@@ -282,7 +282,7 @@ export function createLane(canvas) {
   function hit(cue, kind, delta) {
     const sec = Math.abs(delta ?? 0)
     const timing = kind !== "miss" && sec >= 0.025
-      ? { text: `${delta < 0 ? "偏早" : "偏晚"} ${Math.round(sec * 1000)}ms`, color: delta < 0 ? "#35e0ff" : "#ff4f8b" }
+      ? { text: `${delta < 0 ? "偏早" : "偏晚"} ${Math.round(sec * 1000)}ms`, color: delta < 0 ? "#b7c4c9" : "#e6c98a" }
       : null
     fx.push({ cue, kind, timing, born: performance.now() })
   }

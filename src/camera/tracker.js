@@ -246,6 +246,13 @@ export function createCameraTracker({
 
     // The one method the ring pipeline calls, on every right-hand beat and left-hand palm event.
     // Synchronous and cheap: nothing in the beat path may wait for a frame.
+    // Latest palm position in the camera image, 0..1, or null if the hand has left.
+    hand(role) {
+      const frame = buffers[role]?.at(-1)
+      if (!frame || performance.now() / 1000 - frame.t > 0.4) return null
+      return { x: frame.x, y: frame.y }
+    },
+
     verdict(hand, pageTime) {
       if (!running) return null
       const result = cameraDirection(buffers[hand], pageTime)

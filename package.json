@@ -9,7 +9,7 @@
     "ring": "node bridge/server.mjs",
     "replay": "node bridge/replay.mjs",
     "eval": "node tools/eval-detectors.mjs",
-    "test": "node tests/world.test.mjs && node tests/absolute.test.mjs && node tests/sections.test.mjs && node tests/controller.test.mjs && node tests/ring.test.mjs && node tests/direction.test.mjs && node tests/lane.test.mjs && node tests/camera.test.mjs && node tests/gesture-log.test.mjs && node tools/replay-sessions.mjs"
+    "test": "node tests/world.test.mjs && node tests/absolute.test.mjs && node tests/sections.test.mjs && node tests/repertoire.test.mjs && node tests/controller.test.mjs && node tests/ring.test.mjs && node tests/direction.test.mjs && node tests/lane.test.mjs && node tests/camera.test.mjs && node tests/gesture-log.test.mjs && node tools/replay-sessions.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.2.3",

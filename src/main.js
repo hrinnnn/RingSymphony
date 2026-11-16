@@ -1,4 +1,4 @@
-import { endFree, partLevels, queuePart, setDynamics, setPart, setPartGain, setTempo, songSeconds, startFree, startLevel, stopLevel, transportBeats } from "./audio.js"
+import { endFree, partLevels, queuePart, setDynamics, setPart, setPartGain, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
 import { buildChart, STUDIES } from "./chart.js"
 import { createMixerHud } from "./hud.js"
 import { GOOD, PERFECT } from "./judge.js"
@@ -10,6 +10,7 @@ import { createCameraTracker } from "./camera/tracker.js"
 import { createCameraLog } from "./camera/log.js"
 import { createCameraPanel } from "./camera/panel.js"
 import { createGestureLog } from "./ring/gesture-log.js"
+import { buildPieceChart, PIECES } from "./repertoire.js"
 import { LOOP_BARS } from "./score.js"
 import { createSettings } from "./settings.js"
 import { createTempo } from "./tempo.js"
@@ -92,6 +93,7 @@ function levelButton(icon, tone, title, detail, tag, onClick) {
 }
 STUDIES.forEach((study, i) => levelButton(["♪", "♩", "♬"][i], ["var(--pink)", "var(--sky)", "var(--butter)"][i], study.title, study.blurb, study.tag, () => begin(study)))
 levelButton("♫", "var(--mint)", "自由指挥 · 分声部", "点选或画圈选中声部，起奏、停止、独奏<br>挥拍的快慢就是乐队的速度", "自由模式", beginFree)
+PIECES.forEach((piece) => levelButton("♪", "var(--gold, #e6c98a)", piece.title, piece.sub, piece.tag, () => beginPiece(piece)))
 
 function setMode(next) {
   mode = next
@@ -121,6 +123,7 @@ function scoreCue(cue, kind, delta) {
   lane.hit(cue, kind, delta)
   if (kind === "miss") return
   if (cue.kind === "cue") { setPart(cue.part, true); world.pose("left", "point", cue.part) }
+  if (cue.kind === "circle") { cue.parts.forEach((part) => setPart(part, true)); world.pose("left", "point", cue.parts[0]) }
   if (cue.kind === "dynamics") {
     dynamics = cue.direction === "up" ? 1.6 : 0.7
     setDynamics(dynamics)
@@ -132,8 +135,8 @@ function nearest(now, hand, kind) {
   let best = null
   let distance = Infinity
   for (const cue of cues) {
-    if (cue.result || cue.hand !== hand || (kind && cue.kind !== kind)) continue
-    const gap = Math.abs(now - cue.time)
+    if (cue.result || (cue.hand !== hand && cue.hand !== "both") || (kind && cue.kind !== kind)) continue
+    const gap = cue.until ? (now < cue.time - 0.15 || now > cue.until ? Infinity : 0) : Math.abs(now - cue.time)
     if (gap < distance) {
       distance = gap
       best = cue
@@ -156,32 +159,38 @@ function gradeDistance(distance) {
 // `at` is the gesture time on the song clock; rings supply it back-dated by their transmission delay.
 // A "weak" beat cleared the low trigger but not the high one: it is only taken as a beat when it
 // lands near a cue the player was due to hit, so incidental motion is dropped instead of scored.
-function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong") {
+function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong", which = "right") {
   if (mode === "free") return freeBeat(direction)
   if (mode !== "playing" && mode !== "count-in") return
+  const hand = which
   if (!direction) {
-    if (fromRing && tier === "strong") {
+    const found = nearest(at, hand, "beat")
+    if (found && tier !== "weak") scoreCue(found.cue, gradeDistance(found.distance), found.delta)
+    else if (fromRing && tier === "strong") {
       const now = inputNow()
       unclearRun = now - unclearAt < 6 ? unclearRun + 1 : 1
       unclearAt = now
-      // Say it once, then stay quiet unless it keeps happening — at which point the advice
-      // changes, because by the fourth miss in a row the problem is the calibration, not the wave.
-      if (unclearRun === 1) toast("方向不确定")
+      if (unclearRun === 1) toast("方向不确定，这一拍按时间算")
       else if (unclearRun === 4) toast("方向总是认不出，建议到「指环」面板补录该方向")
     }
     return
   }
-  const found = nearest(at, "right", "beat")
-  // A weak beat still moves the hand: the player made a motion and the stage should answer it.
-  // It simply does not score when there is no cue it could plausibly belong to.
-  world.pose("right", direction)
+  const found = nearest(at, hand, "beat")
+  world.pose(hand === "left" ? "left" : "right", direction)
   if (tier === "weak" && !(found && found.distance <= GOOD * 2)) return
   if (!found) return
   if (fromRing && found.cue.direction === direction && found.distance <= GOOD) {
     ring?.reportError(at - found.cue.time)
     ringDeltas.push(at - found.cue.time)
   }
-  const kind = found.cue.direction === direction ? gradeDistance(found.distance) : "miss"
+  let kind = gradeDistance(found.distance)
+  // A wrong direction still counts when the time is right; it just cannot be Perfect.
+  if (found.cue.direction && found.cue.direction !== direction && kind === "perfect") kind = "good"
+  if (found.cue.hand === "both") {
+    const hands = found.cue.hands || (found.cue.hands = new Set())
+    hands.add(hand)
+    if (!(hands.has("left") && hands.has("right")) && kind === "perfect") kind = "good"
+  }
   scoreCue(found.cue, kind, found.delta)
 }
 
@@ -239,13 +248,15 @@ function onRing(event) {
       yaw: event.ringYaw, vertical: event.ringVertical, peakSpeed: event.peakSpeed,
       mode: event.directionMode,
     })
-    playBeat(event.dir, at, true, event.tier)
+    playBeat(event.dir, at, true, event.tier, event.hand)
   }
   else if (event.hand === "left" && event.type === "palm") playPalm(event.dir, at)
   else if (event.hand === "left" && event.type === "strike") {
     // Without a camera the strike cannot say who is pointed at, so it answers whichever entrance is due.
-    const found = nearest(at, "left", "cue")
-    if (found) playPoint(found.cue.part, at)
+    const target = chart?.entries ? aimedSection() : null
+    const found = target ? null : nearest(at, "left", "cue")
+    if (target) playPoint(target, at)
+    else if (found) playPoint(found.cue.part, at)
     else world.pose("left", "point")
   }
 }
@@ -448,8 +459,46 @@ async function begin(study = lastStudy) {
   lane.resize()
   await startLevel(chart, {
     onVoice: (part) => world.emit?.(part),
+    onNote: (note) => world.note?.(note.part, note),
     onDone: () => { if (cues.every((cue) => cue.result)) finish() },
   })
+  setDynamics(1)
+}
+
+async function beginPiece(piece) {
+  lastStudy = piece
+  ring.clearTiming()
+  ring.closePanel?.()
+  settings.close()
+  stopLevel()
+  world.reset()
+  lane.reset()
+  mixer.reset()
+  chart = buildPieceChart(piece)
+  cues = chart.cues.map((cue) => ({ ...cue, result: null }))
+  counts = { perfect: 0, good: 0, miss: 0 }
+  deltas = []
+  spawned = new Set()
+  dynamics = 1
+  tallyEl.textContent = "0000"
+  tallyLabel.textContent = "SCORE"
+  sessionTitle.textContent = piece.title
+  sessionSub.textContent = piece.sub
+  beatDots.forEach((dot, i) => { dot.hidden = i >= chart.meter })
+  progressEl.style.width = "0%"
+  setMode("count-in")
+  statusEl.textContent = "预备"
+  hintEl.innerHTML = "<span>这一段该用哪只手，谱面上会告诉你</span><span>指、圈、渐强都直接出现在乐团身上</span>"
+  world.setLevelHands(true)
+  world.resize()
+  lane.resize()
+  const clock = await startPiece(piece, {
+    onVoice: (part) => world.emit?.(part),
+    onNote: (note) => world.note?.(note.part, note),
+    onDone: () => { if (cues.every((cue) => cue.result)) finish() },
+  })
+  chart.duration = clock.duration
+  chart.countIn = clock.countIn
   setDynamics(1)
 }
 
@@ -656,20 +705,48 @@ function loop() {
       if (cue.kind === "cue") world.spawn(cue)
     }
     const grace = ((cue.hand === "right" && rightRing) || (cue.hand === "left" && leftRing) ? 0.5 : LATE_GRACE) + delay
-    if (!cue.result && now > cue.time + GOOD + grace) scoreCue(cue, "miss")
+    const openUntil = (cue.until ?? cue.time + GOOD) + grace
+    if (!cue.result && now > openUntil) scoreCue(cue, "miss")
   })
   if (now >= chart.duration && cues.every((cue) => cue.result)) finish()
-  const playing = new Set(["piano", "cello"])
-  if (cues.some((cue) => cue.kind === "cue" && cue.part === "violin" && cue.result && cue.result !== "miss")) playing.add("violin")
-  if (cues.some((cue) => cue.kind === "cue" && cue.part === "flute" && cue.result && cue.result !== "miss")) playing.add("flute")
+  const playing = new Set(chart.entries ? chart.entries.on : ["piano", "cello"])
+  if (!chart.entries) {
+    if (cues.some((cue) => cue.kind === "cue" && cue.part === "violin" && cue.result && cue.result !== "miss")) playing.add("violin")
+    if (cues.some((cue) => cue.kind === "cue" && cue.part === "flute" && cue.result && cue.result !== "miss")) playing.add("flute")
+  } else {
+    cues.forEach((cue) => {
+      if (!cue.result || cue.result === "miss") return
+      if (cue.part) playing.add(cue.part)
+      cue.parts?.forEach((part) => playing.add(part))
+    })
+  }
   hud.update(levelView(playing, partLevels?.() || {}))
-  const pending = new Map(cues.filter((cue) => cue.kind === "cue" && !cue.result && cue.time - now < 2).map((cue) => [cue.part, "in"]))
+  const pending = new Map(cues.filter((cue) => (cue.kind === "cue" || cue.kind === "circle") && !cue.result && cue.time - now < 2).flatMap((cue) => (cue.parts || [cue.part]).map((part) => [part, "in"])))
+  const soon = cues.find((cue) => !cue.result && cue.kind !== "beat" && now >= cue.time - 1.6 && now <= (cue.until ?? cue.time + 0.4))
+  const aimed = aimedSection()
+  const prompt = soon && {
+    kind: soon.kind === "cue" ? "point" : soon.kind,
+    part: soon.part,
+    parts: soon.parts || (soon.part ? [soon.part] : soon.parts),
+    dir: soon.direction,
+    progress: soon.until ? Math.min(1, Math.max(0, (now - soon.time) / (soon.until - soon.time))) : 1,
+  }
   lane.update(now, chart, cues)
-  world.update(now, playing, { selected: new Set(), pending, solo: null })
+  const selected = new Set()
+  if (aimed) selected.add(aimed)
+  world.update(now, playing, { selected, pending, solo: null, prompt })
 }
 
 // In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.
 const manual = (hand) => mode === "free" || !ring?.input?.live?.(hand)
+
+let mouseX = null
+function aimedSection() {
+  const seen = camera.hand?.("left")
+  const x = seen ? (1 - seen.x) * view.clientWidth : mouseX
+  if (x == null) return null
+  return world.sectionAt?.(x) || null
+}
 
 window.addEventListener("keydown", (event) => {
   if (document.querySelector(".ring-rerecord")?.open) return
@@ -677,7 +754,9 @@ window.addEventListener("keydown", (event) => {
   const beat = { ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up" }[event.key]
   if (beat) {
     event.preventDefault()
-    if (manual("right")) playBeat(beat)
+    const upcoming = cues.find((cue) => cue.kind === "beat" && !cue.result)
+    const which = upcoming?.hand === "left" ? "left" : "right"
+    if (manual(which)) playBeat(beat, inputNow(), false, "strong", which)
   }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
   if (key === "e" && manual("left")) playPalm("up")
@@ -704,7 +783,8 @@ function local(event) {
 
 view.addEventListener("pointerdown", (event) => {
   view.setPointerCapture(event.pointerId)
-  pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: mode === "free" ? [local(event)] : null }
+  pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: mode === "free" || chart?.entries ? [local(event)] : null }
+  mouseX = event.offsetX
 })
 
 function swipeDirection(dx, dy) {
@@ -719,6 +799,7 @@ function swipe(fromLeft, dx, dy) {
 
 view.addEventListener("pointermove", (event) => {
   if (!pointer) return
+  mouseX = event.offsetX
   if (pointer.trail) {
     pointer.trail.push(local(event))
     if (pathLength(pointer.trail) > 36) {
@@ -751,7 +832,12 @@ view.addEventListener("pointerup", (event) => {
   if (trail) {
     lassoPath.setAttribute("d", "")
     if (pathLength(trail) > 60) {
-      freeLasso(lassoParts(trail, world.screenPositions()))
+      const parts = lassoParts(trail, world.screenPositions())
+      if (mode === "free") freeLasso(parts)
+      else {
+        const found = nearest(inputNow(), "left", "circle")
+        if (found && found.cue.parts.every((part) => parts.includes(part))) scoreCue(found.cue, "perfect", 0)
+      }
       return
     }
   }
