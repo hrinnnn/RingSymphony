@@ -1,0 +1,1 @@
+Sparse instrument samples from [tonejs-instruments](https://github.com/nbrosowsky/tonejs-instruments) by N. P. Brosowsky (CC BY 3.0). French horn files live under `horn/`. Only the pitches each section needs are included; Tone repitches the rest.

@@ -34,16 +34,16 @@ function ensure() {
     }),
   }
   const samples = {
-    violin: ["G3", "C4", "E4", "G4", "C5", "E5", "G5", "C6"],
-    flute: ["C4", "E4", "C5", "E5", "C6", "E6", "A6"],
-    horn: ["C4"],
-    cello: ["C2", "E2", "G2", "C3", "E3", "G3", "C4", "E4"],
-    piano: ["C2", "E2", "G2", "C3", "E3", "G3", "C4", "E4", "G4", "C5", "E5", "G5", "C6"],
+    violin: { G3: "G3.mp3", A3: "A3.mp3", C4: "C4.mp3", E4: "E4.mp3", G4: "G4.mp3", A4: "A4.mp3", C5: "C5.mp3", E5: "E5.mp3", G5: "G5.mp3", A5: "A5.mp3", C6: "C6.mp3", E6: "E6.mp3", G6: "G6.mp3", A6: "A6.mp3" },
+    flute: { C4: "C4.mp3", E4: "E4.mp3", A4: "A4.mp3", C5: "C5.mp3", E5: "E5.mp3", A5: "A5.mp3", C6: "C6.mp3", E6: "E6.mp3", A6: "A6.mp3", C7: "C7.mp3" },
+    horn: { D3: "D3.mp3", F3: "F3.mp3", A3: "A3.mp3", C4: "C4.mp3", D5: "D5.mp3", F5: "F5.mp3" },
+    cello: { C2: "C2.mp3", "D#2": "Ds2.mp3", G2: "G2.mp3", "A#2": "As2.mp3", "C#3": "Cs3.mp3", E3: "E3.mp3", G3: "G3.mp3", "A#3": "As3.mp3", "C#4": "Cs4.mp3", E4: "E4.mp3", G4: "G4.mp3" },
+    piano: { C2: "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3", A2: "A2.mp3", C3: "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3", A3: "A3.mp3", C4: "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3", A4: "A4.mp3", C5: "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3", A5: "A5.mp3", C6: "C6.mp3" },
   }
   const samplers = {}
   for (const part of PARTS) {
     samplers[part] = new Tone.Sampler({
-      urls: Object.fromEntries(samples[part].map((note) => [note, `${note}.mp3`])),
+      urls: samples[part],
       baseUrl: `/samples/${part}/`,
       release: 0.8,
       onerror: () => {},
