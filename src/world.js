@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { laneLayout } from "./lane.js"
+import { beatFlight, laneLayout } from "./lane.js"
 
 // All scenery, people, instruments and UI geometry are original procedural assets.
 // Classical hall: black formal wear, one restrained accent per section, gold for the conductor.
@@ -463,21 +463,26 @@ function animatePlayers(players, seconds, playing, sections, wall) {
     // gesture per note: its length is the note's length, its size is the note's velocity.
     const stroke = person.userData.stroke
     const age = stroke ? wall - stroke.start : 0
-    const sounding = Boolean(stroke) && age >= 0 && age <= stroke.dur
+    const sounding = active && Boolean(stroke) && age >= 0 && age <= stroke.dur
+    const waiting = sections.pending.has(part) && !active
+    const closing = sections.prompt?.kind === "cut" && active
     // A sounding note is one bow. Between notes an active player keeps a smaller stroke,
     // so the last bars do not freeze just because a long note has reached its end.
     const phrase = Math.sin(seconds * Math.PI * 2 * hz + index * 0.4)
+    const swelling = sections.prompt?.kind === "swell" && sections.pending.has(part)
+    const swellLift = sections.prompt?.lift ?? sections.prompt?.progress ?? 0
+    const rising = sections.prompt?.dir !== "down"
     const along = sounding
       ? Math.sin((age / stroke.dur) * Math.PI) * (0.45 + 0.55 * stroke.vel)
-      : active ? phrase * 0.42 : 0
-    // Waiting players hop in their seats; the entrance itself is a little bounce.
-    const eager = sections.pending.has(part) ? Math.abs(Math.sin(wall * 9 + index)) * 0.05 : 0
-    const bounce = active ? entrance * Math.abs(Math.sin(since * 14)) * 0.06 : 0
-    body.position.y = breath * (active ? 0.01 : 0.004) + eager + bounce
+      : active ? phrase * 0.42 + (swelling && rising ? swellLift * 0.6 : 0) : waiting ? 0.7 : 0
+    // Waiting players lift the instrument. A swell lifts or settles the body. A cut bows.
+    const eager = waiting ? Math.abs(Math.sin(wall * 3 + index)) * 0.02 : 0
+    const bounce = active && !closing ? entrance * Math.abs(Math.sin(since * 14)) * 0.06 : 0
+    body.position.y = breath * (active ? 0.01 : 0.004) + eager + bounce + (swelling && rising ? swellLift * 0.04 : 0)
     body.rotation.set(
-      (active ? 0.035 : 0.012) + breath * 0.008 + entrance * 0.07,
-      active ? along * 0.045 : 0,
-      active ? -along * 0.05 : breath * 0.006,
+      closing ? 0.32 : swelling ? (rising ? -0.2 * swellLift : 0.26) : waiting ? 0.1 : (active ? 0.035 : 0.012) + breath * 0.008 + entrance * 0.07,
+      active && !closing ? along * 0.045 : 0,
+      active && !closing ? -along * 0.05 : breath * 0.006,
     )
     head.rotation.set(
       active ? 0.04 - along * 0.05 : 0.03,
@@ -498,7 +503,7 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       const fingerWrist = [hold.finger.w[0], hold.finger.w[1] + vib, hold.finger.w[2] + vib * 0.4]
       applyLimb(rig.finger, hold.finger.s, hold.finger.e, fingerWrist)
     } else if (part === "flute") {
-      const lift = breath * (active ? 0.016 : 0.004)
+      const lift = waiting ? 0.07 : breath * (active ? 0.016 : 0.004)
       const left = HOLDS.flute.left
       const right = HOLDS.flute.right
       applyLimb(rig.left, left.s, left.e, [left.w[0], left.w[1] + lift, left.w[2]])
@@ -701,6 +706,118 @@ export function createWorld(canvas, laneCanvas) {
   band.castShadow = false
   band.receiveShadow = false
   band.visible = false
+  const sectionOrder = Object.keys(SECTION_COLOR)
+  const beacons = sectionOrder.map(() => {
+    const group = new THREE.Group()
+    const gem = mesh(group, new THREE.OctahedronGeometry(0.16, 0), glow(0xfff1cc, 1), 0, 0.22, 0)
+    const stem = mesh(group, new THREE.CylinderGeometry(0.02, 0.02, 0.55, 8), glow(0xe6c98a, 0.95), 0, -0.18, 0)
+    gem.castShadow = false
+    stem.castShadow = false
+    gem.receiveShadow = false
+    stem.receiveShadow = false
+    group.visible = false
+    scene.add(group)
+    return group
+  })
+  const shafts = sectionOrder.map(() => {
+    const shaft = mesh(scene, new THREE.CylinderGeometry(0.035, 0.09, 1, 8), glow(0xffe3a8, 0.28))
+    shaft.castShadow = false
+    shaft.receiveShadow = false
+    shaft.visible = false
+    return shaft
+  })
+  const lamps = sectionOrder.map(() => {
+    const lamp = new THREE.PointLight(0xffe3a8, 0, 5.5, 1.2)
+    scene.add(lamp)
+    return lamp
+  })
+  const arch = mesh(scene, new THREE.TorusGeometry(1, 0.055, 8, 32, Math.PI), glow(0xfff1cc, 0.96))
+  arch.castShadow = false
+  arch.receiveShadow = false
+  arch.visible = false
+  function arrowShape() {
+    const shape = new THREE.Shape()
+    shape.moveTo(0, 0.36)
+    shape.lineTo(0.24, 0.05)
+    shape.lineTo(0.09, 0.05)
+    shape.lineTo(0.09, -0.3)
+    shape.lineTo(-0.09, -0.3)
+    shape.lineTo(-0.09, 0.05)
+    shape.lineTo(-0.24, 0.05)
+    shape.closePath()
+    return new THREE.ShapeGeometry(shape)
+  }
+  const arrowGeo = arrowShape()
+  const arrowFace = glow(0xfff6df, 1)
+  const arrowRim = glow(0x6b5124, 1)
+  const arrowTrail = glow(0xe6c98a, 0.28)
+  const beatRoot = new THREE.Group()
+  beatRoot.visible = false
+  camera.add(beatRoot)
+  const hitLine = box(beatRoot, [1.7, 0.01, 0.006], glow(0xe6c98a, 0.95), 0, -0.32, -1.58)
+  const hitGlow = box(beatRoot, [1.7, 0.045, 0.002], glow(0xe6c98a, 0.16), 0, -0.32, -1.55)
+  hitLine.castShadow = false
+  hitGlow.castShadow = false
+  hitLine.receiveShadow = false
+  hitGlow.receiveShadow = false
+  const BEAT_ROT = { up: 0, right: -Math.PI / 2, down: Math.PI, left: Math.PI / 2 }
+  function makeArrow(mat, edged) {
+    const group = new THREE.Group()
+    if (edged) {
+      const rim = mesh(group, arrowGeo, arrowRim)
+      rim.scale.setScalar(1.18)
+      rim.position.z = -0.02
+      rim.castShadow = false
+      rim.receiveShadow = false
+    }
+    const face = mesh(group, arrowGeo, mat)
+    face.castShadow = false
+    face.receiveShadow = false
+    group.visible = false
+    beatRoot.add(group)
+    return group
+  }
+  const flyers = Array.from({ length: 12 }, () => makeArrow(arrowFace, true))
+  const trails = Array.from({ length: 12 }, () => makeArrow(arrowTrail, false))
+  const swellSign = makeArrow(arrowFace, true)
+  swellSign.removeFromParent()
+  scene.add(swellSign)
+  const meter = new THREE.Group()
+  const rail = mesh(meter, new THREE.BoxGeometry(1.35, 0.09, 0.03), glow(0x3a3124, 0.92))
+  const fill = mesh(meter, new THREE.BoxGeometry(1.35, 0.09, 0.04), glow(0xfff1cc, 1), 0, 0, 0.012)
+  const head = mesh(meter, new THREE.SphereGeometry(0.09, 12, 10), glow(0xfff6df, 1))
+  for (const piece of [rail, fill, head]) {
+    piece.castShadow = false
+    piece.receiveShadow = false
+  }
+  meter.visible = false
+  scene.add(meter)
+  function beatHands(cue) {
+    if (cue.hand === "both") return ["left", "right"]
+    return [cue.hand === "left" ? "left" : "right"]
+  }
+  function placeArrow(group, hand, remain, lead, direction, mul = 1) {
+    const flight = beatFlight(hand, remain, lead)
+    group.visible = true
+    group.position.set(flight.x, flight.y, flight.z)
+    group.scale.setScalar(Math.max(0.18, flight.scale * mul))
+    group.rotation.z = BEAT_ROT[direction] || 0
+  }
+  function syncBeats(now, cues = [], beat = 0.6) {
+    for (const group of [...flyers, ...trails]) group.visible = false
+    const lead = Math.max(0.25, beat) * 3.4
+    const visible = (cues || []).filter((cue) => cue.kind === "beat" && cue.direction && cue.time - now < lead && now - cue.time < 0.3 && (!cue.result || cue.result === "miss"))
+    let slot = 0
+    for (const cue of visible) {
+      for (const hand of beatHands(cue)) {
+        if (slot >= flyers.length) break
+        const remain = cue.time - now
+        placeArrow(flyers[slot], hand, remain, lead, cue.direction, 1.15)
+        placeArrow(trails[slot], hand, remain + lead * 0.16, lead, cue.direction, 0.7)
+        slot += 1
+      }
+    }
+  }
   const scoreCanvas = document.createElement("canvas")
   scoreCanvas.width = 512
   scoreCanvas.height = 256
@@ -778,6 +895,9 @@ export function createWorld(canvas, laneCanvas) {
     cueRings.forEach(entry => entry.rings.forEach(remove)); cueRings.length = 0
     notes.forEach(note => { note.removeFromParent(); note.material.dispose() }); notes.length = 0
     handStates.forEach(state => { state.until = 0; state.pose = 'rest'; state.preview = false })
+    syncBeats(0, [], 1)
+    swellSign.visible = false
+    meter.visible = false
   }
   const NO_SECTIONS = { selected: new Set(), pending: new Map(), solo: null }
   function update(seconds, playing, sections = NO_SECTIONS) {
@@ -785,18 +905,29 @@ export function createWorld(canvas, laneCanvas) {
     const dt = Math.min(0.1, Math.max(0, t - lastFrame)); lastFrame = t
     animatePlayers(players, seconds, playing, sections, t)
     for (const part of Object.keys(suits)) {
-      const lit = sections.selected.has(part) ? 0.22 + Math.sin(t * 6) * 0.08 : sections.pending.has(part) ? (Math.sin(t * 12) > 0 ? 0.2 : 0.05) : 0
+      const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
+      const energy = (mood - 0.55) / 1.05
+      const phase = sections.beatPhase ?? 0
+      const pulse = Math.exp(-phase * 6)
+      const living = playing.has(part) ? 0.22 + energy * 0.5 + pulse * 0.28 : 0
+      const lit = sections.pending.has(part) ? 1.15 : sections.selected.has(part) ? Math.max(0.45, living) : living
       suits[part].coat.emissive.copy(suits[part].color).multiplyScalar(lit)
+      suits[part].deep.emissive.copy(suits[part].color).multiplyScalar(lit * 0.85)
+      suits[part].pants.emissive.copy(suits[part].color).multiplyScalar(lit * 0.65)
     }
     halos.forEach((disc) => {
       const part = disc.userData.of
       const selected = sections.selected.has(part)
       const pending = sections.pending.has(part)
       const soloing = sections.solo?.has(part)
-      const target = selected ? 0.55 + Math.sin(t * 6) * 0.12 : pending ? (Math.sin(t * 12) > 0 ? 0.5 : 0.15) : soloing ? 0.4 : playing.has(part) ? 0.16 : 0
+      const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
+      const energy = (mood - 0.55) / 1.05
+      const pulse = Math.exp(-(sections.beatPhase ?? 0) * 6)
+      const living = playing.has(part) ? 0.2 + energy * 0.38 + pulse * 0.22 : 0
+      const target = selected ? Math.max(0.55, living) : pending ? 0.85 : soloing ? 0.4 : living
       disc.material.opacity = THREE.MathUtils.lerp(disc.material.opacity, target, 0.25)
-      disc.userData.ring.material.opacity = selected || pending ? 0.9 : soloing ? 0.6 : 0
-      disc.scale.setScalar(selected ? 1 + Math.sin(t * 6) * 0.04 : 1)
+      disc.userData.ring.material.opacity = selected || pending ? 1 : soloing ? 0.6 : playing.has(part) ? 0.25 + energy * 0.35 : 0
+      disc.scale.setScalar(pending ? 1.6 : playing.has(part) ? 1 + pulse * 0.08 : 1)
     })
     for (let i = notes.length - 1; i >= 0; i--) {
       const note = notes[i], data = note.userData
@@ -886,28 +1017,85 @@ export function createWorld(canvas, laneCanvas) {
         disc.userData.ring.material.opacity = 0.95
       })
     }
+    ghost.visible = false
+    const marked = new Set([...sections.pending.keys(), ...askedNames])
+    const shown = []
+    sectionOrder.forEach((part, index) => {
+      const beacon = beacons[index]
+      const shaft = shafts[index]
+      const lamp = lamps[index]
+      const people = marked.has(part) ? players.filter((person) => person.userData.part === part) : []
+      if (!people.length) {
+        beacon.visible = false
+        shaft.visible = false
+        const crew = playing.has(part) ? players.filter((person) => person.userData.part === part) : []
+        if (!crew.length) { lamp.intensity = 0; return }
+        const spot = crew.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / crew.length)
+        const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
+        const pulse = Math.exp(-(sections.beatPhase ?? 0) * 6)
+        lamp.intensity = 3 + ((mood - 0.55) / 1.05) * 8 + pulse * 5
+        lamp.position.set(spot.x, spot.y + 1.45, spot.z + 0.3)
+        return
+      }
+      const center = people.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / people.length)
+      const swelling = asked?.kind === "swell"
+      lamp.intensity = asked?.kind === "cut" ? 5 : 24
+      lamp.position.set(center.x, center.y + 1.5, center.z + 0.35)
+      if (swelling) {
+        beacon.visible = false
+        shaft.visible = false
+      } else {
+        beacon.visible = true
+        beacon.position.set(center.x, center.y + 2.35 + Math.sin(t * 3 + index) * 0.07, center.z)
+        beacon.rotation.x = asked?.kind === "cut" ? Math.PI : 0
+        beacon.scale.setScalar(1.5 + Math.sin(t * 4 + index) * 0.12)
+        shaft.visible = asked?.kind !== "cut"
+        shaft.scale.set(1, 1.4, 1)
+        shaft.position.set(center.x, center.y + 1.55, center.z)
+      }
+      shown.push(center.clone())
+    })
+    if (asked?.kind === "circle" && shown.length >= 2) {
+      const left = shown.reduce((best, spot) => spot.x < best.x ? spot : best)
+      const right = shown.reduce((best, spot) => spot.x > best.x ? spot : best)
+      const span = Math.max(0.8, right.x - left.x)
+      arch.visible = true
+      arch.position.set((left.x + right.x) / 2, Math.max(left.y, right.y) + 2.65, (left.z + right.z) / 2)
+      arch.scale.set(span / 2, span * 0.22, 1)
+      arch.rotation.set(0, 0, 0)
+    } else arch.visible = false
+    const arrive = Math.min(1, Math.max(0, sections.arrive ?? 0))
+    if (asked && shown.length) {
+      const center = shown.reduce((sum, spot) => sum.add(spot), new THREE.Vector3()).multiplyScalar(1 / shown.length)
+      meter.visible = true
+      meter.position.set(center.x, center.y + 2.85, center.z)
+      fill.scale.x = Math.max(0.02, arrive)
+      fill.position.x = -0.675 + 0.675 * arrive
+      head.position.set(-0.675 + 1.35 * arrive, 0, 0.06)
+      head.scale.setScalar(arrive > 0.92 ? 1.45 : 1)
+      if (shown.length === 1) {
+        const only = sectionOrder.findIndex((part) => marked.has(part))
+        if (only >= 0 && beacons[only].visible) {
+          beacons[only].position.set(center.x + 0.675, center.y + 2.85, center.z)
+        }
+      }
+    } else meter.visible = false
     const targets = players.filter((person) => askedNames.includes(person.userData.part))
-    if (!asked || !targets.length && asked.kind !== "cut") {
-      ghost.visible = false
-      band.visible = false
+    if (asked?.kind === "swell" && targets.length) {
+      const center = targets.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / targets.length)
+      const lift = Math.max(0.15, asked.lift ?? asked.progress ?? 0)
+      const column = 0.5 + lift * 2.4
+      band.visible = true
+      band.position.set(center.x, center.y + column / 2, center.z + 0.25)
+      band.scale.set(Math.max(0.9, targets.length * 0.28), column / 1.6, 1)
+      band.material.opacity = 0.34 + lift * 0.45
+      swellSign.visible = true
+      swellSign.rotation.set(0, 0, asked.dir === "down" ? Math.PI : 0)
+      swellSign.position.set(center.x, center.y + 1.25 + lift * 2.2, center.z + 0.75)
+      swellSign.scale.setScalar(1.7)
     } else {
-      const center = targets.length
-        ? targets.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / targets.length)
-        : new THREE.Vector3(0, 0, -3)
-      const lift = asked.lift ?? asked.progress ?? 0
-      ghost.visible = true
-      ghost.position.set(center.x, 2.15 + (asked.kind === "swell" && asked.dir !== "down" ? lift * 0.45 : asked.dir === "down" ? (1 - lift) * 0.2 : 0), center.z + 0.8)
-      ghost.lookAt(camera.position)
-      const pointing = asked.kind === "point" || asked.kind === "cue"
-      ghostFinger.scale.z = (pointing || asked.kind === "circle") ? 1 : asked.kind === "cut" ? 0.25 : 0.35
-      ghostFinger.position.z = pointing ? -0.18 : -0.08
-      if (asked.kind === "circle") ghost.position.x += Math.sin(t * 2.2) * 0.55
-      if (asked.kind === "swell") {
-        band.visible = true
-        band.position.set(center.x, 0.35 + Math.max(0.15, lift) * 0.8, center.z + 0.35)
-        band.scale.set(Math.max(1.2, targets.length * 0.7), Math.max(0.15, lift), 1)
-        band.material.opacity = 0.14 + lift * 0.28
-      } else band.visible = false
+      band.visible = false
+      swellSign.visible = false
     }
     if (sections.score !== undefined) paintScore(sections.score)
     for (let i = cueRings.length - 1; i >= 0; i--) {
@@ -915,7 +1103,7 @@ export function createWorld(canvas, laneCanvas) {
       if (remain < -0.25 || cue.result) { rings.forEach(remove); cueRings.splice(i, 1); continue }
       rings.forEach(ring => {
         ring.scale.setScalar(1 + Math.sin(t * 7) * 0.08)
-        ring.material.opacity = 0.65 + Math.sin(t * 7) * 0.3
+        ring.material.opacity = 0.18 + Math.sin(t * 7) * 0.06
       })
     }
     if (lanePlane.visible) {
@@ -972,6 +1160,11 @@ export function createWorld(canvas, laneCanvas) {
   function setLevelHands(value) {
     levelHands = value
     lanePlane.visible = value
+    beatRoot.visible = value
+    if (!value) {
+      swellSign.visible = false
+      meter.visible = false
+    }
   }
   // One bow, breath or key-press per note. `dur` is seconds, `vel` is 0..1.
   function note(part, info = {}) {
@@ -998,5 +1191,5 @@ export function createWorld(canvas, laneCanvas) {
     }
     return best
   }
-  return { resize, update, spawn, emit, note, sectionAt, pose, previewRight, pick, reset, setLevelHands, screenPositions, players }
+  return { resize, update, spawn, emit, note, sectionAt, pose, previewRight, pick, reset, setLevelHands, syncBeats, screenPositions, players }
 }

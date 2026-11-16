@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { createLane } from "../src/lane.js"
+import { beatFlight, createLane, laneLayout } from "../src/lane.js"
 
 globalThis.window = { devicePixelRatio: 1 }
 
@@ -19,34 +19,32 @@ function render(width, height, cues, now = 0) {
   return calls
 }
 
-const arcs = (calls) => calls.filter(([name]) => name === "arc")
-const noteAt = (calls) => calls.filter(([name, x]) => name === "translate" && x > 20).at(-1)
-const down = { hand: "right", kind: "beat", direction: "down", time: 1.5 }
-const approaching = noteAt(render(1200, 800, [down]))
-const landed = noteAt(render(1200, 800, [{ ...down, time: 0 }]))
-assert.ok(approaching[1] > landed[1] && approaching[2] > landed[2], "down beat approaches diagonally upward from the right")
-assert.equal(landed[1], 1200 * 0.56 + 1200 * 0.05)
-assert.equal(landed[2], 800 * 0.62)
-const desktopLine = arcs(render(1200, 800, []))
-assert.equal(desktopLine[0][1], 300 + 1200 * 0.05, "left mark sits on the judgment line")
-assert.ok(render(1200, 800, []).some(([name]) => name === "lineTo"), "a judgment line is drawn")
-
-for (const [direction, label] of [["up", "渐强 CRESC"], ["down", "渐弱 DIM"]]) {
-  const calls = render(1200, 800, [{ hand: "left", kind: "dynamics", direction, time: 0.6 }])
-  assert.equal(arcs(calls).length, 2, "left-hand notes do not add circles of their own")
-  assert.ok(calls.some(([name]) => name === "closePath"), "left-hand note has a closed outline")
-  assert.ok(calls.some(([name, value]) => name === "fillText" && value === label))
-  const outlineEnd = calls.findIndex(([name]) => name === "closePath")
-  const mark = calls.slice(outlineEnd).filter(([name]) => name === "lineTo").slice(0, 2)
-  assert.equal(mark.length, 2)
-  assert.equal(mark[0][1], mark[1][1])
-  if (direction === "up") assert.notEqual(mark[0][2], mark[1][2])
-  else assert.equal(mark[0][2], mark[1][2])
+const far = beatFlight("right", 3, 3)
+const near = beatFlight("right", 0, 3)
+assert.ok(Math.abs(far.z) > Math.abs(near.z) + 2, "a beat starts deep in the hall")
+assert.ok(near.scale > far.scale * 2, "it grows as it flies toward the line")
+assert.ok(Math.abs(far.x) < 0.08 && Math.abs(near.x) > 0.4, "it leaves the center of the hall and lands on one hand")
+const left = beatFlight("left", 0, 3)
+assert.ok(left.x < -0.4 && near.x > 0.4, "left and right land on opposite sides of the line")
+assert.deepEqual(beatFlight("right", 1.2, 3), beatFlight("right", 1.2, 3))
+for (const direction of ["up", "down", "left", "right"]) {
+  assert.ok(direction)
+  assert.ok(Math.abs(beatFlight("right", 2.4, 3).x) < Math.abs(near.x), "direction does not change the flight")
 }
 
-const entryCalls = render(1200, 800, [{ hand: "left", kind: "cue", part: "violin", time: 0.6 }])
-assert.ok(entryCalls.some(([name, value]) => name === "fillText" && value === "VN"))
-const mobileTargets = arcs(render(375, 667, []))
-assert.ok(mobileTargets[0][1] < mobileTargets[1][1], "left mark stays left of the right mark on narrow screens")
+const layout = laneLayout(1200, 800)
+assert.ok(layout.left.target.x < layout.right.target.x, "left mark stays left of the right mark")
+assert.ok(laneLayout(375, 667).left.target.x < laneLayout(375, 667).right.target.x, "left mark stays left on a narrow screen")
 
-console.log("Lane: down-beat approach, left-hand symbols, and narrow-screen targets pass")
+for (const cue of [
+  { hand: "right", kind: "beat", direction: "down", time: 1.5 },
+  { hand: "left", kind: "dynamics", direction: "up", time: 0.6 },
+  { hand: "left", kind: "cue", part: "violin", time: 0.6 },
+  { hand: "both", kind: "cut", time: 0.6 },
+]) {
+  const calls = render(1200, 800, [cue])
+  assert.equal(calls.filter(([name]) => name === "fillText").length, 0, "the lane does not label the cue")
+  assert.equal(calls.filter(([name]) => name === "closePath").length, 0, "beat arrows are not drawn flat on the page")
+}
+
+console.log("Lane: depth flight, opposite hands, and a quiet page pass")

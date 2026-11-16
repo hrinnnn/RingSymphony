@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { buildChart, STUDIES } from '../src/chart.js'
 import { eventsFor } from '../src/score.js'
 import { PERFECT, GOOD } from '../src/judge.js'
-import { laneLayout } from '../src/lane.js'
+import { laneLayout, beatFlight } from '../src/lane.js'
 const noop = () => {}
 let rendered
 class TestRenderer {
@@ -16,11 +16,12 @@ class TestRenderer {
 }
 globalThis.__THREE = { ...Three, WebGLRenderer: TestRenderer }
 globalThis.__laneLayout = laneLayout
+globalThis.__beatFlight = beatFlight
 globalThis.window = { devicePixelRatio: 1 }
 globalThis.document = { createElement: () => ({ getContext: () => new Proxy({}, { get: () => noop, set: () => true }) }) }
 const source = (await readFile(new URL('../src/world.js', import.meta.url), 'utf8'))
   .replace('import * as THREE from "three"', 'const THREE = globalThis.__THREE')
-  .replace('import { laneLayout } from "./lane.js"', 'const laneLayout = globalThis.__laneLayout')
+  .replace('import { beatFlight, laneLayout } from "./lane.js"', 'const laneLayout = globalThis.__laneLayout; const beatFlight = globalThis.__beatFlight')
 const { createWorld } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 let width = 1440, height = 900
 const canvas = { getBoundingClientRect: () => ({ width, height, left: 0, top: 0 }) }

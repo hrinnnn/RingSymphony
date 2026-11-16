@@ -686,21 +686,26 @@ function loop() {
     return
   }
   const now = Math.max(0, songSeconds())
+  const warn = chart.meter * chart.beat * 2
   if (mode === "count-in" && now >= chart.countIn) {
     mode = "playing"
     statusEl.textContent = "演奏"
   }
   progressEl.style.width = `${Math.min(100, now / chart.duration * 100)}%`
   beatDots.forEach((dot, i) => dot.classList.toggle("active", Math.floor(now / chart.beat) % chart.meter === i))
-  const nextLeft = cues.find(cue => cue.hand === "left" && !cue.result && cue.time >= now - GOOD)
+  const nextGesture = cues.find((cue) => cue.kind !== "beat" && !cue.result && now <= (cue.until ?? cue.time + GOOD))
   const leftRing = !manual("left")
   const rightRing = !manual("right")
-  if (now < chart.countIn) cueHintEl.textContent = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
-  else if (nextLeft && nextLeft.time - now < 2) {
-    if (nextLeft.kind === "cue") cueHintEl.textContent = leftRing ? `左手向前一指 · ${PART_INFO[nextLeft.part].name}进入` : `点一下发光的圈 · ${PART_INFO[nextLeft.part].name}进入`
-    else if (nextLeft.direction === "up") cueHintEl.textContent = leftRing ? "左手掌心向上抬 · 渐强" : "抬起左手 · 渐强  E"
-    else cueHintEl.textContent = leftRing ? "左手压下去 · 渐弱" : "放低左手 · 渐弱  D"
-  } else cueHintEl.textContent = rightRing ? "音符落到判定线时 · 按箭头方向挥动右手" : "音符落到判定线时 · 按同方向打拍"
+  let hint
+  if (now < chart.countIn) hint = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
+  else if (nextGesture && nextGesture.time - now < warn) {
+    if (nextGesture.kind === "cue") hint = `指${PART_INFO[nextGesture.part].name}`
+    else if (nextGesture.kind === "circle") hint = `圈住${names(nextGesture.parts)}`
+    else if (nextGesture.kind === "cut") hint = "收束"
+    else if (nextGesture.direction === "up") hint = "渐强"
+    else hint = "渐弱"
+  } else hint = rightRing ? "箭头落到判定线时，按箭头的方向打拍" : "箭头落到判定线时，按同方向打拍"
+  if (cueHintEl.textContent !== hint) cueHintEl.textContent = hint
   if (mode === "playing") {
     const bar = Math.min(chart.bars, Math.floor((now - chart.countIn) / (chart.meter * chart.beat)) + 1)
     if (bar > 0) statusEl.textContent = `第 ${bar} / ${chart.bars} 小节`
@@ -708,7 +713,7 @@ function loop() {
   // A positive input delay judges gestures earlier, so a cue must stay open that much longer.
   const delay = Math.max(0, settings.latency)
   cues.forEach((cue, index) => {
-    if (!spawned.has(index) && cue.time - now < 2.05) {
+    if (!spawned.has(index) && cue.time - now < warn + 0.05) {
       spawned.add(index)
       if (cue.kind === "cue") world.spawn(cue)
     }
@@ -729,23 +734,45 @@ function loop() {
     })
   }
   hud.update(levelView(playing, partLevels?.() || {}))
-  const pending = new Map(cues.filter((cue) => (cue.kind === "cue" || cue.kind === "circle") && !cue.result && cue.time - now < 2).flatMap((cue) => (cue.parts || [cue.part]).map((part) => [part, "in"])))
-  const soon = cues.find((cue) => !cue.result && cue.kind !== "beat" && now >= cue.time - 1.6 && now <= (cue.until ?? cue.time + 0.4))
-  const aimed = aimedSection()
-  const lift = handLift()
+  const gestureParts = (cue) => {
+    if (cue.kind === "cut") return [...playing]
+    if (cue.parts === "all") return [...PARTS]
+    if (Array.isArray(cue.parts)) return cue.parts
+    return cue.part ? [cue.part] : []
+  }
+  const pending = new Map()
+  for (const cue of cues) {
+    if (cue.result || cue.kind === "beat") continue
+    const early = cue.kind === "dynamics" ? chart.beat * 1.25 : warn
+    if (now < cue.time - early || now > (cue.until ?? cue.time + 0.4)) continue
+    for (const part of gestureParts(cue)) pending.set(part, "in")
+  }
+  const soon = cues.find((cue) => {
+    if (cue.result || cue.kind === "beat") return false
+    const early = cue.kind === "dynamics" ? chart.beat * 1.25 : warn
+    return now >= cue.time - early && now <= (cue.until ?? cue.time + 0.4)
+  })
+  const hand = handLift()
+  const early = soon ? (soon.kind === "dynamics" ? chart.beat * 1.25 : warn) : warn
+  const clock = soon && soon.until ? Math.min(1, Math.max(0, (now - soon.time) / Math.max(0.001, soon.until - soon.time))) : 1
+  const shownLift = !soon ? 0 : soon.direction === "down" ? (hand == null ? 1 - clock : 1 - hand) : (hand == null ? clock : hand)
+  const arrive = soon ? Math.min(1, Math.max(0, (now - (soon.time - early)) / early)) : 0
   const prompt = soon && {
     kind: soon.kind === "cue" ? "point" : soon.kind === "dynamics" ? "swell" : soon.kind,
     part: soon.part,
-    parts: soon.parts || (soon.part ? [soon.part] : "all"),
+    parts: soon.kind === "cut" ? [...playing] : (soon.parts || (soon.part ? [soon.part] : "all")),
     dir: soon.direction,
-    progress: soon.until ? Math.min(1, Math.max(0, (now - soon.time) / (soon.until - soon.time))) : 1,
-    lift: lift == null ? undefined : soon.direction === "down" ? 1 - lift : lift,
+    progress: clock,
+    lift: shownLift,
   }
   const scoreLine = conductLine(now)
   lane.update(now, chart, cues)
+  const aimed = aimedSection()
   const selected = new Set()
   if (aimed) selected.add(aimed)
-  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine })
+  const beatPhase = ((now / chart.beat) % 1 + 1) % 1
+  world.syncBeats?.(now, cues, chart.beat)
+  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine, dynamics, beatPhase, arrive })
 }
 
 // In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.
