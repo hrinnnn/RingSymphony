@@ -368,12 +368,9 @@ export function createRingInput({
       ? message.gyr.map((value, axis) => value - ring.gyroBias[axis])
       : message.gyr
     const w = Math.hypot(...gyr)
-    if (ring.hand === "right") {
-      // `up` and `acc` ride along with every frame so the absolute classifier can reconstruct the
-      // gravity frame at a peak. The gravity filter is advanced on every frame regardless of which
-      // mode is live: it needs a continuous history to stay converged, so running it only while
-      // the absolute path is selected would make a mode switch mid-session read from a cold
-      // filter. `dt` is clamped the way the detectors clamp it, so one late packet cannot throw it.
+    if (ring.hand) {
+      // Both hands keep a gravity history. The left hand has no calibration template — its beat
+      // direction is read from this frame — and the filter needs every packet to stay converged.
       const dt = ring.lastGravityT === null || ring.lastGravityT === undefined ? 0.005 : Math.min(0.05, Math.max(0.001, t - ring.lastGravityT))
       ring.lastGravityT = t
       const up = ring.gravity.update(message.acc, gyr, dt)
@@ -463,12 +460,12 @@ export function createRingInput({
           onDisagreement({ t: event.t + ring.offset, hand: "left", ring: ringPalm, source: fusedPalm.source })
         }
       }
-      if (event.type === "beat" && ring.hand === "right") {
-        if (capturing) continue
+      if (event.type === "beat") {
+        if (capturing && ring.hand === "right") continue
         const { feature, reason, hasGap, rise } = directionFeatureResult(ring.history, event.t)
-        // Both paths produce the same shape — a direction and, when there is none, why — so
-        // everything downstream (fusion, logging, scoring) is untouched by which one is live.
-        const absolute = directionMode === "absolute"
+        // The left hand never uses the right wrist's templates. Its direction comes from the
+        // gravity frame, which does not depend on which hand is wearing the ring.
+        const absolute = ring.hand === "left" || directionMode === "absolute"
         const classified = absolute
           ? classifyAbsolute(gravityFrame(ring.history, event.t))
           : direction.classifyDetailed(feature, ring.address)
@@ -484,8 +481,12 @@ export function createRingInput({
         // confusion are one phenomenon with one cause: a down-stroke and the return of an
         // up-stroke are the same rotation. Fusing afterwards would leave the filter reading the
         // ring's blind guess and suppressing beats on a direction already overruled.
-        const verdict = askCamera("right", event.t + ring.offset)
-        const fused = fusion.fuse(classified.direction, verdict, { allowDistrust: !absolute })
+        const verdict = askCamera(ring.hand, event.t + ring.offset)
+        // The left hand stays out of the right hand's distrust window. A camera may fill a
+        // declined left beat, and it may not overrule one the ring already classified.
+        const fused = ring.hand === "left"
+          ? fuseDirection(classified.direction, verdict)
+          : fusion.fuse(classified.direction, verdict, { allowDistrust: !absolute })
         event.dir = fused.dir
         event.directionSource = fused.source
         // Both sensors' raw answers ride along with the event, so the game can record what each
@@ -507,12 +508,12 @@ export function createRingInput({
         event.ringVertical = absolute ? classified.vertical ?? null : null
         // Which classifier produced this event, carried on the event so the log does not have to
         // ask for a full snapshot once per stroke.
-        event.directionMode = directionMode
+        event.directionMode = ring.hand === "left" ? "absolute" : directionMode
         event.peakSpeed = event.peakSpeed ?? null
         if (fused.source === "camera") cameraStats[classified.direction ? "overrides" : "fills"] += 1
         if (fused.disagreed) {
           cameraStats.disagreements += 1
-          onDisagreement({ t: event.t + ring.offset, hand: "right", ring: classified.direction, source: fused.source })
+          onDisagreement({ t: event.t + ring.offset, hand: ring.hand, ring: classified.direction, source: fused.source })
         }
         event.directionReason = event.dir ? null : (absolute ? classified.reason : (reason || classified.reason))
         // Why the *ring* declined, kept separately from directionReason, which goes null once the
@@ -529,16 +530,18 @@ export function createRingInput({
           ? (event.dir ? !ring.reversalFilter.accept(event.dir, event.t, onCue) : false)
           : (event.dir ? !ring.returnFilter.accept(feature, event.t, onCue, rise) : ring.returnFilter.isReturn(feature, event.t, -0.8, rise))
         if (suppressed) {
-          directionStats.suppressed += 1
+          if (ring.hand === "right") directionStats.suppressed += 1
           continue
         }
-        if (event.dir) directionStats.accepted += 1
-        else if (absolute) directionStats[classified.reason === "数据不足或断帧" ? "data" : "weak"] += 1
-        else if (reason === "数据不足或断帧") directionStats.data += 1
-        else if (reason) directionStats.weak += 1
-        else if (classified.reason === "与校准动作差异过大") directionStats[hasGap ? "mismatchGap" : "mismatch"] += 1
-        else if (classified.reason === "方向相近，无法区分") directionStats.ambiguous += 1
-        else directionStats.uncalibrated += 1
+        if (ring.hand === "right") {
+          if (event.dir) directionStats.accepted += 1
+          else if (absolute) directionStats[classified.reason === "数据不足或断帧" ? "data" : "weak"] += 1
+          else if (reason === "数据不足或断帧") directionStats.data += 1
+          else if (reason) directionStats.weak += 1
+          else if (classified.reason === "与校准动作差异过大") directionStats[hasGap ? "mismatchGap" : "mismatch"] += 1
+          else if (classified.reason === "方向相近，无法区分") directionStats.ambiguous += 1
+          else directionStats.uncalibrated += 1
+        }
       }
       eventCounts[event.hand] += 1
       last = { type: event.type, hand: event.hand, dir: event.dir, directionReason: event.directionReason, at: arrival, count: eventCounts[event.hand], detectionDelay: Math.max(0, t - event.t) }

@@ -245,7 +245,8 @@ export function createLeftDetector(options = {}) {
   }
 }
 
-// Right hand: beats + fist. Left hand: palm + strike + fist.
+// Both hands detect beats: a gyro peak is a beat on either wrist. The left hand also hears a
+// palm, a point and a fist. Those stay, so a slow rise is still a crescendo rather than a beat.
 export function createHandDetector(hand, options = {}) {
   let fist = createFistDetector(options)
   const beat = createBeatDetector(options)
@@ -265,11 +266,9 @@ export function createHandDetector(hand, options = {}) {
         out.push(f)
         beat.mute(frame.t + 0.6)
       }
+      const b = beat.push(frame.t, w)
+      if (b) out.push(b)
       if (left) out.push(...left.push(frame))
-      else {
-        const b = beat.push(frame.t, w)
-        if (b) out.push(b)
-      }
       return out.map((event) => ({ ...event, hand }))
     },
   }

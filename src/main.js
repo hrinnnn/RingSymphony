@@ -191,10 +191,14 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
     hands.add(hand)
     if (!(hands.has("left") && hands.has("right")) && kind === "perfect") kind = "good"
   }
+  if (hand === "left" && !found.cue.result) palmQuietUntil = at + 0.5
   scoreCue(found.cue, kind, found.delta)
 }
 
+let palmQuietUntil = -Infinity
 function playPalm(direction, at = inputNow()) {
+  // A scored left-hand beat owns the next half second, so the same swing is not also a diminuendo.
+  if (at < palmQuietUntil) return
   if (mode === "free") return freeNudge(direction)
   if (mode !== "playing" && mode !== "count-in") return
   world.pose("left", direction)
@@ -237,7 +241,7 @@ function onRing(event) {
   // level it was an irreversible kill switch that either hand could trip on a single spike —
   // a sharp conducting stroke makes much the same angular jerk as a clench.
   if (event.type === "fist") return
-  if (event.hand === "right" && event.type === "beat") {
+  if (event.type === "beat") {
     gestureLog.record({
       at, fused: event.dir, ring: event.ringDir, ringReason: event.ringReason, camera: event.cameraDir,
       cameraReason: event.cameraReason, displacement: event.cameraDisplacement,

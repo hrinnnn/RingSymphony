@@ -63,6 +63,15 @@ for (const person of people) {
 }
 console.log('Right ring: 3/4 and 4/4 recordings give about one beat per swing for all three people: pass')
 
+// The same beat detector runs on the left wrist. A slow rise still reports a palm.
+for (const person of people) {
+  const beats = count(await run('四拍', person, 'left'), 'beat')
+  assert.ok(beats >= 38 && beats <= 58, `${person} left-hand 4/4 beats ${beats}`)
+  const up = await run('上升', person, 'left')
+  assert.ok(count(up, 'palm', 'up') > count(up, 'palm', 'down'), `${person} left beats must not swallow a rise`)
+}
+console.log('Left ring: conducting strokes are beats, and a rise is still a palm: pass')
+
 // Fist: most of the ≈10 fists per recording are found, and ordinary movement never triggers it.
 for (const person of people) {
   assert.ok(count(await run('握拳', person, 'right'), 'fist') >= 4, `${person} fists`)
@@ -102,8 +111,10 @@ console.log('Left ring: rising recordings yield mostly up, falling recordings mo
   const snap = input.snapshot()
   assert.deepEqual(snap.rings.map(r => [r.address, r.hand]), [['A', 'right'], ['B', 'left']], 'offline rings neither take a hand nor show up')
   assert.ok(input.live('right') && input.live('left'))
+  const rightBeats = events.filter(e => e.type === 'beat' && e.hand === 'right')
+  assert.ok(rightBeats.length > 30 && rightBeats.every(e => e.address === 'A'))
+  assert.ok(events.some(e => e.type === 'beat' && e.hand === 'left' && e.address === 'B'), 'the left ring reports its own beats')
   const beats = events.filter(e => e.type === 'beat')
-  assert.ok(beats.length > 30 && beats.every(e => e.hand === 'right' && e.address === 'A'))
   assert.ok(beats.every(e => e.age >= 0 && e.age < 0.3), 'age accounts for detection lag; constant transport delay is not observable from device time alone')
   assert.equal(input.snapshot().last?.type !== undefined, true, 'last gesture is reported for the panel')
   const rightLast = input.snapshot().lastByHand.right
