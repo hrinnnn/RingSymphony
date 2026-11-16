@@ -44,10 +44,10 @@ for (const part of ['violin', 'flute']) {
   world.spawn(cue); world.update(5.5, new Set())
   let rings = []
   scene.traverse(o => { if(o.userData.person) rings.push(o) })
-  assert.equal(rings.length, part === 'violin' ? 6 : 3)
+  assert.equal(rings.length, part === 'violin' ? 5 : 2)
   cue.result = 'perfect'; world.update(7, new Set()); assert.ok(rings.every(r => r.parent === null))
 }
-console.log('Section cues: circles anchored to 6 violinists / 3 flutists, removed after judgement')
+console.log('Section cues: circles anchored to 5 violinists / 2 flutists, removed after judgement')
 for (const direction of ['up','down']) { world.spawn({kind:'dynamics', direction, time: 9}); world.update(7.5, new Set()); world.pose('left',direction); world.update(8,new Set()) }
 let pageObjects = 0; scene.traverse(o => { if (o.userData.cue || o.userData.person) pageObjects++ })
 assert.equal(pageObjects, 0, 'beats and dynamics are drawn on the page overlay, not in the hall')

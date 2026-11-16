@@ -2,14 +2,18 @@ import * as THREE from "three"
 import { laneLayout } from "./lane.js"
 
 // All scenery, people, instruments and UI geometry are original procedural assets.
-// Night-hall palette: each section owns one cool neon accent, shared by suits, halos and notes.
-const PINK = 0xe0457c
-const MINT = 0x2fcfa8
-const LILAC = 0x7f68e6
-const BUTTER = 0xe8a22e
-const SKY = 0x35c8ee
-const GOLD = BUTTER
-export const SECTION_COLOR = { violin: PINK, cello: LILAC, flute: MINT, piano: BUTTER }
+// Classical hall: black formal wear, one restrained accent per section, gold for the conductor.
+const GOLD = 0xe6c98a
+const WINE = 0x8d3a45
+const CREAM = 0xf3ead7
+const BRASS = 0xc4a15a
+const SILVER = 0xc5d0d6
+const PINK = GOLD
+const MINT = SILVER
+const LILAC = WINE
+const BUTTER = BRASS
+const SKY = SILVER
+export const SECTION_COLOR = { violin: GOLD, flute: SILVER, horn: BRASS, cello: WINE, piano: CREAM }
 const toonRamp = new THREE.DataTexture(new Uint8Array([150, 150, 150, 255, 215, 215, 215, 255, 255, 255, 255, 255]), 3, 1, THREE.RGBAFormat)
 toonRamp.minFilter = THREE.NearestFilter
 toonRamp.magFilter = THREE.NearestFilter
@@ -33,11 +37,11 @@ const skins = [0xf3cdb3, 0xd9a47f, 0xf7dcc8, 0xc58d68].map((color) => material(c
 const hairColors = [0x3a2a26, 0x6e4a34, 0xc9a46a, 0x2b2a35, 0x8f5a3e].map((color) => material(color))
 const suits = Object.fromEntries(Object.entries(SECTION_COLOR).map(([part, color]) => [part, {
   color: new THREE.Color(color),
-  coat: material(color),
-  deep: material(shade(color, 0.8)),
-  pants: material(0x3a3d4f),
+  coat: material(0x1a1c24),
+  deep: material(0x101218),
+  pants: material(0x14161c),
 }]))
-const sectionMat = { violin: ivory, cello: ivory, flute: ivory, piano: ivory }
+const sectionMat = Object.fromEntries(Object.entries(SECTION_COLOR).map(([part, color]) => [part, material(color)]))
 
 function mesh(parent, geometry, mat, x = 0, y = 0, z = 0) {
   const item = new THREE.Mesh(geometry, mat)
@@ -339,12 +343,20 @@ function musician(part, x, z, index) {
     applyLimb(rig.bow, hold.bow.s, hold.bow.e, hold.bow.w)
     applyLimb(rig.finger, hold.finger.s, hold.finger.e, hold.finger.w)
     moving = rig.bow.hand
-  } else if (part === "flute") {
+  } else if (part === "flute" || part === "horn") {
     rig.left = createLimb(body, ink, skin, 0.04)
     rig.right = createLimb(body, ink, skin, 0.04)
     applyLimb(rig.left, HOLDS.flute.left.s, HOLDS.flute.left.e, HOLDS.flute.left.w)
     applyLimb(rig.right, HOLDS.flute.right.s, HOLDS.flute.right.e, HOLDS.flute.right.w)
-    addFlute(body, rig)
+    if (part === "flute") addFlute(body, rig)
+    else {
+      const bell = new THREE.Group(); body.add(bell)
+      bell.position.set(0.04, 1.14, 0.16)
+      const coil = mesh(bell, new THREE.TorusGeometry(0.07, 0.016, 8, 18), brass)
+      coil.rotation.y = 0.9
+      rod(bell, [0.05, 0, 0.02], [0.34, 0.08, 0.22], 0.015, brass, 0.05)
+      rig.bell = bell
+    }
     moving = rig.right.hand
   } else {
     const piano = new THREE.Group(); piano.position.set(0, 0, 0.22); body.add(piano)
@@ -447,7 +459,12 @@ function animatePlayers(players, seconds, playing, sections, wall) {
     const entrance = Math.exp(-Math.max(0, since) * 2.4)
     const breath = Math.sin(seconds * Math.PI * 2 * 0.42 + index * 0.7)
     const phase = seconds * Math.PI * 2 * hz / (part === "cello" ? 2 : 1) + index * 0.05
-    const along = Math.sin(phase) * (active ? 1 : 0)
+    // A player only moves while their own part is sounding a note. The stroke is one
+    // gesture per note: its length is the note's length, its size is the note's velocity.
+    const stroke = person.userData.stroke
+    const age = stroke ? wall - stroke.start : 0
+    const sounding = Boolean(stroke) && age >= 0 && age <= stroke.dur
+    const along = sounding ? Math.sin((age / stroke.dur) * Math.PI) * (0.35 + 0.65 * stroke.vel) : 0
     // Waiting players hop in their seats; the entrance itself is a little bounce.
     const eager = sections.pending.has(part) ? Math.abs(Math.sin(wall * 9 + index)) * 0.05 : 0
     const bounce = active ? entrance * Math.abs(Math.sin(since * 14)) * 0.06 : 0
@@ -481,15 +498,22 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       const right = HOLDS.flute.right
       applyLimb(rig.left, left.s, left.e, [left.w[0], left.w[1] + lift, left.w[2]])
       applyLimb(rig.right, right.s, right.e, [right.w[0], right.w[1] + lift * 0.6, right.w[2]])
-      rig.right.hand.rotation.x = active ? Math.sin(phase) * 0.08 : 0
+      rig.right.hand.rotation.x = sounding ? along * 0.12 : 0
+      if (rig.bell) rig.bell.rotation.z = sounding ? -along * 0.5 : 0
       rig.pads.forEach((pad, i) => {
-        const down = active && Math.sin(seconds * hz * Math.PI * 2 + i * 0.7) > 0.1
+        const down = sounding && ((i + Math.floor(age * 8)) % 3 === 0)
         pad.position.y = pad.userData.restY + (down ? -0.007 : 0.003)
       })
+    } else if (part === "horn") {
+      const lift = along * 0.05
+      const left = HOLDS.flute.left
+      const right = HOLDS.flute.right
+      applyLimb(rig.left, left.s, left.e, [left.w[0], left.w[1] + lift, left.w[2]])
+      applyLimb(rig.right, right.s, right.e, [right.w[0], right.w[1] + lift, right.w[2]])
+      if (rig.bell) rig.bell.rotation.x = -along * 0.35
     } else {
-      const bob = active ? Math.sin(seconds * hz * Math.PI * 2) : 0
-      const leftLift = Math.max(0, bob) * 0.04
-      const rightLift = Math.max(0, -bob) * 0.04
+      const leftLift = along * 0.045
+      const rightLift = along * 0.045
       const left = HOLDS.piano.left
       const right = HOLDS.piano.right
       applyLimb(rig.left, left.s, [left.e[0], left.e[1] + leftLift, left.e[2]], [left.w[0], left.w[1] + leftLift, left.w[2]])
@@ -499,7 +523,7 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       if (keys) {
         const eighth = Math.floor(seconds * hz * 2)
         keys.children.forEach((key, i) => {
-          const play = active && (i % 8 === eighth % 8 || (i + 3) % 8 === eighth % 8)
+          const play = sounding && (i % 8 === Math.floor((stroke.pitch || 0) / 2) % 8 || (i + 3) % 8 === Math.floor(age * 6) % 8)
           key.position.y = key.userData.restY - (play ? 0.012 : 0)
         })
       }
@@ -549,7 +573,7 @@ export function createWorld(canvas, laneCanvas) {
   key.castShadow = true; key.shadow.mapSize.set(2048, 2048)
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 25 })
   key.shadow.bias = -0.001; scene.add(key)
-  const rim = new THREE.DirectionalLight(0x35e0ff, 1.5); rim.position.set(4, 4, -7); scene.add(rim)
+  const rim = new THREE.DirectionalLight(0xe6c98a, 1.5); rim.position.set(4, 4, -7); scene.add(rim)
   const rimWarm = new THREE.DirectionalLight(0xff4f8b, 0.9); rimWarm.position.set(-5, 3, -6); scene.add(rimWarm)
   for (const x of [-4, 0, 4]) {
     const spot = new THREE.SpotLight(0xcfe0ff, 16, 18, 0.55, 0.9, 1.5)
@@ -580,7 +604,7 @@ export function createWorld(canvas, laneCanvas) {
   box(scene, [18, 7, 0.3], material(0x1a2033), 0, 3.4, -10)
   for (let i = -8; i <= 8; i++) {
     box(scene, [0.79, 5.4, 0.15], material(i % 2 ? 0x222a42 : 0x1c233a), i * 0.96, 2.8, -9.75)
-    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.02, glow(0x35e0ff, 0.55))
+    rod(scene, [i * 0.96 - 0.42, 0, -9.6], [i * 0.96 - 0.42, 5.6, -9.6], 0.02, glow(0xe6c98a, 0.55))
   }
   const pipeColors = [0x4a5470, 0x3d465f]
   for (let i = -10; i <= 10; i++) {
@@ -597,29 +621,29 @@ export function createWorld(canvas, laneCanvas) {
     box(scene, [0.6, 6, 15], material(0x141a2c), s * 9, 3, -2)
     for (const y of [2.9, 5.1]) {
       box(scene, [0.7, 0.2, 14], material(0x1c2338), s * 8.4, y, -2.5)
-      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.03, glow(0x35e0ff, 0.7))
+      rod(scene, [s * 8, y + 0.55, -9], [s * 8, y + 0.55, 4], 0.03, glow(0xe6c98a, 0.7))
       for (let z = -9; z < 4; z += 0.5) rod(scene, [s * 8, y, z], [s * 8, y + 0.55, z], 0.012, material(0x2c3552))
     }
   }
   const podium = box(scene, [2.8, 0.19, 4.2], material(0x1c2238), 0, 0.095, 3.3)
   box(podium, [2.64, 0.018, 4.03], material(0x2a1226), 0, 0.105, 0)
-  for (const x of [-1.35, 1.35]) box(scene, [0.025, 0.012, 4.15], glow(0x35e0ff, 0.8), x, 0.2, 3.3)
-  box(scene, [2.72, 0.012, 0.025], glow(0x35e0ff, 0.8), 0, 0.2, 1.23)
+  for (const x of [-1.35, 1.35]) box(scene, [0.025, 0.012, 4.15], glow(0xe6c98a, 0.8), x, 0.2, 3.3)
+  box(scene, [2.72, 0.012, 0.025], glow(0xe6c98a, 0.8), 0, 0.2, 1.23)
   const desk = stand(scene, 0, 2.6, 1.18)
   desk.rotation.y = Math.PI
   const players = []
+  // Fan, left to right as the conductor sees it: violins, flutes, horns, cellos, piano.
   const layout = [
-    ['flute', -2.9, -5.6], ['flute', -1.8, -5.9], ['flute', -0.7, -6],
-    ['piano', 3.2, -5.5],
-    ['cello', -1.5, -3.65], ['cello', 0, -3.9], ['cello', 1.5, -3.65],
-    ['violin', -3.1, -1.9], ['violin', -1.9, -1.25], ['violin', -0.7, -1.05],
-    ['violin', 0.7, -1.05], ['violin', 1.9, -1.25], ['violin', 3.1, -1.9],
+    ['violin', -3.3, -1.55], ['violin', -2.15, -1.05], ['violin', -1.0, -0.85], ['violin', 0.15, -1.05], ['violin', 1.3, -1.6],
+    ['flute', -2.75, -3.7], ['flute', -1.5, -4.0],
+    ['horn', -0.2, -4.45], ['horn', 1.15, -4.25],
+    ['cello', 1.85, -2.25], ['cello', 2.85, -1.7], ['cello', 3.55, -2.55],
+    ['piano', 3.2, -5.2],
   ]
-  // Stepped risers keep the back rows' big heads visible over the cellos.
-  const RISER = { violin: 0, cello: 0.2, flute: 0.45, piano: 0.45 }
-  for (const [height, z, depth, width, color] of   [[0.45, -5.8, 1.7, 9, 0x1a2036], [0.2, -3.75, 1.4, 5.6, 0x222a44]]) {
-    const riser = box(scene, [width, height, depth], material(color), 0, height / 2, z)
-      box(riser, [width + 0.02, 0.03, 0.04], glow(0x35e0ff, 0.65), 0, height / 2 - 0.01, depth / 2)
+  const RISER = { violin: 0, cello: 0.16, flute: 0.4, horn: 0.55, piano: 0.55 }
+  for (const [x, height, z, depth, width, color] of [[0, 0.55, -4.7, 2.4, 8.2, 0x3a2a22], [2.7, 0.16, -2.15, 1.5, 2.6, 0x4a3428]]) {
+    const riser = box(scene, [width, height, depth], material(color), x, height / 2, z)
+      box(riser, [width + 0.02, 0.03, 0.04], glow(0xe6c98a, 0.65), 0, height / 2 - 0.01, depth / 2)
   }
   layout.forEach(([part, x, z], i) => {
     const person = musician(part, x, z, i)
@@ -822,6 +846,16 @@ export function createWorld(canvas, laneCanvas) {
         }
       }
     })
+    const asked = sections.prompt
+    if (asked) {
+      const names = asked.parts === "all" ? Object.keys(SECTION_COLOR) : [].concat(asked.part || asked.parts || [])
+      halos.forEach((disc) => {
+        if (!names.includes(disc.userData.of)) return
+        const lifted = asked.kind === "swell" ? 0.2 + (asked.progress || 0) * 0.55 : 0.72
+        disc.material.opacity = Math.max(disc.material.opacity, lifted)
+        disc.userData.ring.material.opacity = 0.95
+      })
+    }
     for (let i = cueRings.length - 1; i >= 0; i--) {
       const { cue, rings } = cueRings[i], remain = cue.time - seconds
       if (remain < -0.25 || cue.result) { rings.forEach(remove); cueRings.splice(i, 1); continue }
@@ -885,5 +919,30 @@ export function createWorld(canvas, laneCanvas) {
     levelHands = value
     lanePlane.visible = value
   }
-  return { resize, update, spawn, emit, pose, previewRight, pick, reset, setLevelHands, screenPositions, players }
+  // One bow, breath or key-press per note. `dur` is seconds, `vel` is 0..1.
+  function note(part, info = {}) {
+    const start = performance.now() / 1000
+    const dur = Math.max(0.12, info.dur || 0.4)
+    const vel = Math.min(1, Math.max(0, info.vel ?? 0.6))
+    players.forEach((person, i) => {
+      if (person.userData.part === part) person.userData.stroke = { start: start + (i % 3) * 0.03, dur, vel, pitch: info.pitch || 0 }
+    })
+  }
+  // Which section a horizontal screen position is pointing at. Used by the camera hand.
+  function sectionAt(clientX) {
+    const mids = {}
+    for (const spot of screenPositions()) {
+      const bucket = mids[spot.part] || (mids[spot.part] = [])
+      bucket.push(spot.x)
+    }
+    let best = null
+    let dist = Infinity
+    for (const [part, xs] of Object.entries(mids)) {
+      const mid = xs.reduce((sum, x) => sum + x, 0) / xs.length
+      const gap = Math.abs(mid - clientX)
+      if (gap < dist) { dist = gap; best = part }
+    }
+    return best
+  }
+  return { resize, update, spawn, emit, note, sectionAt, pose, previewRight, pick, reset, setLevelHands, screenPositions, players }
 }
