@@ -26,11 +26,16 @@ function ensure() {
       oscillator: { type: "sine" },
       envelope: { attack: 0.08, decay: 0.1, sustain: 0.35, release: 0.4 },
     }),
+    horn: new Tone.Synth({
+      oscillator: { type: "sawtooth" },
+      envelope: { attack: 0.08, decay: 0.2, sustain: 0.6, release: 0.4 },
+    }),
   }
   synths.piano.volume.value = -12
   synths.cello.volume.value = -6
   synths.violin.volume.value = -8
   synths.flute.volume.value = -11
+  synths.horn.volume.value = -10
   const gates = {}
   const meters = {}
   for (const part of PARTS) {

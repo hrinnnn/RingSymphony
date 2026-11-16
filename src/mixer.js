@@ -1,10 +1,12 @@
-export const PARTS = ["violin", "cello", "flute", "piano"]
+// Left to right as the conductor sees the stage. Keys follow that order.
+export const PARTS = ["violin", "flute", "horn", "cello", "piano"]
 
 export const PART_INFO = {
   violin: { name: "小提琴", badge: "提", key: "1" },
-  cello: { name: "大提琴", badge: "大", key: "2" },
-  flute: { name: "长笛", badge: "笛", key: "3" },
-  piano: { name: "钢琴", badge: "琴", key: "4" },
+  flute: { name: "长笛", badge: "笛", key: "2" },
+  horn: { name: "圆号", badge: "号", key: "3" },
+  cello: { name: "大提琴", badge: "大", key: "4" },
+  piano: { name: "钢琴", badge: "琴", key: "5" },
 }
 
 // Accompaniment is lowered by this fraction while another section solos (λ in the design doc).

@@ -261,7 +261,7 @@ await node('#back').handlers.click()
 await freeButton.handlers.click()
 key('f')
 assert.equal(audio.queued.length, 0, 'start without a selection does nothing')
-key('1'); key('3')
+key('1'); key('2')
 key('f')
 assert.deepEqual(audio.queued.map(q => [q.part, q.gain, q.quantum]), [['violin', 1, '4n'], ['flute', 1, '4n']])
 audio.queued.forEach(q => q.landed()); audio.queued = []
@@ -279,7 +279,7 @@ performance.now = () => now
 for (let i = 0; i < 8; i++) { key('ArrowDown'); now += 500 }
 performance.now = realNow
 assert.ok(Math.abs(audio.tempo - 120) < 3, `tempo follows 0.5 s beats (got ${audio.tempo})`)
-key('3'); key('g')
+key('2'); key('g')
 assert.deepEqual(audio.queued.map(q => [q.part, q.gain]), [['flute', 0]])
 audio.queued.forEach(q => q.landed()); audio.queued = []
 key('g')
