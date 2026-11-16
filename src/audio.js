@@ -78,7 +78,16 @@ function ensure() {
 
 function voice(part) {
   const sampler = parts.samplers[part]
-  return sampler?.loaded ? sampler : parts.synths[part]
+  const synth = parts.synths[part]
+  if (sampler?.loaded) {
+    // A loaded sampler and its fallback synth were both in the graph, so every chord paid for two instruments.
+    if (!sampler.fallbackCut) {
+      synth.disconnect()
+      sampler.fallbackCut = true
+    }
+    return sampler
+  }
+  return synth
 }
 
 function scheduleEvents(events, hooks) {
@@ -86,15 +95,19 @@ function scheduleEvents(events, hooks) {
   const lastStart = {}
   for (const event of events) {
     Tone.Transport.schedule((time) => {
-      const at = Math.max(time, (lastStart[event.part] ?? -Infinity) + 0.001)
-      lastStart[event.part] = at
-      voice(event.part).triggerAttackRelease(event.note, event.dur, at, event.vel)
-      if (!parts.gates[event.part]) return
-      Tone.Draw.schedule(() => {
-        const dur = Tone.Time(event.dur).toSeconds()
-        hooks.onNote?.({ part: event.part, note: event.note, dur, vel: event.vel })
-        if (parts.gates[event.part].gain.value > 0.05) hooks.onVoice(event.part)
-      }, time)
+      try {
+        const at = Math.max(time, (lastStart[event.part] ?? -Infinity) + 0.001)
+        lastStart[event.part] = at
+        voice(event.part).triggerAttackRelease(event.note, event.dur, at, event.vel)
+        if (!parts.gates[event.part]) return
+        Tone.Draw.schedule(() => {
+          const dur = Tone.Time(event.dur).toSeconds()
+          hooks.onNote?.({ part: event.part, note: event.note, dur, vel: event.vel })
+          if (parts.gates[event.part].gain.value > 0.05) hooks.onVoice(event.part)
+        }, time)
+      } catch {
+        // One bad note must not stall the transport, or the whole bar arrives late.
+      }
     }, Tone.Time(event.time).toSeconds())
   }
 }

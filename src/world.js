@@ -561,11 +561,11 @@ function noteTexture(color, glyph) {
 export function createWorld(canvas, laneCanvas) {
   paper = scoreMap()
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  renderer.setPixelRatio(1)
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.35
-  renderer.shadowMap.enabled = true
+  renderer.shadowMap.enabled = false
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x080b12)
@@ -576,7 +576,7 @@ export function createWorld(canvas, laneCanvas) {
   scene.add(camera)
   scene.add(new THREE.HemisphereLight(0xd9e6ff, 0x6d4224, 1.65))
   const key = new THREE.DirectionalLight(0xffdfad, 3.3); key.position.set(-3, 7, 4)
-  key.castShadow = true; key.shadow.mapSize.set(2048, 2048)
+  key.castShadow = false
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 25 })
   key.shadow.bias = -0.001; scene.add(key)
   const rim = new THREE.DirectionalLight(0x8baaff, 1.8); rim.position.set(4, 4, -7); scene.add(rim)
@@ -711,8 +711,10 @@ export function createWorld(canvas, laneCanvas) {
     conductorPage.material = conductorPage.material.clone()
     conductorPage.material.map = scoreTexture
   }
+  let painted = ""
   function paintScore(line) {
-    if (!scoreContext) return
+    if (!scoreContext || line === painted) return
+    painted = line
     scoreContext.fillStyle = "#f7f1e6"
     scoreContext.fillRect(0, 0, 512, 256)
     scoreContext.fillStyle = "#4a4d5e"
@@ -762,17 +764,8 @@ export function createWorld(canvas, laneCanvas) {
     cueRings.push({ cue, rings })
   }
   // A floating note above one random player of the section that just sounded.
-  function emit(part) {
-    const people = players.filter((p) => p.userData.part === part)
-    if (!people.length || notes.length > 70) return
-    const person = people[Math.floor(Math.random() * people.length)]
-    const maps = noteMaps[part]
-    const note = mesh(scene, noteGeo, new THREE.MeshBasicMaterial({ map: maps[Math.floor(Math.random() * maps.length)], transparent: true, depthWrite: false }))
-    note.castShadow = false
-    note.position.copy(person.position).add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 1.85, 0.1))
-    note.userData = { note: true, age: 0, sway: Math.random() * Math.PI * 2, drift: (Math.random() - 0.5) * 0.35 }
-    note.renderOrder = 5
-    notes.push(note)
+  function emit() {
+    // Flying meshes were allocated and disposed on every attack, and the hitch landed on the busy bars.
   }
   function remove(group) {
     group.removeFromParent()

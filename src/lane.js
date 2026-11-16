@@ -1,7 +1,5 @@
-// Maestro-style note lane drawn over the 3D hall: cues start small near the vanishing point, grow as they come at
-// the player and land on a hit ring. Directional cues generally travel along the stroke they ask for;
-// down beats approach from the lower right to keep them separate from cues coming from above.
-// Left column = left hand (section entrances, swell / fade); centre = right hand (directional beats).
+// Notes travel onto one horizontal gold judgment line, the same line the first version used.
+// Down beats approach from the lower right. Left-hand cues use the left mark on that line.
 import { GOOD } from "./judge.js"
 
 export const DIRECTION_COLOR = { up: "#f8eee0", down: "#e6c98a", left: "#f8eee0", right: "#f8eee0" }
@@ -40,7 +38,7 @@ export function createLane(canvas) {
   function resize() {
     const rect = canvas.getBoundingClientRect()
     if (!rect.width || !rect.height) return
-    ratio = Math.min(window.devicePixelRatio || 1, 2)
+    ratio = 1
     width = rect.width
     height = rect.height
     canvas.width = Math.round(width * ratio)
@@ -52,7 +50,7 @@ export function createLane(canvas) {
 
   // remain: seconds until the cue's time. Past the hit time a late cue keeps travelling a little.
   function place(cue, remain, lead) {
-    const lane = layout[cue.hand]
+    const lane = layout[cue.hand === "both" ? "right" : cue.hand] || layout.right
     const p = Math.min(1.18, 1 - remain / lead)
     const e = Math.max(0, p) ** 1.5
     const swing = cue.direction ? VECTOR[cue.direction] : [0, 0]
@@ -102,37 +100,12 @@ export function createLane(canvas) {
     g.restore()
   }
 
-  function disc(x, y, r, color, fade) {
-    g.save()
-    g.shadowColor = alpha(color, 0.9 * fade)
-    g.shadowBlur = 18
-    g.lineWidth = 2.5
-    g.strokeStyle = alpha(color, fade)
-    g.fillStyle = alpha("#070b16", 0.7 * fade)
-    g.beginPath()
-    g.arc(x, y, r, 0, Math.PI * 2)
-    g.fill()
-    g.stroke()
-    g.restore()
-    g.fillStyle = alpha(color, 0.2 * fade)
-    g.beginPath()
-    g.arc(x, y, r * 0.82, 0, Math.PI * 2)
-    g.fill()
-    g.lineWidth = 1
-    g.strokeStyle = alpha("#ffffff", 0.55 * fade)
-    g.beginPath()
-    g.arc(x, y, r * 0.92, 0, Math.PI * 2)
-    g.stroke()
-  }
-
   function leftNote(x, y, r, color, fade) {
     g.save()
     g.translate(x, y)
-    g.shadowColor = alpha(color, 0.9 * fade)
-    g.shadowBlur = 18
     g.lineWidth = 2.5
     g.strokeStyle = alpha(color, fade)
-    g.fillStyle = alpha("#070b16", 0.9 * fade)
+    g.fillStyle = alpha("#1a140c", 0.55 * fade)
     g.beginPath()
     g.moveTo(-r * 0.7, -r * 0.8)
     g.lineTo(r * 0.7, -r * 0.8)
@@ -189,7 +162,6 @@ export function createLane(canvas) {
     const color = missed ? "#7b8299" : cue.kind === "cue" ? PART_COLOR[cue.part] : cue.kind === "dynamics" ? (cue.direction === "up" ? "#e6c98a" : "#b7c4c9") : DIRECTION_COLOR[cue.direction]
     if (cue.direction && !missed) tail(cue, remain, lead, color, fade)
     if (cue.hand === "left") leftNote(x, y, r, color, fade)
-    else disc(x, y, r, color, fade)
     if (cue.kind === "cue") {
       text(PART_BADGE[cue.part], x, y + 1, r * 0.8, alpha("#ffffff", fade), 700, 1)
       if (scale > 0.55) text(`${PART_NAME[cue.part]} 进入`, x, y + r + 16, 13, alpha("#e8f1ff", fade), 600, 1)
@@ -198,42 +170,27 @@ export function createLane(canvas) {
     if (cue.kind === "dynamics") {
       dynamicsMark(x, y, r, cue.direction, fade)
       if (scale > 0.55) text(cue.direction === "up" ? "渐强 CRESC" : "渐弱 DIM", x, y + r + 16, 13, alpha("#e8f1ff", fade), 600, 1)
-    } else {
-      arrow(x, y, r * 1.1, cue.direction, alpha("#ffffff", fade), Math.sin(now * 9) * r * 0.04)
+    } else if (cue.kind === "circle" || cue.kind === "cut") {
+      text(cue.kind === "circle" ? "合" : "收", x, y, r * 0.7, alpha("#e6c98a", fade), 700)
+    } else if (cue.direction) {
+      arrow(x, y, r * 1.1, cue.direction, alpha("#f8eee0", fade))
     }
   }
 
-  function target(lane, now, chart, title, flash, directions) {
-    const { x, y } = lane.target
-    const r = layout.r
-    const phase = ((now / chart.beat) % 1 + 1) % 1
-    const pulse = Math.exp(-phase * 5)
-    g.save()
-    g.shadowColor = "#e6c98a"
-    g.shadowBlur = 8 + 18 * pulse
+  function judgmentLine() {
+    const y = layout.right.target.y
+    g.strokeStyle = "rgba(230,201,138,0.9)"
     g.lineWidth = 2
-    g.strokeStyle = alpha("#e8f1ff", 0.85)
     g.beginPath()
-    g.arc(x, y, r, 0, Math.PI * 2)
+    g.moveTo(36, y)
+    g.lineTo(width - 36, y)
     g.stroke()
-    g.restore()
-    g.lineWidth = 1
-    g.strokeStyle = "rgba(232,241,255,0.28)"
-    g.setLineDash([3, 6])
-    g.beginPath()
-    g.arc(x, y, r * 1.38, 0, Math.PI * 2)
-    g.stroke()
-    g.setLineDash([])
-    for (const direction of directions) {
-      const [vx, vy] = VECTOR[direction]
-      const lit = flash[direction] ?? 0
-      g.save()
-      g.translate(x + vx * r * 1.95, y + vy * r * 1.95)
-      g.scale(0.34, 0.34)
-      arrow(0, 0, r * 0.9, direction, alpha(lit > 0 ? DIRECTION_COLOR[direction] : "#e8f1ff", lit > 0 ? 1 : 0.3))
-      g.restore()
+    g.fillStyle = "#e6c98a"
+    for (const x of [layout.left.target.x, layout.right.target.x]) {
+      g.beginPath()
+      g.arc(x, y, 3.5, 0, Math.PI * 2)
+      g.fill()
     }
-    text(title, x, y - r * 2.7, 11, "rgba(232,241,255,0.6)", 600, 3)
   }
 
   function effects(chart) {
@@ -243,7 +200,7 @@ export function createLane(canvas) {
       const item = fx[i]
       const age = (nowMs - item.born) / 1000
       if (age > 0.8) { fx.splice(i, 1); continue }
-      const lane = layout[item.cue.hand]
+      const lane = layout[item.cue.hand === "both" ? "right" : item.cue.hand] || layout.right
       const { x, y } = lane.target
       const grade = GRADE[item.kind]
       const t = age / 0.8
@@ -272,9 +229,8 @@ export function createLane(canvas) {
     const visible = cues
       .filter((cue) => cue.time - now < chart.beat * 3 && now - cue.time < 0.9 && (!cue.result || cue.result === "miss"))
       .sort((a, b) => b.time - a.time)
-    const lit = effects(chart)
-    target(layout.right, now, chart, "RIGHT HAND", lit.right, Object.keys(VECTOR))
-    target(layout.left, now, chart, "LEFT HAND", lit.left, ["up", "down"])
+    effects(chart)
+    judgmentLine()
     visible.forEach((cue) => note(cue, now, chart))
   }
 

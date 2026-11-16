@@ -700,7 +700,7 @@ function loop() {
     if (nextLeft.kind === "cue") cueHintEl.textContent = leftRing ? `左手向前一指 · ${PART_INFO[nextLeft.part].name}进入` : `点一下发光的圈 · ${PART_INFO[nextLeft.part].name}进入`
     else if (nextLeft.direction === "up") cueHintEl.textContent = leftRing ? "左手掌心向上抬 · 渐强" : "抬起左手 · 渐强  E"
     else cueHintEl.textContent = leftRing ? "左手压下去 · 渐弱" : "放低左手 · 渐弱  D"
-  } else cueHintEl.textContent = rightRing ? "音符落到判定圈时 · 按箭头方向挥动右手" : "音符落到判定圈时 · 按同方向打拍"
+  } else cueHintEl.textContent = rightRing ? "音符落到判定线时 · 按箭头方向挥动右手" : "音符落到判定线时 · 按同方向打拍"
   if (mode === "playing") {
     const bar = Math.min(chart.bars, Math.floor((now - chart.countIn) / (chart.meter * chart.beat)) + 1)
     if (bar > 0) statusEl.textContent = `第 ${bar} / ${chart.bars} 小节`
@@ -777,12 +777,14 @@ function conductLine(now) {
   const note = (phrase.cues || []).map((cue) => cue.kind === "point" ? `指${PART_INFO[cue.part].name}` : cue.kind === "circle" ? "画圈" : cue.dir === "up" ? "渐强" : "渐弱").join(" · ")
   const title = `第 ${bar + 1} 小节 · ${HAND_WORD[phrase.hand]}${note ? ` · ${note}` : ""}`
   conductEl.hidden = false
-  conductTitle.textContent = title
-  conductMarks.innerHTML = Array.from({ length: Math.min(8, chart.bars - bar) }, (_, i) => {
-    const at = bar + i
-    const here = phrases.find((item) => at >= item.bar && at < item.bar + item.bars)
-    return `<i class="${i === 0 ? "now" : ""}">${HAND_MARK[here?.hand] || ""}</i>`
-  }).join("")
+  if (conductTitle.textContent !== title) {
+    conductTitle.textContent = title
+    conductMarks.innerHTML = Array.from({ length: Math.min(8, chart.bars - bar) }, (_, i) => {
+      const at = bar + i
+      const here = phrases.find((item) => at >= item.bar && at < item.bar + item.bars)
+      return `<i class="${i === 0 ? "now" : ""}">${HAND_MARK[here?.hand] || ""}</i>`
+    }).join("")
+  }
   return title
 }
 
