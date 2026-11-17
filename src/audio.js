@@ -1,6 +1,5 @@
 import * as Tone from "tone"
 import { PARTS } from "./mixer.js"
-import { ENTRIES } from "./orchestra.js"
 import { eventsFor as pieceEvents } from "./repertoire.js"
 import { eventsFor, LOOP_BARS, loopEvents } from "./score.js"
 
@@ -155,8 +154,8 @@ export async function startPiece(piece, hooks) {
   await Tone.start()
   ensure()
   resetTransport(piece.bpm, piece.meter)
-  const open = new Set(ENTRIES[piece.id].on)
-  PARTS.forEach((part) => setPart(part, open.has(part)))
+  // Every written part sounds on its own. A missed point still leaves the music intact.
+  PARTS.forEach((part) => setPart(part, true))
   const bar = Tone.Time("1m").toSeconds()
   scheduleEvents(pieceEvents(piece.id).map((event) => ({
     ...event,

@@ -1,0 +1,30 @@
+These MIDI files are the notes the game plays. Each track is assigned to one of the five sampled sections.
+
+卡农
+  File: canon_per_3_violini_e_basso.mid
+  Source: Mutopia Project, id 2047. Johann Pachelbel, Canon per 3 Violini e Basso.
+  From an IMSLP edition. Creative Commons Attribution 4.0.
+  https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2047
+  Violin I → violin, violin II → flute, violin III → horn, cello → cello and piano.
+
+欢乐颂
+  File: ode.mid
+  Source: Mutopia Project, id 528. Ludwig van Beethoven, Ode to Joy.
+  Public domain.
+  https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=528
+  Upper staff → violin and flute. Lower staff → cello, horn and piano.
+
+蓝色多瑙河
+  File: danube.mid
+  Source: Mutopia Project, id 519. Johann Strauss Jr., The Blue Danube Waltz, main theme, Op. 314.
+  Arrangement by N. Kouremenos. Creative Commons Attribution-ShareAlike 4.0.
+  https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=519
+  This file is the famous theme, not the whole waltz.
+  Upper staff → violin and flute. Lower staff → cello, horn and piano.
+
+小夜曲
+  File: MozartWA-KV525-mov-01.mid
+  Source: Mutopia Project, id 2230. W. A. Mozart, Eine kleine Nachtmusik, K. 525, first movement.
+  Typeset from the 1883 Breitkopf & Härtel edition. Public domain.
+  https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2230
+  Violin I → violin, violin II → flute, viola → horn, cello → cello and piano.

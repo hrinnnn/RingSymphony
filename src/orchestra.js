@@ -23,40 +23,46 @@ export function noteEvent(part, note, dur, vel) {
 // swell  — raise or lower over several beats:  { kind: "swell", dir: "up"|"down", parts: "all"|string[], at, beats }
 export const PHRASES = {
   canon: [
-    { bar: 0, bars: 4, hand: "right" },
-    { bar: 4, bars: 4, hand: "right", cues: [{ kind: "point", part: "violin", at: "4:0" }] },
-    { bar: 8, bars: 4, hand: "right", cues: [{ kind: "point", part: "flute", at: "8:0" }, { kind: "swell", dir: "up", parts: "all", at: "8:0", beats: 4 }] },
-    { bar: 12, bars: 3, hand: "free", cues: [{ kind: "point", part: "horn", at: "12:0" }, { kind: "swell", dir: "down", parts: "all", at: "13:0", beats: 4 }] },
-    { bar: 15, bars: 1, hand: "cut" },
+    { bar: 0, bars: 2, hand: "right" },
+    { bar: 2, bars: 2, hand: "right", cues: [{ kind: "point", part: "violin", at: "2:0" }] },
+    { bar: 4, bars: 2, hand: "right", cues: [{ kind: "point", part: "flute", at: "4:0" }] },
+    { bar: 6, bars: 4, hand: "both", cues: [{ kind: "point", part: "horn", at: "6:0" }] },
+    { bar: 10, bars: 8, hand: "right", cues: [{ kind: "swell", dir: "up", parts: "all", at: "10:0", beats: 8 }] },
+    { bar: 18, bars: 20, hand: "right" },
+    { bar: 38, bars: 16, hand: "right", cues: [{ kind: "swell", dir: "down", parts: "all", at: "38:0", beats: 8 }] },
+    { bar: 54, bars: 2, hand: "free" },
+    { bar: 56, bars: 1, hand: "cut" },
   ],
   joy: [
     { bar: 0, bars: 4, hand: "right" },
-    { bar: 4, bars: 4, hand: "both", cues: [{ kind: "point", part: "horn", at: "4:0" }] },
-    { bar: 8, bars: 4, hand: "right", cues: [{ kind: "swell", dir: "up", parts: ["violin", "horn"], at: "8:0", beats: 8 }] },
+    { bar: 4, bars: 4, hand: "both" },
+    { bar: 8, bars: 4, hand: "right", cues: [{ kind: "swell", dir: "up", parts: "all", at: "8:0", beats: 8 }] },
     { bar: 12, bars: 3, hand: "left" },
     { bar: 15, bars: 1, hand: "cut" },
   ],
   danube: [
-    { bar: 0, bars: 4, hand: "right" },
-    { bar: 4, bars: 4, hand: "free", cues: [{ kind: "swell", dir: "up", parts: "all", at: "4:0", beats: 8 }] },
-    { bar: 8, bars: 4, hand: "both", cues: [{ kind: "circle", parts: ["violin", "cello"], at: "8:0" }] },
-    { bar: 12, bars: 3, hand: "right", cues: [{ kind: "swell", dir: "down", parts: "all", at: "12:0", beats: 6 }] },
-    { bar: 15, bars: 1, hand: "cut" },
+    { bar: 0, bars: 8, hand: "right", cues: [{ kind: "point", part: "cello", at: "1:0" }] },
+    { bar: 8, bars: 8, hand: "both", cues: [{ kind: "swell", dir: "up", parts: "all", at: "8:0", beats: 6 }] },
+    { bar: 16, bars: 8, hand: "right" },
+    { bar: 24, bars: 8, hand: "left", cues: [{ kind: "swell", dir: "down", parts: "all", at: "24:0", beats: 6 }] },
+    { bar: 32, bars: 1, hand: "cut" },
   ],
   nachtmusik: [
-    { bar: 0, bars: 4, hand: "both" },
-    { bar: 4, bars: 4, hand: "left" },
-    { bar: 8, bars: 4, hand: "both", cues: [{ kind: "point", part: "flute", at: "8:0" }] },
-    { bar: 12, bars: 3, hand: "right", cues: [{ kind: "swell", dir: "up", parts: "all", at: "12:0", beats: 6 }] },
-    { bar: 15, bars: 1, hand: "cut" },
+    { bar: 0, bars: 16, hand: "right" },
+    { bar: 16, bars: 16, hand: "both", cues: [{ kind: "swell", dir: "up", parts: "all", at: "16:0", beats: 8 }] },
+    { bar: 32, bars: 32, hand: "right" },
+    { bar: 64, bars: 32, hand: "left" },
+    { bar: 96, bars: 32, hand: "right", cues: [{ kind: "swell", dir: "down", parts: "all", at: "96:0", beats: 8 }] },
+    { bar: 128, bars: 8, hand: "free" },
+    { bar: 136, bars: 1, hand: "cut" },
   ],
 }
 
 // Which sections are already playing when a piece starts, and where the others enter.
 // The arrangements must follow this, so a gesture and the music happen together.
 export const ENTRIES = {
-  canon: { on: ["cello", "piano"], violin: 4, flute: 8, horn: 12 },
-  joy: { on: ["violin", "cello", "piano"], horn: 4, flute: 0 },
-  danube: { on: ["violin", "cello", "piano", "horn"], flute: 4 },
-  nachtmusik: { on: ["violin", "cello", "piano", "horn"], flute: 8 },
+  canon: { on: ["cello", "piano"], violin: 2, flute: 4, horn: 6 },
+  joy: { on: ["violin", "flute", "horn", "cello", "piano"] },
+  danube: { on: ["violin", "flute"], cello: 1, horn: 1, piano: 1 },
+  nachtmusik: { on: ["violin", "flute", "horn", "cello", "piano"] },
 }

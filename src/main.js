@@ -727,11 +727,10 @@ function loop() {
     if (cues.some((cue) => cue.kind === "cue" && cue.part === "violin" && cue.result && cue.result !== "miss")) playing.add("violin")
     if (cues.some((cue) => cue.kind === "cue" && cue.part === "flute" && cue.result && cue.result !== "miss")) playing.add("flute")
   } else {
-    cues.forEach((cue) => {
-      if (!cue.result || cue.result === "miss") return
-      if (cue.part) playing.add(cue.part)
-      cue.parts?.forEach((part) => playing.add(part))
-    })
+    const barNow = Math.max(0, Math.floor((now - chart.countIn) / (chart.meter * chart.beat)))
+    for (const [part, starts] of Object.entries(chart.entries)) {
+      if (typeof starts === "number" && barNow >= starts) playing.add(part)
+    }
   }
   hud.update(levelView(playing, partLevels?.() || {}))
   const gestureParts = (cue) => {
