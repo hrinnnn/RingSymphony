@@ -1,4 +1,4 @@
-import { endFree, partLevels, queuePart, setDynamics, setPart, setPartGain, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
+import { endFree, partLevels, queuePart, setBandPlan, setDynamics, setPart, setPartGain, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
 import { buildChart, STUDIES } from "./chart.js"
 import { createMixerHud } from "./hud.js"
 import { GOOD, PERFECT } from "./judge.js"
@@ -11,7 +11,7 @@ import { createCameraLog } from "./camera/log.js"
 import { createCameraPanel } from "./camera/panel.js"
 import { createGestureLog } from "./ring/gesture-log.js"
 import { buildPieceChart, PIECES } from "./repertoire.js"
-import { LOOP_BARS } from "./score.js"
+import { createSwingEar } from "./ring/detectors.js"
 import { createSettings } from "./settings.js"
 import { createTempo } from "./tempo.js"
 import { createWorld } from "./world.js"
@@ -77,6 +77,14 @@ let unclearRun = 0
 const mixer = createMixer()
 const tempo = createTempo(96)
 let ending = false
+const MELODIC = ["violin", "flute", "piano"]
+const BAND_NAME = { violin: "吉他", flute: "萨克斯", horn: "鼓", cello: "贝斯", piano: "钢琴" }
+const SAINTS_BARS = 16
+let bandNow = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
+let bandNext = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
+let bandEnergy = 1
+let swingEar = null
+const bandNames = (list) => list.map((part) => BAND_NAME[part] || PART_INFO[part].name).join("、")
 let lastStudy = STUDIES[0]
 // A ring gesture reaches the page a little after it happened; keep a cue open that long past its Good window.
 const LATE_GRACE = 0.12
@@ -95,7 +103,7 @@ function levelButton(icon, tone, title, detail, tag, onClick) {
   levelList.append(button)
 }
 STUDIES.forEach((study, i) => levelButton(["♪", "♩", "♬"][i], ["var(--pink)", "var(--sky)", "var(--butter)"][i], study.title, study.blurb, study.tag, () => begin(study)))
-levelButton("♫", "var(--mint)", "自由指挥 · 分声部", "点选或画圈选中声部，起奏、停止、独奏<br>挥拍的快慢就是乐队的速度", "自由模式", beginFree)
+levelButton("♫", "var(--mint)", "自由指挥 · 圣者进行曲", "点萨克斯、吉他或钢琴，八拍后才换<br>贝斯和鼓一直在，挥拍决定快慢和轻重", "自由模式", beginFree)
 PIECES.forEach((piece) => levelButton("♪", "var(--gold, #e6c98a)", piece.title, piece.sub, piece.tag, () => beginPiece(piece)))
 
 function setMode(next) {
@@ -228,10 +236,24 @@ function pickCard(part) {
 
 function onRing(event) {
   if (mode === "free") {
-    if (event.hand !== "left") return
     const snapshot = ring.input.snapshot()
     const calibration = snapshot.palmCalibration
     if (calibration.active) return
+    if (event.type === "beat") {
+      const heard = (swingEar || createSwingEar()).hear(performance.now() / 1000, event.peakSpeed)
+      if (!heard.accept) return
+      freeBeat(event.dir || "down")
+      if (Number.isFinite(heard.energy)) {
+        bandEnergy = bandEnergy * 0.7 + heard.energy * 0.3
+        setBandPlan(bandNext, bandEnergy)
+        const amount = Math.max(0.4, Math.min(1.6, 0.35 + bandEnergy * 0.7))
+        dynamics = amount
+        setDynamics(amount)
+      }
+      return
+    }
+    if (event.type === "fist") return freeStop()
+    if (event.hand !== "left") return
     if (event.type === "strike") freeStart()
     else if (event.type === "palm") {
       if (calibration.ready || snapshot.directionMode === "absolute") playPalm(event.dir)
@@ -516,26 +538,41 @@ async function beginFree() {
   stopLevel()
   world.reset()
   mixer.reset()
-  tempo.reset(96)
+  tempo.reset(120)
   chart = null
   dynamics = 1
   ending = false
+  bandNow = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
+  bandNext = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
+  bandEnergy = 1
+  swingEar = createSwingEar()
+  mixer.parts.cello.on = true
+  mixer.parts.horn.on = true
   sessionTitle.textContent = "自由指挥"
-  sessionSub.textContent = "FREE　/　4:4　/　C · G · Am · F"
+  sessionSub.textContent = "圣者进行曲　/　4:4"
   tallyLabel.textContent = "BPM"
-  tallyEl.textContent = "96"
+  tallyEl.textContent = "120"
   progressEl.style.width = "0%"
   setMode("free")
   beatDots.forEach((dot) => { dot.hidden = false })
-  statusEl.textContent = "等待起奏"
-  hintEl.innerHTML = '<span>点乐手 / <kbd>1</kbd>–<kbd>4</kbd> · 选声部</span><span>拖动画圈 · 圈选</span><span>左手指环前指 / <kbd>F</kbd> 起奏　<kbd>G</kbd> 停止</span><span>左手抬/压掌 / <kbd>E</kbd><kbd>D</kbd> 渐强渐弱　<kbd>S</kbd> 独奏</span><span><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> 打拍控速</span>'
+  statusEl.textContent = "贝斯和鼓垫着"
+  hintEl.innerHTML = '<span>点人再 <kbd>F</kbd>：加入自己的声部，再按一次才独奏旋律</span><span><kbd>G</kbd> 停下选中的人，全选再停就把鼓和贝斯也停掉</span><span>没选人时 <kbd>G</kbd> 谢幕。方向键打拍</span>'
   world.setLevelHands(false)
+  world.showCombo?.(true)
   world.resize()
   lane.resize()
   lane.update(0, null, [])
-  await startFree({ onVoice: (part) => world.emit?.(part) })
+  await startFree({
+    onVoice: (part) => world.emit?.(part),
+    onNote: (note) => {
+      world.note?.(note.part, note)
+      if (note.part !== "horn") world.emit?.(note.part, note.note)
+    },
+  })
+  setBandPlan(bandNext, bandEnergy)
+  setTempo(120)
   setDynamics(1)
-  toast("先选声部，再前指或按 F 起奏")
+  toast("圣者进行曲。点一个人，这一句结束才换。")
 }
 
 const names = (list) => list.map((part) => PART_INFO[part].name).join("、")
@@ -558,18 +595,53 @@ function freeLasso(list) {
 }
 
 function applyGains() {
-  PARTS.forEach((part) => { if (mixer.parts[part].on) setPartGain(part, mixer.gainOf(part)) })
+  PARTS.forEach((part) => {
+    if (!mixer.parts[part].on || part === "cello" || part === "horn") return
+    setPartGain(part, mixer.gainOf(part))
+  })
+}
+
+function rememberBand(part) {
+  if (part in bandNow) bandNow[part] = bandNext[part]
 }
 
 function freeStart() {
   if (ending) return
-  const list = [...mixer.selected]
-  if (!list.length) { toast("先点一个乐手，或画圈圈选几个声部"); return }
-  const changed = mixer.request(list, true)
-  if (!changed.length) { toast(`${names(list)} 已经在演奏`); return }
-  world.pose("left", "point", changed[0])
-  changed.forEach((part) => queuePart(part, mixer.gainOf(part, true), "4n", () => mixer.commit(part)))
-  toast(`${names(changed)} · 下一拍进入`)
+  const selected = [...mixer.selected]
+  if (!selected.length) { toast("先点一个人，或按 A 全选"); return }
+  const beds = selected.filter((part) => part === "cello" || part === "horn")
+  const melodic = selected.filter((part) => MELODIC.includes(part))
+  const waking = beds.filter((part) => bandNext[part] === "off")
+  const resting = melodic.filter((part) => bandNext[part] === "off")
+  if (waking.length || resting.length) {
+    waking.forEach((part) => { bandNext[part] = "on" })
+    resting.forEach((part) => { bandNext[part] = "comp" })
+    const changed = mixer.request([...waking, ...resting], true)
+    setBandPlan(bandNext, bandEnergy)
+    world.pose("left", "point", (changed[0] || waking[0] || resting[0]))
+    changed.forEach((part) => queuePart(part, 1, "2m", () => { mixer.commit(part); rememberBand(part) }))
+    const names = bandNames([...waking, ...resting])
+    toast(resting.length ? `${names} · 这一句结束加入自己的声部` : `${names} · 这一句结束回来`)
+    mixer.clearSelection()
+    return
+  }
+  if (!melodic.length) { toast("他们已经在了"); return }
+  const part = melodic[melodic.length - 1]
+  if (bandNext[part] === "solo") { toast(`${BAND_NAME[part]} 已经在独奏`); return }
+  for (const other of MELODIC) {
+    if (other !== part && bandNext[other] === "solo") bandNext[other] = "comp"
+  }
+  bandNext[part] = "solo"
+  mixer.parts[part].pending = "in"
+  setBandPlan(bandNext, bandEnergy)
+  world.pose("left", "point", part)
+  queuePart(part, 1, "2m", () => {
+    if (mixer.parts[part].pending) mixer.commit(part)
+    for (const other of MELODIC) rememberBand(other)
+    mixer.toggleSolo([part])
+    applyGains()
+  })
+  toast(`${BAND_NAME[part]} · 这一句结束改吹旋律，别人退回伴奏`)
   mixer.clearSelection()
 }
 
@@ -577,10 +649,17 @@ function freeStop() {
   if (ending) return
   const list = [...mixer.selected]
   if (list.length) {
+    list.forEach((part) => { bandNext[part] = "off" })
     const changed = mixer.request(list, false)
     world.pose("left", "down")
-    changed.forEach((part) => queuePart(part, 0, "4n", () => mixer.commit(part)))
-    toast(changed.length ? `${names(changed)} · 下一拍停下` : "它们本来就在休息")
+    setBandPlan(bandNext, bandEnergy)
+    changed.forEach((part) => queuePart(part, 0, "2m", () => {
+      mixer.commit(part)
+      rememberBand(part)
+      if (mixer.solo?.has(part)) mixer.toggleSolo([])
+      applyGains()
+    }))
+    toast(changed.length ? `${bandNames(changed)} · 这一句结束停下` : "它们本来就在休息")
     mixer.clearSelection()
     return
   }
@@ -588,16 +667,21 @@ function freeStop() {
   ending = true
   mixer.request(PARTS, false)
   world.pose("left", "down")
-  toast("握拳收束 · 这一小节后谢幕")
+  toast("这一句结束就谢幕")
   endFree(() => {
     PARTS.forEach((part) => mixer.commit(part))
     mixer.toggleSolo([])
+    bandNow = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
+    bandNext = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
+    setBandPlan(bandNext, 1)
+    mixer.parts.cello.on = true
+    mixer.parts.horn.on = true
     tempo.reset(96)
     setTempo(96)
     tallyEl.textContent = "96"
     ending = false
     statusEl.textContent = "等待起奏"
-    toast("已谢幕 · 再选声部可以开始新的一段")
+    toast("已谢幕")
   })
 }
 
@@ -616,15 +700,24 @@ function freeNudge(direction) {
 }
 
 function freeSolo() {
-  const list = [...mixer.selected]
+  const list = [...mixer.selected].filter((part) => MELODIC.includes(part))
   const solo = mixer.toggleSolo(list)
-  applyGains()
-  toast(solo ? `${names([...solo])} 独奏 · 其他声部变轻` : "恢复合奏")
+  for (const part of MELODIC) {
+    if (!mixer.parts[part].on && bandNow[part] === "off") continue
+    bandNext[part] = solo?.has(part) ? "solo" : "comp"
+  }
+  setBandPlan(bandNext, bandEnergy)
+  const apply = () => {
+    for (const part of MELODIC) if (mixer.parts[part].on || bandNow[part] !== "off") rememberBand(part)
+    applyGains()
+  }
+  queuePart(list[0] || "violin", 1, "2m", apply)
+  toast(solo ? `${bandNames([...solo])} · 这一句结束独奏` : "这一句结束回到合奏")
 }
 
 function freeBeat(direction) {
-  world.pose("right", direction)
-  if (!mixer.anyOn() || ending) return
+  world.pose("right", direction || "down")
+  if (ending) return
   const bpm = tempo.tap(performance.now() / 1000)
   setTempo(bpm)
   tallyEl.textContent = String(Math.round(bpm))
@@ -643,10 +736,19 @@ function freeView(levels) {
   const view = {}
   for (const part of PARTS) {
     const p = mixer.parts[part]
-    const soloing = mixer.solo?.has(part)
-    const ducked = p.on && mixer.solo && !soloing
-    const label = p.pending === "in" ? "下一拍进入" : p.pending === "out" ? "下一拍停" : !p.on ? "休息中" : soloing ? "独奏" : ducked ? "伴奏" : `演奏 ${Math.round(p.local * 100)}%`
-    view[part] = { label, on: p.on, selected: mixer.selected.has(part), pending: Boolean(p.pending), solo: soloing, ducked, level: levels[part] }
+    const bed = part === "cello" || part === "horn"
+    const now = bandNow[part]
+    const next = bandNext[part]
+    const waiting = now !== next
+    const soloing = !bed && (now === "solo" || next === "solo")
+    const job = part === "horn" ? "鼓点" : part === "cello" ? "拨弦" : "伴奏"
+    const label = waiting && next === "off" ? "八拍后停下" : waiting && next === "solo" ? "八拍后独奏" : waiting && (next === "comp" || next === "on") ? "八拍后加入" : now === "solo" ? "旋律" : now === "comp" || now === "on" ? job : "休息"
+    view[part] = {
+      name: BAND_NAME[part], label, on: now === "on" || now === "comp" || now === "solo" || p.on,
+      selected: mixer.selected.has(part), pending: waiting || Boolean(p.pending),
+      solo: soloing && !waiting, ducked: Boolean(p.on && mixer.solo && !mixer.solo.has(part) && !bed),
+      level: levels[part],
+    }
   }
   return view
 }
@@ -663,20 +765,19 @@ function levelView(playing, levels) {
 
 function freeLoop() {
   const beats = transportBeats()
-  const bar = Math.floor(beats / 4) % LOOP_BARS
-  progressEl.style.width = `${((beats % (LOOP_BARS * 4)) / (LOOP_BARS * 4)) * 100}%`
-  beatDots.forEach((dot, i) => dot.classList.toggle("active", mixer.anyOn() && Math.floor(beats) % 4 === i))
+  const bar = Math.floor(beats / 4) % SAINTS_BARS
+  progressEl.style.width = `${((beats % (SAINTS_BARS * 4)) / (SAINTS_BARS * 4)) * 100}%`
+  beatDots.forEach((dot, i) => dot.classList.toggle("active", Math.floor(beats) % 4 === i))
   const playing = mixer.playing()
-  if (playing.size && !ending) statusEl.textContent = `第 ${bar + 1} / ${LOOP_BARS} 小节`
+  if (!ending) statusEl.textContent = `第 ${bar + 1} / ${SAINTS_BARS} 小节`
   const selected = [...mixer.selected]
-  if (ending) cueHintEl.textContent = "谢幕中…"
-  else if (selected.length) cueHintEl.textContent = `已选 ${names(selected)} · 前指 / F 起奏 · G 停止 / S 独奏`
-  else if (!playing.size) cueHintEl.textContent = "点一位乐手，或拖动鼠标画个圈"
-  else cueHintEl.textContent = "挥拍控制速度 · 没选人时 G 全体收束"
-  const pending = new Map(PARTS.filter((part) => mixer.parts[part].pending).map((part) => [part, mixer.parts[part].pending]))
+  if (ending) cueHintEl.textContent = "谢幕中"
+  else if (selected.length) cueHintEl.textContent = `已选 ${bandNames(selected)} · 这一句结束才换`
+  else cueHintEl.textContent = "挥拍。摆得大，乐队就更响。"
+  const pending = new Map(PARTS.filter((part) => mixer.parts[part].pending || (part in bandNow && bandNow[part] !== bandNext[part])).map((part) => [part, mixer.parts[part].pending || "in"]))
   const levels = partLevels?.() || {}
   hud.update(freeView(levels))
-  world.update(beats * 60 / 96, playing, { selected: mixer.selected, pending, solo: mixer.solo })
+  world.update(beats * 60 / 120, playing, { selected: mixer.selected, pending, solo: mixer.solo, dynamics, freeHands: true })
 }
 
 function loop() {
@@ -918,6 +1019,7 @@ view.addEventListener("pointerup", (event) => {
 
 function goHome() {
   stopLevel()
+  world.showCombo?.(false)
   mixer.reset()
   ending = false
   setMode("home")

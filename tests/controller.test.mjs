@@ -37,6 +37,7 @@ globalThis.__controller = {
   setDynamics: value => { audio.dynamics=value }, setPart: (part,on) => { if(on)audio.parts.add(part) },
   startLevel: async (chart, hooks) => { audio.now=0; audio.parts=new Set(['piano','cello']); levelDone = hooks.onDone }, stopLevel() {},
   startFree: async () => { audio.freeStarted = true }, endFree: fn => { audio.ended = fn },
+  setBandPlan() {}, createSwingEar: () => ({ hear: () => ({ accept: true, energy: 1 }) }),
   queuePart: (part, gain, quantum, landed) => { audio.queued.push({ part, gain, quantum, landed }) },
   setPartGain: (part, gain) => { audio.gains[part] = gain }, setTempo: bpm => { audio.tempo = bpm },
   partLevels: () => ({}), transportBeats: () => 0,
@@ -264,15 +265,17 @@ key('f')
 assert.equal(audio.queued.length, 0, 'start without a selection does nothing')
 key('1'); key('2')
 key('f')
-assert.deepEqual(audio.queued.map(q => [q.part, q.gain, q.quantum]), [['violin', 1, '4n'], ['flute', 1, '4n']])
+assert.deepEqual(audio.queued.map(q => [q.part, q.gain, q.quantum]), [['violin', 1, '2m'], ['flute', 1, '2m']])
 audio.queued.forEach(q => q.landed()); audio.queued = []
 key('f'); assert.equal(audio.queued.length, 0, 'selection clears after an entry')
 key('1'); key('e')
 assert.equal(audio.gains.violin, 1.25)
 key('s')
+audio.queued.at(-1).landed(); audio.queued = []
 assert.equal(audio.gains.violin, 1.25)
 assert.ok(Math.abs(audio.gains.flute - (1 - DUCK)) < 1e-9, 'accompaniment ducks while violin solos')
 key('Escape'); key('s')
+audio.queued.at(-1).landed(); audio.queued = []
 assert.equal(audio.gains.flute, 1, 'solo released')
 let now = 1000
 const realNow = performance.now.bind(performance)
@@ -287,7 +290,7 @@ key('g')
 assert.ok(audio.ended, 'fist with nothing selected closes the whole piece')
 audio.ended()
 assert.equal(audio.tempo, 96)
-console.log('Free mode: two sections enter on the next beat, per-section crescendo, solo ducking, tap tempo, section stop and full close: pass')
+console.log('Free mode: sections enter on the next phrase, solo ducking, tap tempo, section stop and full close: pass')
 
 // Auto-compensation converges on the player's offset without oscillating, and a partial step is
 // what prevents it: reportError only samples beats that landed within GOOD, so the measured mean

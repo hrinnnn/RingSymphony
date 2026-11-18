@@ -273,3 +273,42 @@ export function createHandDetector(hand, options = {}) {
     },
   }
 }
+
+function median(values) {
+  const mid = Math.floor(values.length / 2)
+  if (values.length % 2) return values[mid]
+  return (values[mid - 1] + values[mid]) / 2
+}
+
+// Free-mode ear. Over the last few seconds, split swings into a taller half and a shorter half.
+// A new peak closer to the tall group is a beat. Tempo and loudness only move on those.
+// If every recent swing is about the same size, they all count, so a gentle conductor is not erased.
+// This does not replace createBeatDetector. Levels keep that one.
+export function createSwingEar() {
+  const swings = []
+  return {
+    hear(t, peak) {
+      const speed = Number(peak)
+      if (!Number.isFinite(speed) || speed <= 0) return { accept: true, energy: null }
+      const recent = swings.filter((swing) => t - swing.t <= 8)
+      let result
+      if (recent.length < 4) result = { accept: true, energy: 1 }
+      else {
+        const sorted = recent.map((swing) => swing.peak).sort((a, b) => a - b)
+        const mid = Math.floor(sorted.length / 2)
+        const small = median(sorted.slice(0, mid))
+        const big = median(sorted.slice(mid))
+        if (!(big > small * 1.35)) {
+          const middle = median(sorted) || speed
+          result = { accept: true, energy: Math.max(0.55, Math.min(1.7, speed / middle)) }
+        } else if (Math.abs(speed - big) <= Math.abs(speed - small)) {
+          result = { accept: true, energy: Math.max(0.55, Math.min(1.7, speed / big)) }
+        } else result = { accept: false, energy: null }
+      }
+      swings.push({ t, peak: speed })
+      while (swings.length && t - swings[0].t > 8) swings.shift()
+      return result
+    },
+    reset() { swings.length = 0 },
+  }
+}

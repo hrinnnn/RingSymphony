@@ -1,9 +1,15 @@
 import * as Tone from "tone"
 import { PARTS } from "./mixer.js"
 import { eventsFor as pieceEvents } from "./repertoire.js"
-import { eventsFor, LOOP_BARS, loopEvents } from "./score.js"
+import { eventsFor } from "./score.js"
+import { phraseEvents, SAINTS_BARS, SAINTS_BPM } from "./saints.js"
 
 let parts
+let bandLive = false
+let bandLoop = null
+let bandHooks = null
+let bandPlan = { violin: "off", flute: "off", piano: "off" }
+let bandEnergy = 1
 
 // Each section: synth → gate (on/off × local gain × solo duck) → master (global dynamics) → reverb.
 function ensure() {
@@ -68,8 +74,8 @@ function ensure() {
   // The pulse is not a section: it bypasses the gates and the dynamics so the beat is always audible.
   synths.kick = new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 3, envelope: { attack: 0.001, decay: 0.22, sustain: 0, release: 0.05 } })
   synths.tick = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 } })
-  synths.kick.volume.value = -6
-  synths.tick.volume.value = -24
+  synths.kick.volume.value = -1
+  synths.tick.volume.value = -10
   synths.kick.toDestination()
   synths.tick.toDestination()
   parts = { synths, samplers, gates, meters, master }
@@ -112,6 +118,8 @@ function scheduleEvents(events, hooks) {
 }
 
 function resetTransport(bpm, meter) {
+  bandLive = false
+  bandLoop = null
   Tone.Transport.stop()
   Tone.Transport.cancel()
   Tone.Transport.loop = false
@@ -169,20 +177,89 @@ export async function startPiece(piece, hooks) {
   return { duration, countIn: bar }
 }
 
+export function setBandPlan(roles, energy) {
+  if (roles) {
+    bandPlan = {
+      violin: roles.violin || "off",
+      flute: roles.flute || "off",
+      piano: roles.piano || "off",
+      cello: roles.cello === "off" ? "off" : "on",
+      horn: roles.horn === "off" ? "off" : "on",
+    }
+  }
+  if (typeof energy === "number" && Number.isFinite(energy)) bandEnergy = energy
+}
+
+// The next phrase is armed from inside the current downbeat, two bars ahead,
+// so the event is still in the future. Arming it at the downbeat itself gets dropped,
+// and then 起奏 never reaches the other players.
+function armPhrase(absolute) {
+  const scoreBar = absolute % SAINTS_BARS
+  Tone.Transport.schedule((time) => {
+    const roles = { ...bandPlan }
+    const energy = bandEnergy
+    const hooks = bandHooks || {}
+    const soloing = ["violin", "flute", "piano"].some((part) => roles[part] === "solo")
+    const beat = Tone.Time("4n").toSeconds()
+    for (const part of ["violin", "flute", "piano", "cello"]) {
+      const role = part === "cello" ? "bed" : roles[part]
+      const open = part === "cello" ? roles.cello !== "off" : role === "comp" || role === "solo"
+      const level = !open ? 0 : soloing && role === "comp" ? 0.5 : 1
+      const gate = parts.gates[part].gain
+      gate.cancelScheduledValues(time)
+      gate.rampTo(level, 0.06, time)
+    }
+    for (const event of phraseEvents(scoreBar, roles, energy)) {
+      const at = time + event.offset * beat
+      try {
+        if (event.drum === "kick") parts.synths.kick.triggerAttackRelease("C2", "8n", at, 1)
+        else if (event.drum === "tick") parts.synths.tick.triggerAttackRelease("G4", "16n", at, 0.9)
+        else voice(event.part).triggerAttackRelease(event.note, event.dur, at, event.vel)
+      } catch {
+        // One bad note must not stall the bar.
+      }
+      if (event.drum === "tick") continue
+      Tone.Draw.schedule(() => {
+        hooks.onNote?.({ part: event.part, note: event.note, dur: 0.35, vel: event.vel })
+        if (!event.drum) hooks.onVoice?.(event.part)
+      }, at)
+    }
+    armPhrase(absolute + 2)
+  }, Tone.Time(`${absolute}:0:0`).toSeconds())
+}
+
+function scheduleBand() {
+  armPhrase(0)
+}
+
 export async function startFree(hooks) {
   await Tone.start()
   ensure()
-  resetTransport(96, 4)
-  Tone.Transport.loop = true
-  Tone.Transport.loopStart = 0
-  Tone.Transport.loopEnd = `${LOOP_BARS}m`
-  scheduleEvents(loopEvents(), hooks)
+  resetTransport(SAINTS_BPM, 4)
+  bandHooks = hooks
+  bandLive = true
+  bandPlan = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
+  bandEnergy = 1
+  scheduleBand()
+  parts.gates.cello.gain.value = 1
+  if (Tone.context.state !== "running") await Tone.context.resume()
+  Tone.Transport.start()
 }
 
 // Entries and exits land on the next beat (or bar) so a phrase is not cut mid-note.
 // The first entry starts the timeline right away, as the downbeat of bar one.
 export function queuePart(part, gain, quantum, onLanded) {
   if (!parts) return
+  if (bandLive) {
+    if (Tone.Transport.state !== "started") {
+      scheduleBand()
+      Tone.Transport.position = 0
+      Tone.Transport.start()
+    }
+    const at = Tone.Transport.state === "started" ? Tone.Transport.nextSubdivision(quantum) : Tone.now()
+    Tone.Draw.schedule(onLanded, at)
+    return
+  }
   const gate = parts.gates[part].gain
   if (Tone.Transport.state !== "started") {
     Tone.Transport.position = 0

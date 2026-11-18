@@ -28,3 +28,12 @@ These MIDI files are the notes the game plays. Each track is assigned to one of 
   Typeset from the 1883 Breitkopf & Härtel edition. Public domain.
   https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2230
   Violin I → violin, violin II → flute, viola → horn, cello → cello and piano.
+
+圣者进行曲（只在自由模式）
+  File: saints.mid
+  Source: Wikimedia Commons, File:When_The_Saints.mid. Traditional melody.
+  Setting by Rabanus Flavus / Peter Gerloff. CC0.
+  https://commons.wikimedia.org/wiki/File:When_The_Saints.mid
+  The game loops the first 16 bars of 4/4, starting where the melody enters.
+  Sax, guitar or piano play that melody when they solo. Bass uses this file's bass.
+  Drums are a march pulse, not a new tune.

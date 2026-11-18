@@ -26,7 +26,7 @@ export function createMixerHud(container, onPick) {
     card.append(badge, text, meter, key)
     card.addEventListener("click", () => onPick(part))
     container.append(card)
-    cards[part] = { card, state, fill, last: "" }
+    cards[part] = { card, state, fill, name, last: "", lastName: info.name }
   }
 
   return {
@@ -41,6 +41,11 @@ export function createMixerHud(container, onPick) {
         c.card.classList.toggle("pending", Boolean(v.pending))
         c.card.classList.toggle("solo", Boolean(v.solo))
         c.card.classList.toggle("ducked", Boolean(v.ducked))
+        const name = v.name || PART_INFO[part].name
+        if (c.lastName !== name) {
+          c.name.textContent = name
+          c.lastName = name
+        }
         if (c.last !== v.label) {
           c.state.textContent = v.label
           c.last = v.label
