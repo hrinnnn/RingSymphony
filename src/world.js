@@ -784,10 +784,10 @@ function noteTexture(color, glyph) {
 export function createWorld(canvas, laneCanvas) {
   paper = scoreMap()
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
-  renderer.setPixelRatio(1)
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.35
+  renderer.toneMappingExposure = 1.12
   renderer.shadowMap.enabled = false
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   const scene = new THREE.Scene()
@@ -797,14 +797,14 @@ export function createWorld(canvas, laneCanvas) {
   camera.position.set(0, 2.2, 4.7)
   camera.lookAt(0, 1.25, -3)
   scene.add(camera)
-  scene.add(new THREE.HemisphereLight(0xd9e6ff, 0x6d4224, 1.65))
-  const key = new THREE.DirectionalLight(0xffdfad, 3.3); key.position.set(-3, 7, 4)
+  scene.add(new THREE.HemisphereLight(0xd9e6ff, 0x6d4224, 0.82))
+  const key = new THREE.DirectionalLight(0xffdfad, 3.55); key.position.set(-3, 7, 4)
   key.castShadow = false
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 25 })
   key.shadow.bias = -0.001; scene.add(key)
-  const rim = new THREE.DirectionalLight(0x8baaff, 1.8); rim.position.set(4, 4, -7); scene.add(rim)
+  const rim = new THREE.DirectionalLight(0x8baaff, 1.15); rim.position.set(4, 4, -7); scene.add(rim)
   for (const x of [-4, 0, 4]) {
-    const spot = new THREE.SpotLight(0xffd3a0, 45, 18, 0.51, 0.8, 1.5)
+    const spot = new THREE.SpotLight(0xffd3a0, 30, 17, 0.51, 0.82, 1.7)
     spot.position.set(x, 6, -1); spot.target.position.set(x * 0.7, 0, -3)
     scene.add(spot, spot.target)
     oval(scene, [0.09, 0.045, 0.09], glow(0xffe9bd), x, 5.8, -1)
@@ -825,7 +825,7 @@ export function createWorld(canvas, laneCanvas) {
     }
   })
   floorMap.wrapS = floorMap.wrapT = THREE.RepeatWrapping; floorMap.repeat.set(4, 5); floorMap.anisotropy = renderer.capabilities.getMaxAnisotropy()
-  const floor = mesh(scene, new THREE.PlaneGeometry(19, 23, 19, 23), new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.48 }), 0, -0.01, -3)
+  const floor = mesh(scene, new THREE.PlaneGeometry(19, 23, 19, 23), new THREE.MeshStandardMaterial({ map: floorMap, roughness: 0.62 }), 0, -0.01, -3)
   floor.rotation.x = -Math.PI / 2
   box(scene, [19, 0.35, 20], material(0x38251c), 0, -0.2, -4)
   // Timber hall, brass organ pipes, burgundy curtains. The first version of the room.
@@ -992,6 +992,11 @@ export function createWorld(canvas, laneCanvas) {
   camera.add(beatRoot)
   const hitLine = box(beatRoot, [1.7, 0.01, 0.006], glow(0xe6c98a, 0.95), 0, -0.32, -1.58)
   const hitGlow = box(beatRoot, [1.7, 0.045, 0.002], glow(0xe6c98a, 0.16), 0, -0.32, -1.55)
+  // A soft warm-dark shadow under the gold line, not an outline on it: it
+  // seats the line on the floor without drawing a black edge of its own.
+  const hitEdge = box(beatRoot, [1.72, 0.022, 0.004], glow(0x2b1d0f, 0.3), 0, -0.325, -1.588)
+  hitEdge.castShadow = false
+  hitEdge.receiveShadow = false
   hitLine.castShadow = false
   hitGlow.castShadow = false
   hitLine.receiveShadow = false

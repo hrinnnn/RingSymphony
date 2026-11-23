@@ -135,7 +135,7 @@ h1 em { font-style: italic; color: var(--gold); text-shadow: none; }
 .candy.plain { --c: #c4bbac; --d: #8d877e; }
 
 .frame { position: relative; height: 100svh; min-height: 480px; overflow: hidden; background: #090c12; }
-.frame::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 110px 25px #04070a77; background: linear-gradient(#080b1266, transparent 23%, transparent 76%, #080b12bb); }
+.frame::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 130px 30px #04070a99; background: linear-gradient(#080b1259, transparent 26%, transparent 72%, #080b12cc); }
 canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
 #lane { position: absolute; inset: 0; visibility: hidden; pointer-events: none; cursor: default; }
 #lasso { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; overflow: visible; }
@@ -150,12 +150,14 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: 
 #progress-fill { display: block; width: 0; height: 100%; background: #d7b982; box-shadow: none; }
 .conducting-hud { position: absolute; left: 50%; top: 13%; transform: translateX(-50%); z-index: 2; text-align: center; pointer-events: none; }
 .beats { display: flex; gap: 12px; justify-content: center; }
-.beat-dot { display: block; width: 6px; height: 6px; border: 0; border-radius: 50%; background: #d4c0a23b; transform: none; transition: transform .12s ease, background .08s, box-shadow .08s; }
-.beat-dot.active { background: #ffde9e; border-color: #ffde9e; box-shadow: 0 0 10px #ffcc7788; transform: scale(1.25); }
+.beat-dot { display: block; width: 6px; height: 6px; border: 0; border-radius: 50%; background: #d4c0a24d; box-shadow: 0 0 0 1px #0b0804b3; transform: none; transition: transform .12s ease, background .08s, box-shadow .08s; }
+.beat-dot.active { background: #ffde9e; border-color: #ffde9e; box-shadow: 0 0 0 1px #0b0804cc, 0 0 10px #ffcc7788; transform: scale(1.25); }
 .beat-dot:nth-child(1).active { background: #e6c98a; border-color: #e6c98a; box-shadow: 0 0 10px #e6c98a66; }
-#cue-hint { display: inline-block; background: transparent; border: 0; box-shadow: none; font-size: 12px; font-weight: 400; letter-spacing: .12em; color: #dfcdaa; white-space: nowrap; margin: 14px 0 0; padding: 0; text-shadow: 0 2px 8px #000; }
-#grade { position: absolute; left: 50%; top: 40%; z-index: 2; margin: 0; transform: translateX(-50%); font-size: 32px; font-style: italic; letter-spacing: .07em; pointer-events: none; text-shadow: 0 2px 10px #000; }
-#grade.perfect { color: #ffe2a6; } #grade.good { color: #b7c4c9; } #grade.miss { color: #cf8f83; }
+#cue-hint { display: inline-block; background: transparent; border: 0; box-shadow: none; font-size: 12px; font-weight: 400; letter-spacing: .12em; color: #f0dfbc; white-space: nowrap; margin: 14px 0 0; padding: 0; text-shadow: 0 1px 0 #15100a, 0 2px 9px #000; }
+/* Unused: the live PERFECT/GOOD/MISS text is painted on #lane by lane.js.
+   Colors mirror GRADE in src/lane.js so the two cannot drift. */
+#grade { position: absolute; left: 50%; top: 40%; z-index: 2; margin: 0; transform: translateX(-50%); font-size: 32px; font-style: italic; letter-spacing: .07em; pointer-events: none; text-shadow: 0 1px 0 #1a1206, 0 2px 12px #000; }
+#grade.perfect { color: #ffd98a; } #grade.good { color: #8fd8c4; } #grade.miss { color: #e08878; }
 #hint { position: absolute; bottom: 16px; left: 20px; right: 20px; z-index: 2; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 10px; margin: 0; font: 11px var(--sans); letter-spacing: .02em; color: #c3bcaf; pointer-events: none; }
 #hint > span { padding: 5px 12px; background: #12151bcc; }
 #hint kbd { display: inline-block; min-width: 20px; padding: 1px 6px; margin: 0 2px; border: 1px solid var(--line); border-radius: 0; background: #090c12; color: var(--gold); text-align: center; }
