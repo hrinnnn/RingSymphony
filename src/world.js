@@ -655,18 +655,29 @@ export function createWorld(canvas, laneCanvas) {
   left.position.copy(rests[0]); right.position.copy(rests[1]); camera.add(left, right)
   const handStates = [{ until: 0, pose: 'rest' }, { until: 0, pose: 'rest' }]
 
-  const soloPiano = musician("piano", 0.45, -2.0, 9)
-  soloPiano.rotation.y = -0.85
-  soloPiano.visible = false
-  scene.add(soloPiano)
-  const soloPlayers = [soloPiano]
-  const halos = players.map((person) => {
+  const chamber = new THREE.Group()
+  chamber.visible = false
+  scene.add(chamber)
+  const chamberPlayers = [
+    ["violin", -1.65, -2.5],
+    ["flute", -0.64, -2.7],
+    ["horn", 0.33, -2.85],
+    ["cello", 1.36, -2.6],
+    ["piano", 2.85, -3.3],
+  ].map(([part, x, z], i) => {
+    const person = musician(part, x, z, i * 2 + 1)
+    person.rotation.y = part === "piano" ? -0.85 : -x * 0.14
+    chamber.add(person)
+    return person
+  })
+  const halos = [...players, ...chamberPlayers].map((person) => {
     const color = SECTION_COLOR[person.userData.part]
     const disc = mesh(scene, new THREE.CircleGeometry(0.5, 40), glow(color, 0), person.position.x, person.position.y + 0.025, person.position.z)
     disc.rotation.x = -Math.PI / 2; disc.castShadow = false; disc.receiveShadow = false
     const ring = mesh(disc, new THREE.RingGeometry(0.5, 0.58, 48), glow(0xffffff, 0))
     ring.castShadow = false; ring.receiveShadow = false
-    disc.userData = { halo: true, part: null, of: person.userData.part, ring }
+    disc.userData = { halo: true, part: null, of: person.userData.part, chamber: person.parent === chamber, ring }
+    disc.visible = !disc.userData.chamber
     disc.renderOrder = 1
     return disc
   })
@@ -873,7 +884,7 @@ export function createWorld(canvas, laneCanvas) {
   // not a new mesh for every note of a full score.
   function emit(part, pitch) {
     if (!pitch || notes.length > 16) return
-    const people = (soloPiano.visible ? soloPlayers : players).filter((person) => person.userData.part === part)
+    const people = (chamber.visible ? chamberPlayers : players).filter((person) => person.userData.part === part)
     const person = people[0]
     if (!person) return
     const note = mesh(scene, noteGeo, new THREE.MeshBasicMaterial({
@@ -912,8 +923,7 @@ export function createWorld(canvas, laneCanvas) {
   function update(seconds, playing, sections = NO_SECTIONS) {
     const t = performance.now() / 1000
     const dt = Math.min(0.1, Math.max(0, t - lastFrame)); lastFrame = t
-    animatePlayers(players, seconds, playing, sections, t)
-    if (soloPiano.visible) animatePlayers(soloPlayers, seconds, playing, sections, t)
+    animatePlayers(chamber.visible ? chamberPlayers : players, seconds, playing, sections, t)
     for (const part of Object.keys(suits)) {
       const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
       const energy = (mood - 0.55) / 1.05
@@ -1027,12 +1037,12 @@ export function createWorld(canvas, laneCanvas) {
     }
     const marked = new Set([...sections.pending.keys(), ...askedNames])
     const shown = []
-    const ensemble = soloPiano.visible ? soloPlayers : players
+    const ensemble = chamber.visible ? chamberPlayers : players
     sectionOrder.forEach((part, index) => {
       const beacon = beacons[index]
       const shaft = shafts[index]
       const lamp = lamps[index]
-      const people = marked.has(part) ? players.filter((person) => person.userData.part === part) : []
+      const people = marked.has(part) ? ensemble.filter((person) => person.userData.part === part) : []
       if (!people.length) {
         beacon.visible = false
         shaft.visible = false
@@ -1126,7 +1136,7 @@ export function createWorld(canvas, laneCanvas) {
   }
   function screenPositions() {
     const rect = canvas.getBoundingClientRect()
-    const pool = soloPiano.visible ? soloPlayers : players
+    const pool = chamber.visible ? chamberPlayers : players
     return pool.map((person) => {
       const p = person.position.clone().add(new THREE.Vector3(0, 1.4, 0)).project(camera)
       return { part: person.userData.part, x: (p.x + 1) / 2 * rect.width, y: (1 - p.y) / 2 * rect.height }
@@ -1141,7 +1151,7 @@ export function createWorld(canvas, laneCanvas) {
     state.direction = gesture === "beat" || gesture === "palm" ? detail : undefined
     state.aimX = undefined
     if (gesture === "point" && detail) {
-      const pool = soloPiano.visible ? soloPlayers : players
+      const pool = chamber.visible ? chamberPlayers : players
       const person = pool.find(p => p.userData.part === detail)
       const position = person.position.clone().add(new THREE.Vector3(0, 1.3, 0)).project(camera)
       state.aimX = THREE.MathUtils.clamp(position.x * 0.65, -0.65, 0.45)
@@ -1153,7 +1163,7 @@ export function createWorld(canvas, laneCanvas) {
     const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, camera)
     const ringHit = ray.intersectObjects(cueRings.flatMap(entry => entry.rings), false)[0]
     if (ringHit) return ringHit.object.userData.person.userData.part
-    const pool = soloPiano.visible ? soloPlayers : players
+    const pool = chamber.visible ? chamberPlayers : players
     const hit = ray.intersectObjects(pool, true)[0]
     let node = hit?.object
     while (node && !node.userData.part) node = node.parent
@@ -1176,13 +1186,12 @@ export function createWorld(canvas, laneCanvas) {
     const mark = (person, i) => {
       if (person.userData.part === part) person.userData.stroke = { start: start + (i % 3) * 0.03, dur, vel, pitch: info.pitch || 0 }
     }
-    players.forEach(mark)
-    mark(soloPiano, 0)
+    ;(chamber.visible ? chamberPlayers : players).forEach(mark)
   }
-  function showSoloPiano(on) {
-    soloPiano.visible = on
+  function showChamber(on) {
+    chamber.visible = on
     players.forEach((person) => { person.visible = !on })
-    halos.forEach((disc) => { disc.visible = !on })
+    halos.forEach((disc) => { disc.visible = disc.userData.chamber === on })
   }
   // Which section a horizontal screen position is pointing at. Used by the camera hand.
   function sectionAt(clientX) {
@@ -1200,5 +1209,5 @@ export function createWorld(canvas, laneCanvas) {
     }
     return best
   }
-  return { resize, update, spawn, emit, note, sectionAt, pose, pick, reset, setLevelHands, syncBeats, screenPositions, showSoloPiano, players }
+  return { resize, update, spawn, emit, note, sectionAt, pose, pick, reset, setLevelHands, syncBeats, screenPositions, showChamber, players }
 }

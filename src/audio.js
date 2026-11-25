@@ -2,7 +2,7 @@ import * as Tone from "tone"
 import { PARTS } from "./mixer.js"
 import { eventsFor as pieceEvents } from "./repertoire.js"
 import { eventsFor } from "./score.js"
-import { FREE_BPM, FREE_METER, FREE_SCORE, phaseTarget, pianoDuration } from "./free-music.js"
+import { articulatedDuration, FREE_BPM, FREE_GAINS, FREE_METER, FREE_SCORE, freeVoice, phaseTarget } from "./free-music.js"
 
 let parts
 let freeSession
@@ -43,15 +43,16 @@ function ensure() {
     piano: { C2: "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3", A2: "A2.mp3", C3: "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3", A3: "A3.mp3", C4: "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3", A4: "A4.mp3", C5: "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3", A5: "A5.mp3", C6: "C6.mp3" },
   }
   const samplers = {}
-  let settlePiano
-  const pianoReady = new Promise((resolve) => { settlePiano = resolve })
+  const ready = []
   for (const part of PARTS) {
+    let settle
+    ready.push(new Promise((resolve) => { settle = resolve }))
     samplers[part] = new Tone.Sampler({
       urls: samples[part],
       baseUrl: `/samples/${part}/`,
       release: 0.8,
-      onload: part === "piano" ? settlePiano : () => {},
-      onerror: part === "piano" ? settlePiano : () => {},
+      onload: settle,
+      onerror: settle,
     })
   }
   synths.piano.volume.value = -12
@@ -75,7 +76,7 @@ function ensure() {
   synths.tick = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 } })
   synths.kick.volume.value = -1
   synths.tick.volume.value = -10
-  parts = { synths, samplers, gates, meters, master, pianoReady }
+  parts = { synths, samplers, gates, meters, master, samplesReady: Promise.all(ready) }
 }
 
 function voice(part) {
@@ -183,7 +184,7 @@ export async function startFree(hooks) {
   await Tone.start()
   if (generation !== freeGeneration) return false
   ensure()
-  await parts.pianoReady
+  await parts.samplesReady
   if (generation !== freeGeneration) return false
   freeSession = { hooks, run: null }
   return true
@@ -192,40 +193,108 @@ export async function startFree(hooks) {
 const ticksAt = (beats) => Math.round(beats * Tone.Transport.PPQ)
 const atBeat = (beats) => `${ticksAt(beats)}i`
 
+const nextGridBeat = (step) => {
+  const beat = Tone.Transport.ticks / Tone.Transport.PPQ
+  return (Math.floor(beat / step) + 1) * step
+}
+
+function releaseEnsemble(run, time) {
+  for (const instrument of Object.values(run.voices)) {
+    if (typeof instrument.releaseAll === "function") instrument.releaseAll(time)
+    else instrument.triggerRelease(time)
+  }
+}
+
 function finishFree(session, run) {
   if (freeSession !== session || session.run !== run) return
   session.run = null
-  run.piano.releaseAll(Tone.immediate())
+  releaseEnsemble(run, Tone.immediate())
   Tone.Transport.stop(Tone.immediate())
   Tone.Transport.cancel()
   session.hooks.onEnded()
 }
 
-export function playFree() {
+function matchSectionGain(run, part, time = Tone.now(), duration = 0.16) {
+  const support = run.solo && run.solo !== part ? (part === "cello" ? 0.78 : 0.55) : 1
+  const gain = run.open.has(part) ? FREE_GAINS[part] * run.levels[part] * support : 0
+  parts.gates[part].gain.linearRampTo(gain, duration, time)
+}
+
+function landFreeChanges(run, beat, time) {
+  const changed = []
+  for (const [part, plan] of run.pending) {
+    if (plan.beat !== beat) continue
+    run.pending.delete(part)
+    if (plan.open) run.open.add(part)
+    else run.open.delete(part)
+    changed.push(part)
+  }
+  const soloBefore = run.solo
+  if (run.soloPlan?.beat === beat) {
+    run.solo = run.soloPlan.part
+    run.soloPlan = null
+    if (run.solo) run.open.add(run.solo)
+  }
+  if (run.solo && !run.open.has(run.solo)) run.solo = null
+  for (const part of soloBefore !== run.solo ? PARTS : changed) matchSectionGain(run, part, time)
+}
+
+export function playFree(selected = PARTS) {
   const session = freeSession
   if (!session || session.run) return false
   resetTransport(FREE_BPM, FREE_METER)
-  parts.gates.piano.gain.value = 0.62
-  const run = { piano: voice("piano"), velocity: 1, articulation: 0.95, cutBeat: Infinity }
+  const run = {
+    voices: Object.fromEntries(PARTS.map((part) => [part, voice(part)])),
+    open: new Set(selected),
+    pending: new Map(),
+    levels: Object.fromEntries(PARTS.map((part) => [part, 1])),
+    sounding: Object.fromEntries(PARTS.map((part) => [part, new Map()])),
+    solo: null, soloPlan: null, velocity: 1, articulation: 0.95, cutBeat: Infinity,
+  }
   session.run = run
-  let lastVisualBeat = -1
+  for (const part of selected) parts.gates[part].gain.value = FREE_GAINS[part]
+  // Register the mix callbacks first so a section joining on a beat can also
+  // play a note written on that very beat.
+  for (let beat = 1; beat < FREE_SCORE.endBeat; beat += 1) {
+    Tone.Transport.scheduleOnce((time) => {
+      if (beat < run.cutBeat) landFreeChanges(run, beat, time)
+    }, atBeat(beat))
+  }
+  const lastVisualBeat = new Map()
   for (const note of FREE_SCORE.notes) {
     Tone.Transport.scheduleOnce((time) => {
       if (session.run !== run || note.beat >= run.cutBeat) return
-      const duration = pianoDuration(note, run.articulation)
-      const velocity = Math.min(1, note.velocity * run.velocity)
-      run.piano.triggerAttack(note.note, time, velocity)
-      // A release is placed on the score clock as well, so notes already
-      // sounding still lengthen or shorten with the conductor.
+      const { part, pitch, lead } = freeVoice(note, run.solo)
+      if (!run.open.has(part)) return
+      const instrument = run.voices[part]
+      const polyphonic = typeof instrument.releaseAll === "function"
+      const name = Tone.Frequency(pitch, "midi").toNote()
+      const key = polyphonic ? name : part
+      const active = run.sounding[part]
+      const previous = active.get(key)
+      if ((previous?.lead && !lead) || (!polyphonic && previous?.time === time)) return
+      if (previous) {
+        if (polyphonic) instrument.triggerRelease(name, time)
+        else instrument.triggerRelease(time)
+      }
+      const owner = { lead, time }
+      active.set(key, owner)
+      const duration = articulatedDuration(note, run.articulation)
+      const support = run.solo === part && !lead ? 0.48 : 1
+      const velocity = Math.min(1, note.velocity * run.velocity * (lead ? 1.22 : support))
+      instrument.triggerAttack(name, time, velocity)
       Tone.Transport.scheduleOnce((offTime) => {
-        if (session.run === run) run.piano.triggerRelease(note.note, offTime)
+        if (session.run !== run || active.get(key) !== owner) return
+        active.delete(key)
+        if (polyphonic) instrument.triggerRelease(name, offTime)
+        else instrument.triggerRelease(offTime)
       }, atBeat(note.beat + duration))
-      if (lastVisualBeat === note.beat) return
-      lastVisualBeat = note.beat
+      if (lastVisualBeat.get(part) === note.beat) return
+      lastVisualBeat.set(part, note.beat)
       Tone.Draw.schedule(() => {
         if (session.run !== run) return
         const bpm = Tone.Transport.bpm.getValueAtTime(time)
-        session.hooks.onNote({ ...note, dur: duration * 60 / bpm, vel: velocity })
+        session.hooks.onNote({ ...note, part, pitch, dur: duration * 60 / bpm, vel: velocity })
       }, time)
     }, atBeat(note.beat))
   }
@@ -234,6 +303,44 @@ export function playFree() {
   }, atBeat(FREE_SCORE.endBeat))
   Tone.Transport.start(Tone.now() + 0.025)
   return true
+}
+
+export function freeMix() {
+  return freeSession?.run
+}
+
+export function queueFreeSections(list, open) {
+  const run = freeSession?.run
+  if (!run) return []
+  const beat = nextGridBeat(1)
+  if (beat >= FREE_SCORE.endBeat) return []
+  return list.filter((part) => {
+    const pending = run.pending.get(part)
+    if ((pending?.open ?? run.open.has(part)) === open) return false
+    if (run.open.has(part) === open) run.pending.delete(part)
+    else run.pending.set(part, { beat, open })
+    if (!open && run.soloPlan?.part === part) run.soloPlan = null
+    return true
+  })
+}
+
+export function queueFreeSolo(part) {
+  const run = freeSession?.run
+  const beat = nextGridBeat(FREE_METER * 2)
+  if (!run || beat >= FREE_SCORE.endBeat) return false
+  const current = run.soloPlan ? run.soloPlan.part : run.solo
+  run.soloPlan = { beat, part: part === current ? null : part }
+  return true
+}
+
+export function setFreeSectionDynamics(list, direction, duration) {
+  const run = freeSession?.run
+  if (!run) return
+  const step = direction === "up" ? 0.2 : -0.2
+  for (const part of list) {
+    run.levels[part] = Math.max(0.35, Math.min(1.6, run.levels[part] + step))
+    matchSectionGain(run, part, Tone.now(), duration)
+  }
 }
 
 function audibleTime() {
@@ -261,15 +368,13 @@ export function endFree() {
   const session = freeSession
   const run = session?.run
   if (!run || Number.isFinite(run.cutBeat)) return
-  const ticks = FREE_METER * Tone.Transport.PPQ
-  const at = (Math.floor(Tone.Transport.ticks / ticks) + 1) * ticks
-  run.cutBeat = at / Tone.Transport.PPQ
+  run.cutBeat = nextGridBeat(FREE_METER)
   Tone.Transport.scheduleOnce((time) => {
     if (session.run !== run) return
-    parts.gates.piano.gain.linearRampTo(0, 0.6, time)
-    run.piano.releaseAll(time)
+    for (const part of PARTS) parts.gates[part].gain.linearRampTo(0, 0.6, time)
+    releaseEnsemble(run, time)
     Tone.Draw.schedule(() => finishFree(session, run), time + 0.9)
-  }, `${at}i`)
+  }, atBeat(run.cutBeat))
 }
 
 export function partLevels() {
@@ -283,7 +388,7 @@ export function partLevels() {
 export function stopLevel() {
   freeGeneration += 1
   if (freeSession?.run) {
-    freeSession.run.piano.releaseAll(Tone.immediate())
+    releaseEnsemble(freeSession.run, Tone.immediate())
     freeSession.run = null
   }
   freeSession = undefined

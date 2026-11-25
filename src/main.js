@@ -1,4 +1,4 @@
-import { currentDynamics, endFree, partLevels, playFree, setDynamics, setFreeExpression, setPart, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
+import { currentDynamics, endFree, freeMix, partLevels, playFree, queueFreeSections, queueFreeSolo, setDynamics, setFreeExpression, setFreeSectionDynamics, setPart, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
 import { buildChart, STUDIES } from "./chart.js"
 import { createMixerHud } from "./hud.js"
 import { createConductor, FREE_BARS, FREE_BPM, FREE_METER, FREE_SCORE } from "./free-music.js"
@@ -78,6 +78,7 @@ const conductor = createConductor()
 let ending = false
 let freeReady = false
 let freePlaying = false
+const freeSelection = new Set()
 let swingEar = null
 let lastStudy = STUDIES[0]
 // A ring gesture reaches the page a little after it happened; keep a cue open that long past its Good window.
@@ -97,7 +98,7 @@ function levelButton(icon, tone, title, detail, tag, onClick) {
   levelList.append(button)
 }
 STUDIES.forEach((study, i) => levelButton(["♪", "♩", "♬"][i], ["var(--pink)", "var(--sky)", "var(--butter)"][i], study.title, study.blurb, study.tag, () => begin(study)))
-levelButton("♫", "var(--mint)", "自由指挥 · 萨蒂", "第一号吉诺佩第 · 钢琴独奏<br>挥拍决定速度，手势改变力度和音符长短", "自由模式", beginFree)
+levelButton("♫", "var(--mint)", "自由指挥 · 萨蒂", "第一号吉诺佩第 · 五声部室内乐<br>挥拍控制速度，点选乐手控制编排", "自由模式", beginFree)
 PIECES.forEach((piece) => levelButton("♪", "var(--gold, #e6c98a)", piece.title, piece.sub, piece.tag, () => beginPiece(piece)))
 
 function setMode(next) {
@@ -236,6 +237,15 @@ function playCut(at = inputNow(), hand) {
 }
 
 function playPoint(part, at = inputNow()) {
+  if (mode === "free") {
+    if (!part) { freeSelection.clear(); return }
+    if (freeSelection.has(part)) freeSelection.delete(part)
+    else {
+      freeSelection.add(part)
+      world.pose("left", "point", part)
+    }
+    return
+  }
   if (!part || (mode !== "playing" && mode !== "count-in")) return
   world.pose("left", "point", part)
   const found = nearest(at, "left", "cue")
@@ -264,7 +274,13 @@ function onRing(event) {
       return
     }
     if (event.type === "fist") return freeStop(event.hand)
-    if (event.type === "strike" && event.hand === "left") freeStart()
+    if (event.type === "strike" && event.hand === "left") {
+      if (!freeSelection.size && camera.hand?.("left")) {
+        const target = aimedSection()
+        if (target) freeSelection.add(target)
+      }
+      freeStart()
+    }
     else if (event.type === "palm") {
       if (event.hand === "right" || calibration.ready || snapshot.directionMode === "absolute") {
         playPalm(event.dir, inputNow() - event.age, event.hand, true)
@@ -550,30 +566,32 @@ async function beginFree() {
   ending = false
   freeReady = false
   freePlaying = false
+  freeSelection.clear()
   swingEar = createSwingEar()
   const sessionEar = swingEar
   sessionTitle.textContent = "第一号吉诺佩第"
-  sessionSub.textContent = "Erik Satie · 钢琴独奏 · 3/4"
+  sessionSub.textContent = "Erik Satie · Paul De Bra 编配 · 3/4"
   tallyLabel.textContent = "BPM"
   tallyEl.textContent = String(FREE_BPM)
   progressEl.style.width = "0%"
   setMode("free")
   beatDots.forEach((dot, i) => { dot.hidden = i >= FREE_METER })
-  statusEl.textContent = "加载钢琴音色"
-  hintEl.innerHTML = '<span>戒指或方向键挥拍 · 速度</span><span><kbd>E</kbd>/<kbd>D</kbd> 或抬掌/压掌 · 力度</span><span><kbd>F</kbd> 起奏 · <kbd>G</kbd> 或握拳收束</span>'
+  statusEl.textContent = "加载乐器音色"
+  hintEl.innerHTML = '<span>戒指或方向键挥拍 · 速度</span><span>点选或圈选乐手 · <kbd>F</kbd> 起奏 · <kbd>G</kbd> 停止</span><span><kbd>S</kbd> 领奏 · <kbd>E</kbd>/<kbd>D</kbd> 渐强 / 渐弱</span>'
   world.setLevelHands(false)
-  world.showSoloPiano?.(true)
+  world.showChamber?.(true)
   world.resize()
   lane.resize()
   lane.update(0, null, [])
   try {
     const ready = await startFree({
-      onNote: (note) => world.note?.("piano", note),
+      onNote: (note) => world.note?.(note.part, note),
       onEnded: () => {
         freePlaying = false
         ending = false
         conductor.reset()
         swingEar.reset()
+        freeSelection.clear()
         tallyEl.textContent = String(FREE_BPM)
       },
     })
@@ -590,26 +608,62 @@ async function beginFree() {
 const names = (list) => list.map((part) => PART_INFO[part].name).join("、")
 
 function freeStart() {
-  if (!freeReady || freePlaying || ending) return
+  if (!freeReady || ending) return
+  const list = [...freeSelection]
+  if (freePlaying) {
+    const run = freeMix()
+    const changed = queueFreeSections(list.length ? list : run.open.size ? [] : PARTS, true)
+    if (changed.length) {
+      world.pose("left", "point", changed[0])
+      toast(`${names(changed)} · 下一拍加入`)
+      freeSelection.clear()
+    } else if (!list.length) toast("点选或圈选要起奏的乐手")
+    return
+  }
   conductor.reset()
   dynamics = 1
-  freePlaying = playFree()
+  freePlaying = playFree(list.length ? list : PARTS)
+  if (freePlaying) freeSelection.clear()
 }
 
 function freeStop(hand = "left") {
   if (!freePlaying || ending) return
+  if (freeSelection.size) {
+    const changed = queueFreeSections([...freeSelection], false)
+    if (changed.length) {
+      world.pose(hand, "fist")
+      toast(`${names(changed)} · 下一拍停止`)
+      freeSelection.clear()
+    }
+    return
+  }
   ending = true
   world.pose(hand, "fist")
   endFree()
+}
+
+function freeSolo() {
+  if (!freePlaying || ending) return
+  if (freeSelection.size > 1) { toast("选一位乐手领奏"); return }
+  const part = freeSelection.values().next().value ?? null
+  if (queueFreeSolo(part)) {
+    freeSelection.clear()
+    toast(part ? "下一个两小节边界换领奏" : "下一个两小节边界回到合奏")
+  }
 }
 
 function freeNudge(direction, hand = "left") {
   if (!freePlaying || ending) return
   world.pose(hand, "palm", direction)
   const duration = 60 / conductor.bpm * FREE_METER
-  dynamics = Math.max(0.4, Math.min(1.6, dynamics + (direction === "up" ? 0.2 : -0.2)))
-  setDynamics(dynamics, duration)
-  toast(direction === "up" ? "渐强" : "渐弱")
+  if (freeSelection.size) {
+    setFreeSectionDynamics(freeSelection, direction, duration)
+  } else {
+    dynamics = Math.max(0.4, Math.min(1.6, dynamics + (direction === "up" ? 0.2 : -0.2)))
+    setDynamics(dynamics, duration)
+  }
+  const target = freeSelection.size ? names([...freeSelection]) : "全体"
+  toast(`${target} · ${direction === "up" ? "渐强" : "渐弱"}`)
 }
 
 function freeBeat(direction, hand = "right", at = performance.now() / 1000, stroke) {
@@ -632,6 +686,8 @@ function freeAction(act) {
   if (act === "start") freeStart()
   else if (act === "stop") freeStop()
   else if (act === "up" || act === "down") freeNudge(act)
+  else if (act === "solo") freeSolo()
+  else if (act === "all") PARTS.forEach((part) => freeSelection.add(part))
 }
 
 function levelView(playing, levels) {
@@ -645,10 +701,10 @@ function levelView(playing, levels) {
 }
 
 const emptyParts = new Map()
-const pianoPlaying = new Set(["piano"])
-const pianoWaiting = new Set()
+const waitingParts = new Set()
 
 function freeLoop() {
+  const run = freeMix()
   const beats = freePlaying ? Math.max(0, transportBeats()) : 0
   const bar = Math.min(FREE_BARS, Math.floor(beats / FREE_METER) + 1)
   progressEl.style.width = `${Math.min(100, beats / FREE_SCORE.endBeat * 100)}%`
@@ -656,16 +712,23 @@ function freeLoop() {
   if (freeReady) statusEl.textContent = freePlaying ? `第 ${bar} / ${FREE_BARS} 小节` : "等待起奏"
   if (!freeReady) cueHintEl.textContent = ""
   else if (ending) cueHintEl.textContent = "小节结束后收束"
-  else if (freePlaying) cueHintEl.textContent = ""
-  else cueHintEl.textContent = "挥第一拍或按 F 起奏"
-  hud.update({ piano: {
-    label: freePlaying ? "演奏中" : "等待起奏",
-    readOnly: true,
-    on: freePlaying,
-    level: partLevels?.().piano,
-  } })
-  world.update(beats * 60 / FREE_BPM, freePlaying ? pianoPlaying : pianoWaiting, {
-    selected: pianoWaiting, pending: emptyParts, dynamics: currentDynamics(),
+  else if (freeSelection.size) cueHintEl.textContent = `已选 ${names([...freeSelection])}`
+  else cueHintEl.textContent = freePlaying ? "" : "挥第一拍或按 F 起奏"
+  const levels = partLevels?.() || {}
+  const open = run?.open ?? waitingParts
+  const pending = run?.pending ?? emptyParts
+  const view = Object.fromEntries(PARTS.map((part) => {
+    const plan = pending.get(part)
+    const solo = run?.solo === part
+    const soloQueued = run?.soloPlan?.part === part
+    const label = plan ? (plan.open ? "下一拍加入" : "下一拍停止")
+      : soloQueued ? "等待领奏" : solo ? "领奏" : open.has(part) ? "已起奏" : "休息"
+    return [part, { label, on: open.has(part), selected: freeSelection.has(part), pending: Boolean(plan) || soloQueued,
+      solo, ducked: Boolean(run?.solo && open.has(part) && !solo), level: levels[part] }]
+  }))
+  hud.update(view)
+  world.update(beats * 60 / FREE_BPM, open, {
+    selected: freeSelection, pending, solo: run?.solo ? new Set([run.solo]) : null, dynamics: currentDynamics(),
     beatPhase: beats % 1, beatHz: FREE_BPM / 60,
   })
 }
@@ -842,8 +905,13 @@ window.addEventListener("keydown", (event) => {
     if (key === "g") playCut()
     return
   }
+  const part = PARTS.find((name) => PART_INFO[name].key === key)
+  if (part) playPoint(part)
   if (key === "f") freeStart()
   if (key === "g") freeStop()
+  if (key === "s") freeSolo()
+  if (key === "a") freeAction("all")
+  if (key === "Escape") freeSelection.clear()
 })
 
 toolsEl.addEventListener("click", (event) => {
@@ -859,7 +927,7 @@ function local(event) {
 view.addEventListener("pointerdown", (event) => {
   view.setPointerCapture(event.pointerId)
   const circle = chart?.entries && (mode === "playing" || mode === "count-in") && nearest(inputNow(), "left", "circle")
-  pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: circle ? [local(event)] : null }
+  pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: mode === "free" || circle ? [local(event)] : null }
   mouseX = event.offsetX
 })
 
@@ -915,6 +983,12 @@ view.addEventListener("pointerup", (event) => {
     lassoPath.setAttribute("d", "")
     if (Math.hypot(dx, dy) <= 36 && pathLength(trail) > 60) {
       const parts = lassoParts(trail, world.screenPositions())
+      if (mode === "free") {
+        freeSelection.clear()
+        parts.forEach((part) => freeSelection.add(part))
+        if (parts.length) world.pose("left", "circle")
+        return
+      }
       const found = nearest(inputNow(), "left", "circle")
       if (found && found.cue.parts.every((part) => parts.includes(part))) scoreCue(found.cue, "perfect", 0)
       return
@@ -931,7 +1005,7 @@ view.addEventListener("pointerup", (event) => {
 
 function goHome() {
   stopLevel()
-  world.showSoloPiano?.(false)
+  world.showChamber?.(false)
   ending = false
   setMode("home")
 }

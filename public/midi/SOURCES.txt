@@ -38,8 +38,16 @@ These MIDI files are the notes the game plays. Each track is assigned to one of 
   Sax, guitar or piano play that melody when they solo. Bass uses this file's bass.
   Drums are a march pulse, not a new tune.
 
-第一号吉诺佩第（自由指挥）
+第一号吉诺佩第（钢琴原谱，初版自由指挥）
   File: gymnopedie_1.mid
   Source: Mutopia Project, id 37. Erik Satie; typeset by Evin Robertson from the Dover edition.
   Public domain. Original piano notes and beat positions are retained.
   https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=37
+
+第一号吉诺佩第（现版自由指挥）
+  File: public/scores/Gymnopedie-1.mscz
+  Source: Paul De Bra, Gymnopédie nr. 1, after Claude Debussy’s orchestration of Erik Satie.
+  CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+  https://www.de-bra.nl/arrangements.html#gymnopedie-1
+  The five accordion staves are rendered as flute, violin, horn, piano and cello.
+  The cymbal staff is omitted. The game controls tempo, articulation, gain and lead instrument.

@@ -3,6 +3,14 @@ import score from "./gymnopedie-score.json" with { type: "json" }
 export const FREE_SCORE = score
 export const FREE_BPM = score.bpm
 export const FREE_METER = score.meter
+export const MELODY_PART = "flute"
+export const FREE_GAINS = { flute: 0.48, violin: 0.37, horn: 0.33, piano: 0.36, cello: 0.54 }
+const SOLO_OCTAVES = { flute: 0, violin: 0, horn: -1, piano: 0, cello: -2 }
+export function freeVoice(note, solo) {
+  if (note.part !== MELODY_PART || !solo) return { part: note.part, pitch: note.pitch, lead: false }
+  return { part: solo, pitch: note.pitch + SOLO_OCTAVES[solo] * 12, lead: true }
+}
+
 export const FREE_BARS = Math.ceil(score.endBeat / score.meter)
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value))
@@ -66,6 +74,6 @@ export function createConductor() {
   }
 }
 
-export function pianoDuration(note, articulation) {
+export function articulatedDuration(note, articulation) {
   return Math.min(note.duration * articulation, note.maxDuration === null ? Infinity : note.maxDuration - 0.02)
 }

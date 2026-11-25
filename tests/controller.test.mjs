@@ -36,10 +36,27 @@ globalThis.requestAnimationFrame = fn => { nextFrame = fn }
 globalThis.__controller = {
   setDynamics: (value, duration) => { audio.dynamics = value; audio.dynamicsDuration = duration },
   currentDynamics: () => audio.dynamics, setFreeExpression: value => { audio.expression = value },
-  setPartDynamics: (part, amount, duration) => { audio.sectionDynamics = { part, amount, duration } }, setPart: (part,on) => { if(on)audio.parts.add(part) },
+  setPart: (part,on) => { if(on)audio.parts.add(part) },
   startLevel: async (chart, hooks) => { audio.now=0; audio.parts=new Set(['piano','cello']); levelDone = hooks.onDone }, stopLevel() {},
-  startFree: async (hooks) => { audio.ended = hooks.onEnded; return true },
-  playFree: () => { audio.freeStarts += 1; audio.dynamics = 1; return true },
+  startFree: async (hooks) => {
+    audio.ended = () => { audio.freeRun = null; hooks.onEnded() }
+    return true
+  },
+  playFree: (selected) => {
+    audio.freeRun = { open: new Set(selected), pending: new Map() }
+    audio.freeStarts += 1
+    audio.dynamics = 1
+    return true
+  },
+  freeMix: () => audio.freeRun,
+  queueFreeSections: (list, open) => {
+    audio.sectionCommand = { list, open }
+    return list
+  },
+  queueFreeSolo: (part) => { audio.soloCommand = part; return true },
+  setFreeSectionDynamics: (list, direction, duration) => {
+    audio.sectionDynamics = { parts: [...list], direction, duration }
+  },
   endFree: () => { audio.freeStops += 1 },
   createConductor, FREE_BARS, FREE_BPM, FREE_METER, FREE_SCORE,
   createSwingEar: () => ({ hear: () => ({ accept: true }), reset() {} }),
@@ -235,10 +252,10 @@ assert.equal(node('#tally').textContent, '0050', 'a wrong direction on time is G
 ringLive.clear()
 await node('#back').handlers.click()
 
-// The first beat starts the piano; later beats and gesture shape affect separate controls.
+// The first beat starts the ensemble; later beats and gesture shape affect separate controls.
 await node('#back').handlers.click()
 await freeButton.handlers.click()
-assert.equal(audio.freeStarts, 0, 'the pianist waits for the conductor')
+assert.equal(audio.freeStarts, 0, 'the ensemble waits for the conductor')
 nextFrame()
 assert.equal(node('#status').textContent, '等待起奏')
 
@@ -248,16 +265,17 @@ performance.now = () => now
 key('ArrowDown')
 assert.equal(audio.freeStarts, 1)
 for (let i = 0; i < 6; i++) {
-  now += 750
+  now += 600
   key('ArrowDown')
 }
-assert.ok(Math.abs(audio.tempo - 80) < 2, 'keyboard conducting changes the piano tempo')
+assert.ok(Math.abs(audio.tempo - 100) < 2, 'keyboard conducting changes the ensemble tempo')
+assert.deepEqual([...audio.freeRun.open], PARTS, 'the first beat opens all five written parts')
 ringLive.add('right')
-now += 750
+now += 600
 gesture('beat', 'right', { dir: 'down', age: 0.08, angularTravel: 0.5, peakSpeed: 5, rise: 35 })
 assert.equal(audio.strokeAge, 0.08)
 assert.ok(audio.expression.articulation > 0.9)
-now += 750
+now += 600
 gesture('beat', 'right', { dir: 'down', age: 0.08, angularTravel: 0.65, peakSpeed: 5, rise: 85 })
 assert.ok(audio.expression.articulation < 0.85)
 assert.ok(audio.expression.velocity > 1)
@@ -270,6 +288,20 @@ palmCalibrationReady = true
 gesture('palm', 'left', { dir: 'up' })
 assert.equal(audio.dynamics, 1.2, 'calibrated palms change overall dynamics over a phrase')
 assert.ok(Math.abs(audio.dynamicsDuration - 180 / audio.tempo) < 1e-9)
+key('1')
+gesture('fist', 'left')
+assert.deepEqual(audio.sectionCommand, { list: ['violin'], open: false })
+key('1')
+gesture('strike', 'left')
+assert.deepEqual(audio.sectionCommand, { list: ['violin'], open: true })
+key('4')
+key('s')
+assert.equal(audio.soloCommand, 'cello', 'cello can take the lead')
+key('3')
+key('d')
+assert.equal(audio.sectionDynamics.direction, 'down')
+assert.deepEqual(audio.sectionDynamics.parts, ['horn'])
+key('Escape')
 gesture('fist', 'left')
 assert.equal(audio.freeStops, 1)
 audio.ended()
@@ -279,7 +311,7 @@ key('f')
 assert.equal(audio.freeStarts, 2, 'F starts a fresh performance after the cutoff')
 ringLive.clear()
 performance.now = realNow
-console.log('Free piano: first beat, adaptive tempo, expressive touch, dynamics and restart pass')
+console.log('Free ensemble: timing, expression, section cues, lead selection, and restart pass')
 
 // Auto-compensation converges on the player's offset without oscillating, and a partial step is
 // what prevents it: reportError only samples beats that landed within GOOD, so the measured mean

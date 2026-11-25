@@ -26,7 +26,7 @@ export function createMixerHud(container, onPick) {
     card.append(badge, text, meter, key)
     card.addEventListener("click", () => onPick(part))
     container.append(card)
-    cards[part] = { card, state, fill, name, key, last: "", lastName: info.name }
+    cards[part] = { card, state, fill, name, last: "", lastName: info.name }
   }
 
   return {
@@ -37,8 +37,6 @@ export function createMixerHud(container, onPick) {
         const c = cards[part]
         c.card.hidden = !v
         if (!v) continue
-        c.card.disabled = Boolean(v.readOnly)
-        c.key.hidden = Boolean(v.readOnly)
         c.card.classList.toggle("on", Boolean(v.on))
         c.card.classList.toggle("selected", Boolean(v.selected))
         c.card.classList.toggle("pending", Boolean(v.pending))

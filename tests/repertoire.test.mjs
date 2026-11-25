@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { createConductor, FREE_SCORE, phaseTarget, pianoDuration } from "../src/free-music.js"
+import { createConductor, FREE_SCORE, phaseTarget, articulatedDuration, freeVoice } from "../src/free-music.js"
 import { ENTRIES } from "../src/orchestra.js"
 import { PIECES, buildPieceChart, eventsFor } from "../src/repertoire.js"
 
@@ -49,14 +49,21 @@ assert.ok(Math.abs(joy.musicEnd - joy.countIn - 64 * joy.beat) < 1e-9)
 console.log("Repertoire: four pieces follow their entrances, and phrases become wide cues")
 
 assert.equal(FREE_SCORE.meter, 3)
-assert.equal(FREE_SCORE.notes.length, 282)
-assert.equal(FREE_SCORE.endBeat, 141)
-assert.ok(FREE_SCORE.notes.every((note) => pianoDuration(note, 0.57) < pianoDuration(note, 1.05)))
+assert.equal(FREE_SCORE.endBeat, 228)
+const writtenParts = new Set(FREE_SCORE.notes.map((note) => note.part))
+assert.deepEqual(writtenParts, SECTIONS)
+const voices = Object.fromEntries([...writtenParts].map((part) => [part, FREE_SCORE.notes.filter((note) => note.part === part)]))
+const openingParts = new Set(FREE_SCORE.notes.filter((note) => note.beat < 12).map((note) => note.part))
+assert.deepEqual(openingParts, new Set(["cello", "piano"]))
+assert.ok(voices.violin.some((note) => Math.abs(note.beat % 1) > 0), "the authored arpeggios retain their subdivisions")
+assert.deepEqual(freeVoice(voices.flute[0], "cello"), { part: "cello", pitch: voices.flute[0].pitch - 24, lead: true })
+assert.deepEqual(freeVoice(voices.cello[0], "cello"), { part: "cello", pitch: voices.cello[0].pitch, lead: false })
+assert.ok(FREE_SCORE.notes.every((note) => articulatedDuration(note, 0.57) <= articulatedDuration(note, 1.05)))
 assert.ok(phaseTarget(60, 5.8) > 60, "speed up gently when the piano is behind a stroke")
 assert.ok(phaseTarget(60, 6.2) < 60, "ease back when the piano is ahead")
 const conductor = createConductor()
 conductor.tap(1)
 assert.equal(conductor.tap(1.24), null, "an extra motion between beats must not corrupt tempo")
-assert.equal(conductor.tap(2).bpm, 60)
-for (let i = 1; i <= 8; i++) conductor.tap(2 + i * 1.28)
+assert.equal(conductor.tap(1.8).bpm, 75)
+for (let i = 1; i <= 8; i++) conductor.tap(1.8 + i * 1.28)
 assert.ok(Math.abs(conductor.bpm - 60 / 1.28) < 1, "follow a sustained rallentando")
