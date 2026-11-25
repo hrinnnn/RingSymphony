@@ -2,14 +2,12 @@ import * as Tone from "tone"
 import { PARTS } from "./mixer.js"
 import { eventsFor as pieceEvents } from "./repertoire.js"
 import { eventsFor } from "./score.js"
-import { phraseEvents, SAINTS_BARS, SAINTS_BPM } from "./saints.js"
+import { FREE_BED, FREE_BPM, FREE_PARTS, FREE_TRACKS } from "./free-music.js"
 
 let parts
-let bandLive = false
-let bandLoop = null
-let bandHooks = null
-let bandPlan = { violin: "off", flute: "off", piano: "off" }
-let bandEnergy = 1
+let freeBuffers
+let freeSession
+let freeGeneration = 0
 
 // Each section: voice → entry/solo gate → section dynamics → beat accents → master dynamics → reverb.
 function ensure() {
@@ -119,8 +117,6 @@ function scheduleEvents(events, hooks) {
 }
 
 function resetTransport(bpm, meter) {
-  bandLive = false
-  bandLoop = null
   Tone.Transport.stop()
   Tone.Transport.cancel()
   Tone.Transport.loop = false
@@ -195,121 +191,96 @@ export async function startPiece(piece, hooks) {
   return { duration, countIn: bar }
 }
 
-export function setBandPlan(roles, energy) {
-  if (roles) {
-    bandPlan = {
-      violin: roles.violin || "off",
-      flute: roles.flute || "off",
-      piano: roles.piano || "off",
-      cello: roles.cello === "off" ? "off" : "on",
-      horn: roles.horn === "off" ? "off" : "on",
-    }
-  }
-  if (typeof energy === "number" && Number.isFinite(energy)) bandEnergy = energy
+function loadFreeBuffers() {
+  freeBuffers ??= Promise.all(FREE_PARTS.map((part) => (
+    Tone.ToneAudioBuffer.load(`/music/neon/${FREE_TRACKS[part].file}`)
+  ))).catch((error) => {
+    freeBuffers = undefined
+    throw error
+  })
+  return freeBuffers
 }
 
-// The next phrase is armed from inside the current downbeat, two bars ahead,
-// so the event is still in the future. Arming it at the downbeat itself gets dropped,
-// and then 起奏 never reaches the other players.
-function armPhrase(absolute) {
-  const scoreBar = absolute % SAINTS_BARS
-  Tone.Transport.schedule((time) => {
-    const roles = { ...bandPlan }
-    const energy = bandEnergy
-    const hooks = bandHooks || {}
-    const soloing = ["violin", "flute", "piano"].some((part) => roles[part] === "solo")
-    const beat = Tone.Time("4n").toSeconds()
-    for (const part of ["violin", "flute", "piano", "cello"]) {
-      const role = part === "cello" ? "bed" : roles[part]
-      const open = part === "cello" ? roles.cello !== "off" : role === "comp" || role === "solo"
-      const level = !open ? 0 : soloing && role === "comp" ? 0.5 : 1
-      const gate = parts.gates[part].gain
-      gate.cancelScheduledValues(time)
-      gate.rampTo(level, 0.06, time)
-    }
-    for (const event of phraseEvents(scoreBar, roles, energy)) {
-      const at = time + event.offset * beat
-      try {
-        if (event.drum === "kick") parts.synths.kick.triggerAttackRelease("C2", "8n", at, 1)
-        else if (event.drum === "tick") parts.synths.tick.triggerAttackRelease("G4", "16n", at, 0.9)
-        else voice(event.part).triggerAttackRelease(event.note, event.dur, at, event.vel)
-      } catch {
-        // One bad note must not stall the bar.
-      }
-      if (event.drum === "tick") continue
-      Tone.Draw.schedule(() => {
-        hooks.onNote?.({ part: event.part, note: event.note, dur: 0.35, vel: event.vel })
-        if (!event.drum) hooks.onVoice?.(event.part)
-      }, at)
-    }
-    armPhrase(absolute + 2)
-  }, Tone.Time(`${absolute}:0:0`).toSeconds())
-}
-
-function scheduleBand() {
-  armPhrase(0)
-}
-
-export async function startFree(hooks) {
-  await Tone.start()
+export async function startFree() {
+  const generation = ++freeGeneration
+  const [, buffers] = await Promise.all([Tone.start(), loadFreeBuffers()])
+  if (generation !== freeGeneration) return false
   ensure()
-  resetTransport(SAINTS_BPM, 4)
-  for (const drum of [parts.synths.kick, parts.synths.tick]) drum.disconnect().connect(parts.sectionDynamics.horn)
-  bandHooks = hooks
-  bandLive = true
-  bandPlan = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }
-  bandEnergy = 1
-  scheduleBand()
-  parts.gates.cello.gain.value = 1
-  if (Tone.context.state !== "running") await Tone.context.resume()
-  Tone.Transport.start()
+  resetTransport(FREE_BPM, 4)
+  const start = Tone.now() + 0.03
+  const filters = []
+  const stems = FREE_PARTS.map((part, index) => {
+    const gate = parts.gates[part]
+    gate.gain.value = FREE_BED.includes(part) ? 0.82 : 0
+    const source = new Tone.ToneBufferSource({ url: buffers[index], loop: true })
+    if (part === "flute" || part === "piano") {
+      const filter = new Tone.Filter(4600, "lowpass").connect(gate)
+      source.connect(filter)
+      filters.push(filter)
+    } else source.connect(gate)
+    source.start(start)
+    return source
+  })
+  freeSession = { stems, filters, queued: new Map() }
+  Tone.Transport.start(start)
+  return true
 }
 
-// Entries and exits land on the next beat (or bar) so a phrase is not cut mid-note.
-// The first entry starts the timeline right away, as the downbeat of bar one.
-export function queuePart(part, gain, quantum, onLanded) {
-  if (!parts) return
-  if (bandLive) {
-    if (Tone.Transport.state !== "started") {
-      scheduleBand()
-      Tone.Transport.position = 0
-      Tone.Transport.start()
-    }
-    const at = Tone.Transport.state === "started" ? Tone.Transport.nextSubdivision(quantum) : Tone.now()
-    Tone.Draw.schedule(onLanded, at)
-    return
-  }
-  const gate = parts.gates[part].gain
-  if (Tone.Transport.state !== "started") {
-    Tone.Transport.position = 0
-    Tone.Transport.start()
-    gate.rampTo(gain, 0.04)
-    onLanded()
-    return
-  }
-  const at = Tone.Transport.nextSubdivision(quantum)
-  gate.cancelScheduledValues(at)
-  gate.rampTo(gain, gain > 0 ? 0.08 : 0.25, at)
-  Tone.Draw.schedule(onLanded, at)
+// Place every command on the shared transport in ticks so queued actions stay
+// on-beat even if the conductor changes the tempo before they land.
+function scheduleFreeChange(key, beats, change, onLanded, tail = 0) {
+  const session = freeSession
+  if (!session) return
+  const pending = session.queued.get(key)
+  if (pending !== undefined) Tone.Transport.clear(pending)
+  const ticks = beats * Tone.Transport.PPQ
+  const at = (Math.floor(Tone.Transport.ticks / ticks) + 1) * ticks
+  const current = () => session === freeSession && session.queued.get(key) === id
+  const id = Tone.Transport.scheduleOnce((time) => {
+    if (!current()) return
+    change?.(time)
+    Tone.Draw.schedule(() => {
+      if (!current()) return
+      session.queued.delete(key)
+      onLanded()
+    }, time + tail)
+  }, `${at}i`)
+  session.queued.set(key, id)
 }
 
-export function setPartGain(part, gain) {
-  if (!parts) return
-  parts.gates[part].gain.rampTo(gain, 0.35)
+export function queuePart(part, gain, onLanded) {
+  scheduleFreeChange(part, 1, (time) => setPartGain(part, gain, time), onLanded)
+}
+
+export function queueSolo(onLanded) {
+  scheduleFreeChange("solo", 4, null, onLanded)
+}
+
+export function setPartGain(part, gain, time = Tone.now()) {
+  parts.gates[part].gain.linearRampTo(gain * 0.82, 0.16, time)
 }
 
 export function setTempo(bpm) {
-  Tone.Transport.bpm.rampTo(bpm, 0.25)
+  if (!freeSession) return
+  const time = Tone.now()
+  for (const stem of freeSession.stems) stem.playbackRate.linearRampTo(bpm / FREE_BPM, 0.22, time)
+  Tone.Transport.bpm.linearRampTo(bpm, 0.22, time)
+}
+
+export function setFreeEnergy(energy) {
+  const amount = Math.max(0.55, Math.min(1.55, energy))
+  setBeatAccent(1 + (amount - 1) * 0.2)
+  for (const filter of freeSession?.filters ?? []) filter.frequency.rampTo(1000 + amount ** 2 * 3600, 0.45)
 }
 
 export function endFree(onEnded) {
-  const at = Tone.Transport.state === "started" ? Tone.Transport.nextSubdivision("1m") : Tone.now()
-  PARTS.forEach((part) => parts?.gates[part].gain.rampTo(0, 0.6, at))
-  Tone.Draw.schedule(() => {
-    Tone.Transport.stop()
-    Tone.Transport.position = 0
-    onEnded()
-  }, at + 0.7)
+  const session = freeSession
+  if (!session) return
+  for (const id of session.queued.values()) Tone.Transport.clear(id)
+  session.queued.clear()
+  scheduleFreeChange("end", 4, (time) => {
+    for (const part of FREE_PARTS) parts.gates[part].gain.linearRampTo(0, 0.38, time)
+  }, onEnded, 0.38)
 }
 
 export function partLevels() {
@@ -320,12 +291,14 @@ export function partLevels() {
   }))
 }
 
-export function freeRunning() {
-  return Tone.Transport.state === "started"
-}
-
 export function stopLevel() {
-  if (Tone.Transport.state === "started") Tone.Transport.stop()
+  freeGeneration += 1
+  if (freeSession) {
+    for (const stem of freeSession.stems) stem.dispose()
+    for (const filter of freeSession.filters) filter.dispose()
+    freeSession = undefined
+  }
+  Tone.Transport.stop(Tone.immediate())
   Tone.Transport.cancel()
 }
 

@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { buildChart, STUDIES } from '../src/chart.js'
+import { FREE_BARS, FREE_BED, FREE_BPM, FREE_PARTS, FREE_TRACKS } from '../src/free-music.js'
 import { buildPieceChart, PIECES } from '../src/repertoire.js'
 import { createMixer, PART_INFO, PARTS, DUCK } from '../src/mixer.js'
 import { createGestureLog } from '../src/ring/gesture-log.js'
@@ -39,8 +40,9 @@ globalThis.__controller = {
   setPartDynamics: (part, amount, duration) => { audio.sectionDynamics = { part, amount, duration } }, setPart: (part,on) => { if(on)audio.parts.add(part) },
   startLevel: async (chart, hooks) => { audio.now=0; audio.parts=new Set(['piano','cello']); levelDone = hooks.onDone }, stopLevel() {},
   startFree: async () => { audio.freeStarted = true }, endFree: fn => { audio.ended = fn },
-  setBandPlan() {}, createSwingEar: () => ({ hear: () => ({ accept: true, energy: 1 }) }),
-  queuePart: (part, gain, quantum, landed) => { audio.queued.push({ part, gain, quantum, landed }) },
+  FREE_BARS, FREE_BED, FREE_BPM, FREE_PARTS, FREE_TRACKS, setFreeEnergy() {}, createSwingEar: () => ({ hear: () => ({ accept: true, energy: 1 }) }),
+  queuePart: (part, gain, landed) => { audio.queued.push({ part, gain, landed }) },
+  queueSolo: (landed) => { audio.queued.push({ landed }) },
   setPartGain: (part, gain) => { audio.gains[part] = gain }, setTempo: bpm => { audio.tempo = bpm },
   partLevels: () => ({}), transportBeats: () => 0,
   transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .4, PERFECT: .15, createWorld: () => world, createLane: () => lane, createSettings: () => settings, startPiece: async chart => { audio.now = 0; return chart }, buildPieceChart, PIECES,
@@ -240,7 +242,7 @@ assert.ok(audio.freeStarted)
 ringLive.add('left')
 gesture('strike', 'left')
 assert.equal(audio.queued.length, 0, 'a ring strike without a selection does not start a section')
-screenPositions = [{ part: 'violin', x: 25, y: 25 }, { part: 'flute', x: 75, y: 75 }, { part: 'piano', x: 150, y: 150 }]
+screenPositions = [{ part: 'flute', x: 25, y: 25 }, { part: 'piano', x: 75, y: 75 }, { part: 'cello', x: 150, y: 150 }]
 node('#view').handlers.pointerdown({ clientX: 0, clientY: 0, offsetX: 0, pointerId: 5 })
 for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {
   node('#view').handlers.pointermove({ clientX, clientY, pointerId: 5 })
@@ -251,7 +253,7 @@ gesture('strike', 'left')
 assert.equal(audio.queued.length, 0, 'calibration movements cannot start selected sections')
 palmCalibrationActive = false
 gesture('strike', 'left')
-assert.deepEqual(audio.queued.map(q => q.part), ['violin', 'flute'], 'ring strike starts the circled sections')
+assert.deepEqual(audio.queued.map(q => q.part), ['flute', 'piano'], 'ring strike starts the circled sections')
 audio.queued.forEach(q => q.landed()); audio.queued = []
 palmCalibrationReady = false
 gesture('palm', 'left', { dir: 'up' })
@@ -259,10 +261,10 @@ assert.equal(audio.dynamics, 1, 'uncalibrated palms do not change dynamics in fr
 palmCalibrationReady = true
 gesture('palm', 'left', { dir: 'up' })
 assert.equal(audio.dynamics, 1.2, 'calibrated palms control dynamics in free mode')
-assert.equal(audio.dynamicsDuration, 2, 'free dynamics ramp over one bar at 120 BPM')
+assert.equal(audio.dynamicsDuration, 240 / FREE_BPM, 'free dynamics ramp over one bar')
 gesture('beat', 'right', { dir: 'down' })
 assert.equal(audio.dynamics, 1.2, 'a beat accent does not replace the palm dynamics target')
-assert.equal(audio.dynamicsDuration, 2)
+assert.equal(audio.dynamicsDuration, 240 / FREE_BPM)
 ringLive.clear()
 await node('#back').handlers.click()
 await freeButton.handlers.click()
@@ -270,18 +272,18 @@ key('f')
 assert.equal(audio.queued.length, 0, 'start without a selection does nothing')
 key('1'); key('2')
 key('f')
-assert.deepEqual(audio.queued.map(q => [q.part, q.gain, q.quantum]), [['violin', 1, '2m'], ['flute', 1, '2m']])
+assert.deepEqual(audio.queued.map(q => [q.part, q.gain]), [['flute', 1], ['piano', 1]])
 audio.queued.forEach(q => q.landed()); audio.queued = []
 key('f'); assert.equal(audio.queued.length, 0, 'selection clears after an entry')
 key('1'); key('e')
-assert.deepEqual(audio.sectionDynamics, { part: 'violin', amount: 1.25, duration: 2 })
+assert.deepEqual(audio.sectionDynamics, { part: 'flute', amount: 1.25, duration: 240 / FREE_BPM })
 key('s')
 audio.queued.at(-1).landed(); audio.queued = []
-assert.deepEqual(audio.sectionDynamics, { part: 'violin', amount: 1.25, duration: 2 })
-assert.ok(Math.abs(audio.gains.flute - (1 - DUCK)) < 1e-9, 'accompaniment ducks while violin solos')
+assert.deepEqual(audio.sectionDynamics, { part: 'flute', amount: 1.25, duration: 240 / FREE_BPM })
+assert.ok(Math.abs(audio.gains.piano - (1 - DUCK)) < 1e-9, 'accompaniment ducks while the lead solos')
 key('Escape'); key('s')
 audio.queued.at(-1).landed(); audio.queued = []
-assert.equal(audio.gains.flute, 1, 'solo released')
+assert.equal(audio.gains.piano, 1, 'solo released')
 let now = 1000
 const realNow = performance.now.bind(performance)
 performance.now = () => now
@@ -289,13 +291,15 @@ for (let i = 0; i < 8; i++) { key('ArrowDown'); now += 500 }
 performance.now = realNow
 assert.ok(Math.abs(audio.tempo - 120) < 3, `tempo follows 0.5 s beats (got ${audio.tempo})`)
 key('2'); key('g')
-assert.deepEqual(audio.queued.map(q => [q.part, q.gain]), [['flute', 0]])
+assert.deepEqual(audio.queued.map(q => [q.part, q.gain]), [['piano', 0]])
 audio.queued.forEach(q => q.landed()); audio.queued = []
 key('g')
 assert.ok(audio.ended, 'fist with nothing selected closes the whole piece')
 audio.ended()
-assert.equal(audio.tempo, 96)
-console.log('Free mode: sections enter on the next phrase, solo ducking, tap tempo, section stop and full close: pass')
+assert.equal(audio.tempo, FREE_BPM)
+key('f')
+assert.deepEqual(audio.queued.map(q => q.part), FREE_BED, 'F restarts the rhythm section after closing')
+console.log('Free mode: synced entries, solo ducking, tap tempo, section stop and restart: pass')
 
 // Auto-compensation converges on the player's offset without oscillating, and a partial step is
 // what prevents it: reportError only samples beats that landed within GOOD, so the measured mean
@@ -339,6 +343,7 @@ const accent = canon.cues.find(cue => cue.kind === 'beat' && cue.hand === 'both'
 tick(accent.time); key('ArrowDown'); key('K')
 assert.equal(pageHits.at(-1)[1], 'perfect', 'two hands complete the same accent')
 const circle = canon.cues.find(cue => cue.kind === 'circle')
+screenPositions = [{ part: 'violin', x: 25, y: 25 }, { part: 'flute', x: 75, y: 75 }]
 tick(circle.time)
 node('#view').handlers.pointerdown({ clientX: 0, clientY: 0, offsetX: 0, pointerId: 5 })
 for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {

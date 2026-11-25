@@ -115,17 +115,9 @@ const HOLDS = {
     left: { s: [-0.16, 1.02, 0.04], e: [-0.24, 0.76, 0.28], w: [-0.16, 0.86, 0.58] },
     right: { s: [0.16, 1.02, 0.04], e: [0.26, 0.74, 0.3], w: [0.18, 0.86, 0.6] },
   },
-  guitar: {
-    fret: { s: [-0.16, 1.06, 0.04], e: [-0.24, 0.98, 0.14], w: [-0.14, 1.04, 0.22] },
-    strum: { s: [0.16, 1.02, 0.04], e: [0.16, 0.84, 0.22], w: [0.04, 0.8, 0.36], travel: 0.1 },
-  },
   bass: {
     fret: { s: [-0.06, 1.1, 0.06], e: [0.02, 1.02, 0.16], w: [0.06, 1.16, 0.28] },
     pluck: { s: [0.16, 1.02, 0.06], e: [0.22, 0.8, 0.24], w: [0.16, 0.78, 0.4], travel: 0.08 },
-  },
-  sax: {
-    left: { s: [-0.15, 1.06, 0.04], e: [-0.02, 1.0, 0.16], w: [0.06, 1.02, 0.24] },
-    right: { s: [0.16, 1.02, 0.04], e: [0.1, 0.86, 0.2], w: [0.05, 0.86, 0.28] },
   },
   drums: {
     left: { s: [-0.16, 1.06, 0.04], e: [-0.28, 0.98, 0.18], w: [-0.24, 1.02, 0.32] },
@@ -412,74 +404,6 @@ function bassSlab(parent, x, y, z) {
   }
   box(parent, [0.09, 0.016, 0.014], shoe, x + 0.02, y - 0.14, z + 0.06)
 }
-function heldGuitar(parent, bass) {
-  const group = new THREE.Group(); parent.add(group)
-  const body = bass ? [0.14, 0.72, 0.32] : [0.08, 0.76, 0.3]
-  const neck0 = bass ? [0.1, 0.92, 0.34] : [0.02, 0.9, 0.26]
-  const neck1 = bass ? [-0.08, 1.12, 0.22] : [-0.22, 1.14, 0.18]
-  if (bass) bassSlab(group, body[0], body[1], body[2])
-  else {
-    oval(group, [0.13, 0.15, 0.05], oak, body[0], body[1], body[2])
-    oval(group, [0.09, 0.09, 0.042], oak, body[0] - 0.02, body[1] + 0.1, body[2] - 0.01)
-    mesh(group, new THREE.TorusGeometry(0.036, 0.006, 8, 18), gilt, body[0], body[1] + 0.02, body[2] + 0.055)
-    oval(group, [0.024, 0.024, 0.004], shoe, body[0], body[1] + 0.02, body[2] + 0.06)
-    box(group, [0.06, 0.08, 0.006], ivory, body[0] + 0.05, body[1], body[2] + 0.052)
-    box(group, [0.08, 0.014, 0.014], shoe, body[0], body[1] - 0.08, body[2] + 0.055)
-  }
-  rod(group, neck0, neck1, bass ? 0.016 : 0.012, shoe, bass ? 0.013 : 0.01)
-  rod(group, [neck0[0], neck0[1], neck0[2] + 0.016], [neck1[0], neck1[1], neck1[2] + 0.012], bass ? 0.018 : 0.014, material(0x1a120e, 0.45))
-  const across = [-(neck1[1] - neck0[1]), neck1[0] - neck0[0], 0]
-  const alen = Math.hypot(across[0], across[1]) || 1
-  for (let i = 1; i <= 5; i++) {
-    const p = mix(neck0, neck1, i / 6)
-    const fret = p.map((v, k) => k < 2 ? v + across[k] / alen * 0.02 : v + 0.028)
-    const back = p.map((v, k) => k < 2 ? v - across[k] / alen * 0.02 : v + 0.028)
-    rod(group, back, fret, 0.002, silver)
-  }
-  box(group, [0.07, 0.09, 0.016], shoe, neck1[0] - 0.01, neck1[1] + 0.02, neck1[2])
-  const tuners = bass ? 4 : 6
-  for (let i = 0; i < tuners; i++) {
-    const side = i % 2 ? 1 : -1
-    const y = neck1[1] + 0.01 + Math.floor(i / 2) * 0.02
-    rod(group, [neck1[0], y, neck1[2]], [neck1[0] + side * 0.04, y, neck1[2]], 0.004, silver)
-    oval(group, [0.01, 0.01, 0.008], ivory, neck1[0] + side * 0.042, y, neck1[2])
-  }
-  for (let i = 0; i < tuners; i++) {
-    const spread = (i - (tuners - 1) / 2) * 0.01
-    rod(group, [body[0] + spread, body[1] - 0.12, body[2] + 0.06], [neck1[0] + spread * 0.3, neck1[1], neck1[2] + 0.02], 0.002, silver)
-  }
-  return group
-}
-function saxophone(parent) {
-  const group = new THREE.Group(); parent.add(group)
-  // Held at the mouth. The bell stops at the waist, opening toward the conductor.
-  const spine = [
-    [0.02, 1.22, 0.14],
-    [0.05, 1.14, 0.17],
-    [0.08, 1.04, 0.2],
-    [0.07, 0.9, 0.24],
-    [0.04, 0.78, 0.28],
-    [0.08, 0.7, 0.34],
-    [0.14, 0.68, 0.4],
-  ]
-  const radii = [0.008, 0.011, 0.014, 0.015, 0.017, 0.026, 0.042]
-  box(group, [0.014, 0.04, 0.012], shoe, 0.015, 1.24, 0.13)
-  oval(group, [0.01, 0.008, 0.008], gilt, 0.045, 1.15, 0.17)
-  for (let i = 0; i < spine.length - 1; i++) rod(group, spine[i], spine[i + 1], radii[i], brass, radii[i + 1])
-  const rim = mesh(group, new THREE.TorusGeometry(0.05, 0.006, 8, 20), brass, 0.16, 0.67, 0.43)
-  rim.rotation.x = 1.05
-  oval(group, [0.034, 0.008, 0.034], material(0x5c4324, 0.45, 0.35), 0.16, 0.67, 0.45)
-  rod(group, [0.0, 1.2, 0.08], [0.06, 0.95, 0.2], 0.0035, black)
-  const pads = []
-  for (let i = 0; i < 5; i++) {
-    const p = mix(spine[2], spine[4], i / 4)
-    const pad = oval(group, [0.011, 0.004, 0.011], silver, p[0] + 0.02, p[1], p[2] + 0.012)
-    pad.userData.restY = pad.position.y
-    pads.push(pad)
-  }
-  group.userData.pads = pads
-  return group
-}
 function drumShell(parent, radius, depth, x, y, z) {
   const drum = new THREE.Group(); drum.position.set(x, y, z); parent.add(drum)
   mesh(drum, new THREE.CylinderGeometry(radius, radius * 0.96, depth, 18), oak)
@@ -529,6 +453,7 @@ function bandPlayer(part, kit, x, z, index) {
   buildHead(head, skin, hair, index, part)
   const rig = {}
   let moving = null
+  let keys = null
   if (kit === "bass") {
     const inst = stringInstrument(body, true)
     inst.scale.setScalar(1.28)
@@ -542,23 +467,24 @@ function bandPlayer(part, kit, x, z, index) {
     applyLimb(rig.bow, HOLDS.bass.pluck.s, HOLDS.bass.pluck.e, HOLDS.bass.pluck.w)
     rig.bow.hand.rotation.x = -0.9
     moving = rig.bow.hand
-  } else if (kit === "guitar") {
-    heldGuitar(body, false)
-    rig.finger = createLimb(body, ink, skin, 0.042)
-    rig.bow = createLimb(body, ink, skin, 0.044)
-    addNubs(rig.finger.hand, skin)
-    applyLimb(rig.finger, HOLDS.guitar.fret.s, HOLDS.guitar.fret.e, HOLDS.guitar.fret.w)
-    applyLimb(rig.bow, HOLDS.guitar.strum.s, HOLDS.guitar.strum.e, HOLDS.guitar.strum.w)
-    moving = rig.bow.hand
-  } else if (kit === "sax") {
-    const inst = saxophone(body)
-    rig.pads = inst.userData.pads
-    rig.left = createLimb(body, ink, skin, 0.04)
-    rig.right = createLimb(body, ink, skin, 0.04)
-    addNubs(rig.left.hand, skin)
-    addNubs(rig.right.hand, skin)
-    applyLimb(rig.left, HOLDS.sax.left.s, HOLDS.sax.left.e, HOLDS.sax.left.w)
-    applyLimb(rig.right, HOLDS.sax.right.s, HOLDS.sax.right.e, HOLDS.sax.right.w)
+  } else if (kit === "keys") {
+    box(group, [0.86, 0.085, 0.29], shoe, 0, 0.795, 0.61)
+    for (const x of [-0.36, 0.36]) rod(group, [x, 0.75, 0.61], [-x, 0.06, 0.61], 0.015, black)
+    keys = new THREE.Group()
+    group.add(keys)
+    for (let i = 0; i < 20; i += 1) {
+      const key = box(keys, [0.035, 0.013, 0.15], ivory, -0.38 + i * 0.038, 0.843, 0.56)
+      key.userData.restY = key.position.y
+      if (![2, 6].includes(i % 7) && i < 19) {
+        box(group, [0.019, 0.016, 0.085], shoe, key.position.x + 0.021, 0.853, 0.59)
+      }
+    }
+    for (const side of ["left", "right"]) {
+      const hold = HOLDS.piano[side]
+      rig[side] = createLimb(body, ink, skin, 0.04)
+      addNubs(rig[side].hand, skin)
+      applyLimb(rig[side], hold.s, hold.e, hold.w)
+    }
     moving = rig.right.hand
   } else {
     const kitPieces = drumKit(group)
@@ -572,7 +498,7 @@ function bandPlayer(part, kit, x, z, index) {
     applyLimb(rig.right, HOLDS.drums.right.s, HOLDS.drums.right.e, HOLDS.drums.right.w)
     moving = rig.right.hand
   }
-  group.userData = { part, kit, body, head, moving, keys: null, index, rig, wasActive: false, entered: null }
+  group.userData = { part, kit, body, head, moving, keys, index, rig, wasActive: false, entered: null }
   return group
 }
 function addFinger(group, skin, x, length, curl) {
@@ -630,7 +556,7 @@ function ictus(u) {
   return Math.sin(Math.pow(clamp01(u), 0.36) * Math.PI)
 }
 function animatePlayers(players, seconds, playing, sections, wall) {
-  const hz = 96 / 60
+  const hz = sections.beatHz ?? 96 / 60
   for (const person of players) {
     const { part, body, head, keys, index, rig } = person.userData
     const active = playing.has(part)
@@ -672,24 +598,14 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       active ? -along * 0.04 : 0,
     )
     const kit = person.userData.kit
-    if (kit === "guitar" || kit === "bass") {
-      const hold = kit === "bass" ? HOLDS.bass : HOLDS.guitar
-      const strum = kit === "bass" ? hold.pluck : hold.strum
+    if (kit === "bass") {
+      const hold = HOLDS.bass
+      const strum = hold.pluck
       const wrist = [strum.w[0], strum.w[1] - Math.abs(along) * strum.travel, strum.w[2]]
       applyLimb(rig.bow, strum.s, strum.e, wrist)
       rig.bow.hand.rotation.x = -0.4 - Math.abs(along) * 0.8
       const fret = [hold.fret.w[0], hold.fret.w[1] + (active ? Math.sin(seconds * 18 + index) * 0.012 : 0), hold.fret.w[2]]
       applyLimb(rig.finger, hold.fret.s, hold.fret.e, fret)
-    } else if (kit === "sax") {
-      const lift = active ? Math.sin(seconds * 6 + index) * 0.012 : 0
-      const left = HOLDS.sax.left
-      const right = HOLDS.sax.right
-      applyLimb(rig.left, left.s, left.e, [left.w[0], left.w[1] + lift, left.w[2]])
-      applyLimb(rig.right, right.s, right.e, [right.w[0], right.w[1] + lift, right.w[2]])
-      rig.pads?.forEach((pad, i) => {
-        const down = sounding && ((i + Math.floor(age * 8)) % 3 === 0)
-        pad.position.y = pad.userData.restY + (down ? -0.006 : 0)
-      })
     } else if (kit === "drums") {
       const rightHit = Math.max(0, along)
       const leftHit = Math.max(0, -along)
@@ -714,7 +630,7 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       const vib = active ? Math.sin(seconds * 26 + index) * 0.01 : 0
       const fingerWrist = [hold.finger.w[0], hold.finger.w[1] + vib, hold.finger.w[2] + vib * 0.4]
       applyLimb(rig.finger, hold.finger.s, hold.finger.e, fingerWrist)
-    } else if (part === "flute") {
+    } else if (part === "flute" && kit !== "keys") {
       const lift = waiting ? 0.07 : breath * (active ? 0.016 : 0.004)
       const left = HOLDS.flute.left
       const right = HOLDS.flute.right
@@ -744,8 +660,10 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       rig.right.hand.rotation.x = -0.35 - rightLift * 6
       if (keys) {
         const eighth = Math.floor(seconds * hz * 2)
+        const pressed = sounding || (kit === "keys" && active && sections.beatPhase < 0.4)
         keys.children.forEach((key, i) => {
-          const play = sounding && (i % 8 === Math.floor((stroke.pitch || 0) / 2) % 8 || (i + 3) % 8 === Math.floor(age * 6) % 8)
+          const pattern = kit === "keys" ? eighth : Math.floor((stroke?.pitch || 0) / 2)
+          const play = pressed && (i % 8 === pattern % 8 || (i + 3) % 8 === Math.floor(age * 6) % 8)
           key.position.y = key.userData.restY - (play ? 0.012 : 0)
         })
       }
@@ -889,22 +807,18 @@ export function createWorld(canvas, laneCanvas) {
   left.position.copy(rests[0]); right.position.copy(rests[1]); camera.add(left, right)
   const handStates = [{ until: 0, pose: 'rest' }, { until: 0, pose: 'rest' }]
 
-  // Same hall, same players. Sax, guitar, bass and drums are new instruments in that
-  // construction. The piano is the one already on the stage.
   const combo = new THREE.Group()
   combo.visible = false
   scene.add(combo)
   const comboLayout = [
-    ["flute", "sax", -1.7, -1.35],
-    ["violin", "guitar", -0.5, -1.25],
+    ["flute", "keys", -1.75, -1.5],
+    ["piano", "keys", -0.55, -1.4],
     ["cello", "bass", 0.65, -1.3],
-    ["horn", "drums", 1.65, -1.45],
-    ["piano", "piano", 3.15, -5.15],
+    ["horn", "drums", 1.75, -1.65],
   ]
   const comboMembers = comboLayout.map(([part, kit, x, z], i) => {
-    const person = kit === "piano" ? musician(part, x, z, 4) : bandPlayer(part, kit, x, z, i * 2 + 1)
-    person.position.y = part === "piano" ? 0.55 : 0
-    person.rotation.y = part === "piano" ? -0.95 : Math.atan2(-x, 4.7 - z) * 0.45
+    const person = bandPlayer(part, kit, x, z, i * 2 + 1)
+    person.rotation.y = Math.atan2(-x, 4.7 - z) * 0.45
     combo.add(person)
     return person
   })

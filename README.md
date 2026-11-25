@@ -39,6 +39,12 @@ npm run dev
 
 关卡数据在 [src/chart.js](src/chart.js)（谱面和音乐都由它生成，见 [src/score.js](src/score.js)）。
 
+## 自由指挥 · Neon
+
+自由模式使用 Oğuzhan Girgin 的 [Rust — Neon Loop](https://colorosse.com/assets/audio/music/rust-music-loop)，按 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 授权。仓库带入原作者提供的四条 WAV 分轨，游戏实时混音、滤波并调整播放速率。
+
+开场是 108 BPM 的鼓组和贝斯。键盘方向键或戒指连续挥拍可以改变速度。点乐手、按 1–4 或用鼠标画圈选中声部，按 F 或用左手戒指前指让它们在下一拍加入。按 G 或握拳可停下已选声部。无选择时收束整队，再按 F 可重新起奏。S 在下一小节聚焦已选声部，E/D 渐强或渐弱。挥拍幅度会影响合成器的音色亮度。
+
 ## 设置
 
 页面右上角「设置」里可以手动调「判定延迟」（−400 到 +400 ms，保存在浏览器里）。总是偏晚就调大，总是偏早就调小。它只改判定时间，不改画面。游戏已经自动扣除了音频调度提前量和设备输出延迟。

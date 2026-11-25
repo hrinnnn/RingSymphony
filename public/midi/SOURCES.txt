@@ -29,7 +29,7 @@ These MIDI files are the notes the game plays. Each track is assigned to one of 
   https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=2230
   Violin I → violin, violin II → flute, viola → horn, cello → cello and piano.
 
-圣者进行曲（只在自由模式）
+圣者进行曲（旧版自由模式）
   File: saints.mid
   Source: Wikimedia Commons, File:When_The_Saints.mid. Traditional melody.
   Setting by Rabanus Flavus / Peter Gerloff. CC0.

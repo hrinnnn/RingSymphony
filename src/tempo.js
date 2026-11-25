@@ -4,7 +4,7 @@ export const MIN_GAP = 0.22
 const MIN_BPM = 50
 const MAX_BPM = 180
 
-export function createTempo(initial = 96) {
+export function createTempo(initial = 96, { min = MIN_BPM, max = MAX_BPM } = {}) {
   let bpm = initial
   let last = null
   return {
@@ -14,7 +14,7 @@ export function createTempo(initial = 96) {
       if (last !== null) {
         const instant = 60 / (seconds - last)
         const ratio = instant / bpm
-        if (ratio > 0.6 && ratio < 1.4) bpm = Math.min(MAX_BPM, Math.max(MIN_BPM, 0.3 * instant + 0.7 * bpm))
+        if (ratio > 0.6 && ratio < 1.4) bpm = Math.min(max, Math.max(min, 0.3 * instant + 0.7 * bpm))
       }
       last = seconds
       return bpm
