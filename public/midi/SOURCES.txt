@@ -37,3 +37,9 @@ These MIDI files are the notes the game plays. Each track is assigned to one of 
   The game loops the first 16 bars of 4/4, starting where the melody enters.
   Sax, guitar or piano play that melody when they solo. Bass uses this file's bass.
   Drums are a march pulse, not a new tune.
+
+第一号吉诺佩第（自由指挥）
+  File: gymnopedie_1.mid
+  Source: Mutopia Project, id 37. Erik Satie; typeset by Evin Robertson from the Dover edition.
+  Public domain. Original piano notes and beat positions are retained.
+  https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=37

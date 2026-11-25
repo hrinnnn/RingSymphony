@@ -462,7 +462,7 @@ export function createRingInput({
       }
       if (event.type === "beat") {
         if (capturing && ring.hand === "right") continue
-        const { feature, reason, hasGap, rise } = directionFeatureResult(ring.history, event.t)
+        const { feature, reason, hasGap, rise, angularTravel } = directionFeatureResult(ring.history, event.t)
         // The left hand never uses the right wrist's templates. Its direction comes from the
         // gravity frame, which does not depend on which hand is wearing the ring.
         const absolute = ring.hand === "left" || directionMode === "absolute"
@@ -510,6 +510,8 @@ export function createRingInput({
         // ask for a full snapshot once per stroke.
         event.directionMode = ring.hand === "left" ? "absolute" : directionMode
         event.peakSpeed = event.peakSpeed ?? null
+        event.angularTravel = angularTravel ?? null
+        event.rise = rise ?? null
         if (fused.source === "camera") cameraStats[classified.direction ? "overrides" : "fills"] += 1
         if (fused.disagreed) {
           cameraStats.disagreements += 1

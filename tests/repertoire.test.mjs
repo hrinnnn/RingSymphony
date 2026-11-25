@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createConductor, FREE_SCORE, phaseTarget, pianoDuration } from "../src/free-music.js"
 import { ENTRIES } from "../src/orchestra.js"
 import { PIECES, buildPieceChart, eventsFor } from "../src/repertoire.js"
 
@@ -46,3 +47,16 @@ const lastJoyBeat = joy.cues.filter((cue) => cue.kind === "beat").at(-1)
 assert.ok(Math.abs(lastJoyBeat.time - (joy.musicEnd - 3 * joy.beat)) < 1e-9, "leave the final two beats to the held tonic")
 assert.ok(Math.abs(joy.musicEnd - joy.countIn - 64 * joy.beat) < 1e-9)
 console.log("Repertoire: four pieces follow their entrances, and phrases become wide cues")
+
+assert.equal(FREE_SCORE.meter, 3)
+assert.equal(FREE_SCORE.notes.length, 282)
+assert.equal(FREE_SCORE.endBeat, 141)
+assert.ok(FREE_SCORE.notes.every((note) => pianoDuration(note, 0.57) < pianoDuration(note, 1.05)))
+assert.ok(phaseTarget(60, 5.8) > 60, "speed up gently when the piano is behind a stroke")
+assert.ok(phaseTarget(60, 6.2) < 60, "ease back when the piano is ahead")
+const conductor = createConductor()
+conductor.tap(1)
+assert.equal(conductor.tap(1.24), null, "an extra motion between beats must not corrupt tempo")
+assert.equal(conductor.tap(2).bpm, 60)
+for (let i = 1; i <= 8; i++) conductor.tap(2 + i * 1.28)
+assert.ok(Math.abs(conductor.bpm - 60 / 1.28) < 1, "follow a sustained rallentando")

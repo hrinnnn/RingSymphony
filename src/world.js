@@ -115,14 +115,7 @@ const HOLDS = {
     left: { s: [-0.16, 1.02, 0.04], e: [-0.24, 0.76, 0.28], w: [-0.16, 0.86, 0.58] },
     right: { s: [0.16, 1.02, 0.04], e: [0.26, 0.74, 0.3], w: [0.18, 0.86, 0.6] },
   },
-  bass: {
-    fret: { s: [-0.06, 1.1, 0.06], e: [0.02, 1.02, 0.16], w: [0.06, 1.16, 0.28] },
-    pluck: { s: [0.16, 1.02, 0.06], e: [0.22, 0.8, 0.24], w: [0.16, 0.78, 0.4], travel: 0.08 },
-  },
-  drums: {
-    left: { s: [-0.16, 1.06, 0.04], e: [-0.28, 0.98, 0.18], w: [-0.24, 1.02, 0.32] },
-    right: { s: [0.16, 1.04, 0.04], e: [0.16, 0.86, 0.24], w: [0.04, 0.9, 0.36] },
-  },
+
 }
 function texture(draw, width = 512, height = 512) {
   const canvas = document.createElement("canvas")
@@ -379,128 +372,6 @@ function musician(part, x, z, index) {
   group.userData = { part, body, head, moving, keys, index, rig, wasActive: false, entered: null }
   return group
 }
-// A jazz guitar, bass guitar, saxophone and drum kit, built the same way as the
-// violin, the horn and the piano: oak, brass, silver, and the same seated player.
-const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t)
-function bassSlab(parent, x, y, z) {
-  const shape = new THREE.Shape()
-  shape.moveTo(0.0, -0.22)
-  shape.lineTo(0.16, -0.2)
-  shape.bezierCurveTo(0.2, -0.06, 0.14, 0.02, 0.08, 0.06)
-  shape.lineTo(0.16, 0.16)
-  shape.lineTo(0.03, 0.2)
-  shape.lineTo(-0.02, 0.08)
-  shape.bezierCurveTo(-0.12, 0.0, -0.14, -0.12, -0.06, -0.22)
-  shape.closePath()
-  const slab = mesh(parent, new THREE.ExtrudeGeometry(shape, {
-    depth: 0.07, bevelEnabled: true, bevelSize: 0.008, bevelThickness: 0.01, bevelSegments: 1,
-  }), material(0x6a3418, 0.45, 0.12))
-  slab.scale.set(1.35, 1.25, 1)
-  slab.position.set(x - 0.02, y - 0.04, z)
-  box(parent, [0.08, 0.018, 0.012], shoe, x + 0.02, y + 0.02, z + 0.06)
-  box(parent, [0.08, 0.018, 0.012], shoe, x + 0.02, y - 0.06, z + 0.06)
-  for (const py of [0.02, -0.06]) {
-    for (let i = 0; i < 4; i++) oval(parent, [0.006, 0.006, 0.004], silver, x - 0.02 + i * 0.018, y + py, z + 0.068)
-  }
-  box(parent, [0.09, 0.016, 0.014], shoe, x + 0.02, y - 0.14, z + 0.06)
-}
-function drumShell(parent, radius, depth, x, y, z) {
-  const drum = new THREE.Group(); drum.position.set(x, y, z); parent.add(drum)
-  mesh(drum, new THREE.CylinderGeometry(radius, radius * 0.96, depth, 18), oak)
-  mesh(drum, new THREE.CylinderGeometry(radius * 1.02, radius * 1.02, 0.012, 18), white, 0, depth / 2, 0)
-  mesh(drum, new THREE.CylinderGeometry(radius * 0.98, radius * 0.98, 0.01, 18), material(0xf7f1e6, 0.4), 0, -depth / 2, 0)
-  mesh(drum, new THREE.TorusGeometry(radius, 0.008, 6, 18), brass, 0, depth / 2, 0)
-  mesh(drum, new THREE.TorusGeometry(radius * 0.98, 0.008, 6, 18), brass, 0, -depth / 2, 0)
-  for (let i = 0; i < 6; i++) {
-    const a = i / 6 * Math.PI * 2
-    rod(drum, [Math.cos(a) * radius, -depth / 2, Math.sin(a) * radius], [Math.cos(a) * radius, depth / 2, Math.sin(a) * radius], 0.006, brass)
-  }
-  return drum
-}
-function drumKit(parent) {
-  const kit = new THREE.Group(); parent.add(kit)
-  const snare = drumShell(kit, 0.13, 0.08, 0.02, 0.7, 0.46)
-  const kick = drumShell(kit, 0.17, 0.16, 0.02, 0.2, 0.58)
-  kick.rotation.x = Math.PI / 2
-  rod(kit, [0.02, 0.06, 0.72], [0.02, 0.2, 0.64], 0.007, black)
-  oval(kit, [0.035, 0.01, 0.06], shoe, 0.02, 0.05, 0.74)
-  rod(kit, [-0.24, 0.08, 0.36], [-0.24, 0.98, 0.34], 0.008, black)
-  const hatTop = mesh(kit, new THREE.CylinderGeometry(0.1, 0.1, 0.006, 18), brass, -0.24, 1.0, 0.34)
-  mesh(kit, new THREE.CylinderGeometry(0.1, 0.1, 0.006, 18), brass, -0.24, 0.97, 0.34)
-  const tom = drumShell(kit, 0.09, 0.1, 0.22, 0.82, 0.34)
-  tom.rotation.x = 0.35
-  rod(kit, [0.32, 0.08, 0.24], [0.32, 1.12, 0.2], 0.008, black)
-  const cymbal = mesh(kit, new THREE.CylinderGeometry(0.14, 0.14, 0.006, 20), brass, 0.32, 1.14, 0.2)
-  cymbal.rotation.x = 0.4
-  oval(kit, [0.016, 0.008, 0.016], gilt, 0.32, 1.15, 0.18)
-  return { hat: hatTop, cymbal }
-}
-function addStick(hand) {
-  rod(hand, [0.01, 0.01, 0.02], [0.02, -0.03, 0.36], 0.006, oak, 0.004)
-  oval(hand, [0.011, 0.011, 0.012], white, 0.02, -0.032, 0.37)
-}
-function bandPlayer(part, kit, x, z, index) {
-  const group = new THREE.Group(); group.position.set(x, 0, z)
-  const skin = skins[index % skins.length]
-  const hair = hairColors[index % hairColors.length]
-  const accent = sectionMat[part]
-  const ink = suits[part].coat
-  chair(group, ink)
-  buildLegs(group, part)
-  const body = new THREE.Group(); group.add(body)
-  buildTorso(body, "violin", accent, skin, index)
-  const head = new THREE.Group(); head.position.y = 1.31; body.add(head)
-  buildHead(head, skin, hair, index, part)
-  const rig = {}
-  let moving = null
-  let keys = null
-  if (kit === "bass") {
-    const inst = stringInstrument(body, true)
-    inst.scale.setScalar(1.28)
-    inst.position.set(0.14, 0.58, 0.22)
-    inst.rotation.set(0.04, 0.2, 0.06)
-    rig.finger = createLimb(body, ink, skin, 0.042)
-    rig.bow = createLimb(body, ink, skin, 0.044)
-    addNubs(rig.finger.hand, skin)
-    addNubs(rig.bow.hand, skin)
-    applyLimb(rig.finger, HOLDS.bass.fret.s, HOLDS.bass.fret.e, HOLDS.bass.fret.w)
-    applyLimb(rig.bow, HOLDS.bass.pluck.s, HOLDS.bass.pluck.e, HOLDS.bass.pluck.w)
-    rig.bow.hand.rotation.x = -0.9
-    moving = rig.bow.hand
-  } else if (kit === "keys") {
-    box(group, [0.86, 0.085, 0.29], shoe, 0, 0.795, 0.61)
-    for (const x of [-0.36, 0.36]) rod(group, [x, 0.75, 0.61], [-x, 0.06, 0.61], 0.015, black)
-    keys = new THREE.Group()
-    group.add(keys)
-    for (let i = 0; i < 20; i += 1) {
-      const key = box(keys, [0.035, 0.013, 0.15], ivory, -0.38 + i * 0.038, 0.843, 0.56)
-      key.userData.restY = key.position.y
-      if (![2, 6].includes(i % 7) && i < 19) {
-        box(group, [0.019, 0.016, 0.085], shoe, key.position.x + 0.021, 0.853, 0.59)
-      }
-    }
-    for (const side of ["left", "right"]) {
-      const hold = HOLDS.piano[side]
-      rig[side] = createLimb(body, ink, skin, 0.04)
-      addNubs(rig[side].hand, skin)
-      applyLimb(rig[side], hold.s, hold.e, hold.w)
-    }
-    moving = rig.right.hand
-  } else {
-    const kitPieces = drumKit(group)
-    rig.hat = kitPieces.hat
-    rig.cymbal = kitPieces.cymbal
-    rig.left = createLimb(body, ink, skin, 0.042)
-    rig.right = createLimb(body, ink, skin, 0.042)
-    addStick(rig.left.hand)
-    addStick(rig.right.hand)
-    applyLimb(rig.left, HOLDS.drums.left.s, HOLDS.drums.left.e, HOLDS.drums.left.w)
-    applyLimb(rig.right, HOLDS.drums.right.s, HOLDS.drums.right.e, HOLDS.drums.right.w)
-    moving = rig.right.hand
-  }
-  group.userData = { part, kit, body, head, moving, keys, index, rig, wasActive: false, entered: null }
-  return group
-}
 function addFinger(group, skin, x, length, curl) {
   const finger = new THREE.Group()
   finger.position.set(x, 0.028, -0.078)
@@ -597,27 +468,7 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       active ? along * 0.07 : Math.sin(seconds * 0.35 + index) * 0.045,
       active ? -along * 0.04 : 0,
     )
-    const kit = person.userData.kit
-    if (kit === "bass") {
-      const hold = HOLDS.bass
-      const strum = hold.pluck
-      const wrist = [strum.w[0], strum.w[1] - Math.abs(along) * strum.travel, strum.w[2]]
-      applyLimb(rig.bow, strum.s, strum.e, wrist)
-      rig.bow.hand.rotation.x = -0.4 - Math.abs(along) * 0.8
-      const fret = [hold.fret.w[0], hold.fret.w[1] + (active ? Math.sin(seconds * 18 + index) * 0.012 : 0), hold.fret.w[2]]
-      applyLimb(rig.finger, hold.fret.s, hold.fret.e, fret)
-    } else if (kit === "drums") {
-      const rightHit = Math.max(0, along)
-      const leftHit = Math.max(0, -along)
-      const right = HOLDS.drums.right
-      const left = HOLDS.drums.left
-      applyLimb(rig.right, right.s, right.e, [right.w[0], right.w[1] - rightHit * 0.14, right.w[2]])
-      applyLimb(rig.left, left.s, left.e, [left.w[0], left.w[1] - leftHit * 0.1, left.w[2]])
-      rig.right.hand.rotation.x = -0.9 - rightHit
-      rig.left.hand.rotation.x = -0.5 - leftHit
-      if (rig.cymbal) rig.cymbal.rotation.z = sounding ? Math.sin(age * 28) * 0.12 : 0
-      if (rig.hat) rig.hat.position.y = 1.0 - (active ? leftHit * 0.02 : 0)
-    } else if (part === "violin" || part === "cello") {
+    if (part === "violin" || part === "cello") {
       const hold = part === "cello" ? HOLDS.cello : HOLDS.violin
       const elbow = [
         hold.bow.e[0] + along * hold.bow.travel * 0.28,
@@ -630,7 +481,7 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       const vib = active ? Math.sin(seconds * 26 + index) * 0.01 : 0
       const fingerWrist = [hold.finger.w[0], hold.finger.w[1] + vib, hold.finger.w[2] + vib * 0.4]
       applyLimb(rig.finger, hold.finger.s, hold.finger.e, fingerWrist)
-    } else if (part === "flute" && kit !== "keys") {
+    } else if (part === "flute") {
       const lift = waiting ? 0.07 : breath * (active ? 0.016 : 0.004)
       const left = HOLDS.flute.left
       const right = HOLDS.flute.right
@@ -659,11 +510,8 @@ function animatePlayers(players, seconds, playing, sections, wall) {
       rig.left.hand.rotation.x = -0.35 - leftLift * 6
       rig.right.hand.rotation.x = -0.35 - rightLift * 6
       if (keys) {
-        const eighth = Math.floor(seconds * hz * 2)
-        const pressed = sounding || (kit === "keys" && active && sections.beatPhase < 0.4)
         keys.children.forEach((key, i) => {
-          const pattern = kit === "keys" ? eighth : Math.floor((stroke?.pitch || 0) / 2)
-          const play = pressed && (i % 8 === pattern % 8 || (i + 3) % 8 === Math.floor(age * 6) % 8)
+          const play = sounding && (i % 8 === Math.floor((stroke.pitch || 0) / 2) % 8 || (i + 3) % 8 === Math.floor(age * 6) % 8)
           key.position.y = key.userData.restY - (play ? 0.012 : 0)
         })
       }
@@ -807,21 +655,11 @@ export function createWorld(canvas, laneCanvas) {
   left.position.copy(rests[0]); right.position.copy(rests[1]); camera.add(left, right)
   const handStates = [{ until: 0, pose: 'rest' }, { until: 0, pose: 'rest' }]
 
-  const combo = new THREE.Group()
-  combo.visible = false
-  scene.add(combo)
-  const comboLayout = [
-    ["flute", "keys", -1.75, -1.5],
-    ["piano", "keys", -0.55, -1.4],
-    ["cello", "bass", 0.65, -1.3],
-    ["horn", "drums", 1.75, -1.65],
-  ]
-  const comboMembers = comboLayout.map(([part, kit, x, z], i) => {
-    const person = bandPlayer(part, kit, x, z, i * 2 + 1)
-    person.rotation.y = Math.atan2(-x, 4.7 - z) * 0.45
-    combo.add(person)
-    return person
-  })
+  const soloPiano = musician("piano", 0.45, -2.0, 9)
+  soloPiano.rotation.y = -0.85
+  soloPiano.visible = false
+  scene.add(soloPiano)
+  const soloPlayers = [soloPiano]
   const halos = players.map((person) => {
     const color = SECTION_COLOR[person.userData.part]
     const disc = mesh(scene, new THREE.CircleGeometry(0.5, 40), glow(color, 0), person.position.x, person.position.y + 0.025, person.position.z)
@@ -1035,7 +873,7 @@ export function createWorld(canvas, laneCanvas) {
   // not a new mesh for every note of a full score.
   function emit(part, pitch) {
     if (!pitch || notes.length > 16) return
-    const people = (combo.visible ? comboMembers : players).filter((person) => person.userData.part === part)
+    const people = (soloPiano.visible ? soloPlayers : players).filter((person) => person.userData.part === part)
     const person = people[0]
     if (!person) return
     const note = mesh(scene, noteGeo, new THREE.MeshBasicMaterial({
@@ -1075,7 +913,7 @@ export function createWorld(canvas, laneCanvas) {
     const t = performance.now() / 1000
     const dt = Math.min(0.1, Math.max(0, t - lastFrame)); lastFrame = t
     animatePlayers(players, seconds, playing, sections, t)
-    if (combo.visible) animatePlayers(comboMembers, seconds, playing, sections, t)
+    if (soloPiano.visible) animatePlayers(soloPlayers, seconds, playing, sections, t)
     for (const part of Object.keys(suits)) {
       const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
       const energy = (mood - 0.55) / 1.05
@@ -1189,6 +1027,7 @@ export function createWorld(canvas, laneCanvas) {
     }
     const marked = new Set([...sections.pending.keys(), ...askedNames])
     const shown = []
+    const ensemble = soloPiano.visible ? soloPlayers : players
     sectionOrder.forEach((part, index) => {
       const beacon = beacons[index]
       const shaft = shafts[index]
@@ -1197,7 +1036,7 @@ export function createWorld(canvas, laneCanvas) {
       if (!people.length) {
         beacon.visible = false
         shaft.visible = false
-        const crew = playing.has(part) ? players.filter((person) => person.userData.part === part) : []
+        const crew = playing.has(part) ? ensemble.filter((person) => person.userData.part === part) : []
         if (!crew.length) { lamp.intensity = 0; return }
         const spot = crew.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / crew.length)
         const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
@@ -1287,7 +1126,7 @@ export function createWorld(canvas, laneCanvas) {
   }
   function screenPositions() {
     const rect = canvas.getBoundingClientRect()
-    const pool = combo.visible ? comboMembers : players
+    const pool = soloPiano.visible ? soloPlayers : players
     return pool.map((person) => {
       const p = person.position.clone().add(new THREE.Vector3(0, 1.4, 0)).project(camera)
       return { part: person.userData.part, x: (p.x + 1) / 2 * rect.width, y: (1 - p.y) / 2 * rect.height }
@@ -1302,7 +1141,7 @@ export function createWorld(canvas, laneCanvas) {
     state.direction = gesture === "beat" || gesture === "palm" ? detail : undefined
     state.aimX = undefined
     if (gesture === "point" && detail) {
-      const pool = combo.visible ? comboMembers : players
+      const pool = soloPiano.visible ? soloPlayers : players
       const person = pool.find(p => p.userData.part === detail)
       const position = person.position.clone().add(new THREE.Vector3(0, 1.3, 0)).project(camera)
       state.aimX = THREE.MathUtils.clamp(position.x * 0.65, -0.65, 0.45)
@@ -1314,7 +1153,7 @@ export function createWorld(canvas, laneCanvas) {
     const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, camera)
     const ringHit = ray.intersectObjects(cueRings.flatMap(entry => entry.rings), false)[0]
     if (ringHit) return ringHit.object.userData.person.userData.part
-    const pool = combo.visible ? comboMembers : players
+    const pool = soloPiano.visible ? soloPlayers : players
     const hit = ray.intersectObjects(pool, true)[0]
     let node = hit?.object
     while (node && !node.userData.part) node = node.parent
@@ -1338,10 +1177,10 @@ export function createWorld(canvas, laneCanvas) {
       if (person.userData.part === part) person.userData.stroke = { start: start + (i % 3) * 0.03, dur, vel, pitch: info.pitch || 0 }
     }
     players.forEach(mark)
-    comboMembers.forEach(mark)
+    mark(soloPiano, 0)
   }
-  function showCombo(on) {
-    combo.visible = on
+  function showSoloPiano(on) {
+    soloPiano.visible = on
     players.forEach((person) => { person.visible = !on })
     halos.forEach((disc) => { disc.visible = !on })
   }
@@ -1361,5 +1200,5 @@ export function createWorld(canvas, laneCanvas) {
     }
     return best
   }
-  return { resize, update, spawn, emit, note, sectionAt, pose, pick, reset, setLevelHands, syncBeats, screenPositions, showCombo, players }
+  return { resize, update, spawn, emit, note, sectionAt, pose, pick, reset, setLevelHands, syncBeats, screenPositions, showSoloPiano, players }
 }

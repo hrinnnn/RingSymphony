@@ -161,3 +161,26 @@ for (const job of jobs) {
 
 writeFileSync("src/midi-score.json", JSON.stringify(out))
 console.log("wrote src/midi-score.json", (JSON.stringify(out).length / 1024).toFixed(0), "KB")
+
+const gymnopedie = parse("public/midi/gymnopedie_1.mid")
+const pianoNotes = gymnopedie.tracks.flatMap(({ notes }) => notes)
+  .sort((a, b) => a.tick - b.tick || a.note - b.note)
+const nextAttack = new Map()
+const notes = pianoNotes.toReversed().map(({ tick, note, vel, end }) => {
+  const next = nextAttack.get(note)
+  nextAttack.set(note, tick)
+  return {
+    beat: tick / gymnopedie.division,
+    duration: (end - tick) / gymnopedie.division,
+    maxDuration: next === undefined ? null : (next - tick) / gymnopedie.division,
+    note: pitchName(note),
+    pitch: note,
+    velocity: vel / 127,
+  }
+}).reverse()
+writeFileSync("src/gymnopedie-score.json", JSON.stringify({
+  bpm: 60_000_000 / gymnopedie.tempos[0].us,
+  meter: gymnopedie.sigs[0].num,
+  endBeat: Math.max(...pianoNotes.map(({ end }) => end)) / gymnopedie.division,
+  notes,
+}))

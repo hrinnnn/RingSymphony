@@ -17,12 +17,16 @@ export function directionFeatureResult(frames, peakTime) {
   const window = frames.filter((frame) => frame.t >= peakTime - 0.15 && frame.t <= peakTime)
   if (window.length < 10 || window[0].t > peakTime - 0.1) return { feature: null, reason: "数据不足或断帧" }
   let observed = 0
+  let angularTravel = 0
   let gaps = 0
   for (let i = 1; i < window.length; i += 1) {
     const dt = window[i].t - window[i - 1].t
     if (dt <= 0 || dt > MAX_SHORT_GAP) return { feature: null, reason: "数据不足或断帧" }
     if (dt > 0.03) gaps += 1
-    else observed += dt
+    else {
+      observed += dt
+      angularTravel += dt * (Math.hypot(...window[i - 1].gyr) + Math.hypot(...window[i].gyr)) / 2
+    }
   }
   if (gaps > 1 || observed < 0.08) return { feature: null, reason: "数据不足或断帧" }
   const mean = [0, 0, 0]
@@ -50,7 +54,7 @@ export function directionFeatureResult(frames, peakTime) {
   }
   const span = highAt === null || lowAt === null ? 0 : highAt - lowAt
   const rise = span > 0 ? (high - low) / span : null
-  return { feature, rise, reason: feature ? null : "方向信号过弱或相互抵消", hasGap: gaps > 0 }
+  return { feature, rise, angularTravel, reason: feature ? null : "方向信号过弱或相互抵消", hasGap: gaps > 0 }
 }
 
 // A near-opposite rotation shortly after an accepted beat is likely the return stroke.
