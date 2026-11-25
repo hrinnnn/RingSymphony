@@ -49,28 +49,37 @@ for (const part of ['violin', 'flute']) {
   cue.result = 'perfect'; world.update(7, new Set()); assert.ok(rings.every(r => r.parent === null))
 }
 console.log('Section cues: circles anchored to 5 violinists / 2 flutists, removed after judgement')
-for (const direction of ['up','down']) { world.spawn({kind:'dynamics', direction, time: 9}); world.update(7.5, new Set()); world.pose('left',direction); world.update(8,new Set()) }
+for (const direction of ['up','down']) { world.spawn({kind:'dynamics', direction, time: 9}); world.update(7.5, new Set()); world.pose('left','palm',direction); world.update(8,new Set()) }
 let pageObjects = 0; scene.traverse(o => { if (o.userData.cue || o.userData.person) pageObjects++ })
 assert.equal(pageObjects, 0, 'beats and dynamics are drawn on the page overlay, not in the hall')
 world.pose('left','point','flute'); world.update(8,new Set())
-world.pose('right','down'); world.update(8,new Set(['violin','flute','cello','piano']))
+world.pose('right','beat','down'); world.update(8,new Set(['violin','flute','cello','piano']))
 assert.ok(world.players.filter(p=>p.userData.part === 'violin').some(p=>Math.abs(p.userData.moving.position.x)>0))
 const rightHand = camera.children.find(child => child.userData.tip)
-assert.ok(rightHand)
+const leftHand = camera.children.find(child => child.userData.fingers && !child.userData.tip)
+assert.ok(rightHand && leftHand)
 const realPerformance = globalThis.performance
 let visualTime = 1000
 globalThis.performance = { now: () => visualTime }
 const settle = () => { for (let i = 0; i < 12; i++) world.update(8, new Set()) }
-for (const [direction, axis, sign] of [['up', 'y', 1], ['down', 'y', -1], ['left', 'x', -1], ['right', 'x', 1]]) {
-  visualTime += 5000; world.reset(); settle()
-  const rest = rightHand.position.clone()
-  world.pose('right', direction); visualTime += 150; settle()
-  assert.ok((rightHand.position[axis] - rest[axis]) * sign > 0.05, `${direction} beat moves the hand ${direction} on screen`)
-  assert.ok(Math.abs(rightHand.position.z - rest.z) < 1e-9, `${direction} beat never moves the hand toward or away from the player`)
+for (const [side, hand] of [['left', leftHand], ['right', rightHand]]) {
+  for (const [direction, axis, sign] of [['up', 'y', 1], ['down', 'y', -1], ['left', 'x', -1], ['right', 'x', 1]]) {
+    visualTime += 5000; world.reset(); settle()
+    const rest = hand.position.clone()
+    world.pose(side, 'beat', direction); visualTime += 150; settle()
+    assert.ok((hand.position[axis] - rest[axis]) * sign > 0.05, `${side} ${direction} beat moves the hand in the requested direction`)
+    assert.ok(Math.abs(hand.position.z - rest.z) < 1e-9, 'beats stay in the screen plane')
+    visualTime += 600; settle()
+    assert.ok(hand.position.distanceTo(rest) < 0.002, 'hand returns to its fixed rest')
+  }
 }
-console.log('Right hand: up / down / left / right beats move strictly in the screen plane')
-const leftHand = camera.children.find(child => child.userData.fingers && !child.userData.tip)
-assert.ok(leftHand)
+world.setLevelHands(true)
+world.syncBeats(1, [{ kind: 'beat', time: 1, hand: 'right', direction: 'down' }], 0.6)
+const beatRoot = camera.children.find(child => child.isGroup && child.children.some(item => item.children.some(layer => layer.geometry?.type === "ShapeGeometry")))
+assert.ok(beatRoot)
+assert.equal(beatRoot.children.filter(child => child.isGroup && child.visible).length, 1, 'one right-hand note draws exactly one arrow')
+world.setLevelHands(false)
+console.log('Both hands: all four beats move in the screen plane, with one arrow per note')
 const lanePlane = camera.children.find(child => child.material?.map?.image === laneCanvas)
 assert.ok(lanePlane && !lanePlane.visible && lanePlane.material.depthTest && !lanePlane.material.depthWrite)
 let laneDisposals = 0
@@ -85,7 +94,7 @@ for (const [direction, sign] of [['up', 1], ['down', -1]]) {
   const rest = leftHand.position.clone()
   const restRotation = leftHand.rotation.x
   const anchor = sleeveEnds().anchor
-  world.pose('left', direction)
+  world.pose('left', 'palm', direction)
   const start = visualTime
   const advance = (elapsed) => {
     while (visualTime < start + elapsed) {
@@ -143,17 +152,15 @@ assert.equal(lanePlane.visible, false, 'free mode hides the lane plane')
 width = 1440; height = 900; world.resize()
 visualTime += 5000; world.reset(); settle()
 assert.ok(Math.abs(leftHand.position.x + 0.26) < 0.01 && Math.abs(rightHand.position.x - 0.4) < 0.01, 'free mode restores the original hand positions')
-visualTime = 20000
-world.previewRight('down')
-visualTime = 20050
-world.update(8, new Set())
-const priorY = rightHand.position.y
-visualTime = 20100
-world.previewRight('down')
-world.pose('right', 'down')
-world.update(8, new Set())
-const strokeDepth = Math.sin(Math.pow(0.1 / 0.46, 0.36) * Math.PI)
-assert.ok(Math.abs(rightHand.position.y - (priorY + (-0.35 - 0.22 * strokeDepth - priorY) * 0.5)) < 1e-8, 'repeated preview and matching confirmed beat do not restart the hand animation')
+visualTime += 5000; world.reset(); settle()
+const fixedRight = rightHand.position.clone()
+world.pose('right', 'palm', 'up'); visualTime += 800; settle()
+assert.ok(rightHand.position.y > fixedRight.y + 0.12, 'right hand can raise slowly')
+visualTime += 5000; world.reset(); settle()
+world.pose('left', 'circle'); visualTime += 280; settle()
+assert.ok(leftHand.position.x > leftRest.x + 0.07 && leftHand.position.y > leftRest.y + 0.05, 'circle moves through an arc')
+world.pose('left', 'fist'); visualTime += 200; settle()
+assert.ok(leftHand.userData.fingers.every(finger => finger.rotation.x < -1.45), 'fist closes every finger')
 globalThis.performance = realPerformance
 console.log('Hand gestures and active musician animation: pass')
 world.reset(); let cueCount=0; scene.traverse(o=>{if(o.userData.cue||o.userData.person)cueCount++}); assert.equal(cueCount,0)

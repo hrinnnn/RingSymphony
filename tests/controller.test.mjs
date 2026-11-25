@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 import { buildChart, STUDIES } from '../src/chart.js'
+import { buildPieceChart, PIECES } from '../src/repertoire.js'
 import { createMixer, PART_INFO, PARTS, DUCK } from '../src/mixer.js'
 import { createGestureLog } from '../src/ring/gesture-log.js'
 import { createTempo } from '../src/tempo.js'
@@ -24,9 +25,8 @@ let panelOpened = false
 const ringLive = new Set()
 const ringErrors = []
 const poses = []
-const previews = []
 let screenPositions = []
-const world = { resize() {}, update() {}, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, previewRight(dir) { previews.push(dir) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
+const world = { resize() {}, update() {}, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
 const pageHits = []
 const lane = { resize() {}, update() {}, reset() {}, hit: (...args) => pageHits.push(args) }
 const settings = { latency: 0, close() {}, suggest(bias) { settings.bias = bias } }
@@ -34,16 +34,18 @@ globalThis.document = { body: makeNode(), querySelector: node, querySelectorAll:
 globalThis.window = { addEventListener: (name,fn) => keys[name]=fn, setTimeout() {}, clearTimeout() {} }
 globalThis.requestAnimationFrame = fn => { nextFrame = fn }
 globalThis.__controller = {
-  setDynamics: value => { audio.dynamics=value }, setPart: (part,on) => { if(on)audio.parts.add(part) },
+  setDynamics: (value, duration) => { audio.dynamics = value; audio.dynamicsDuration = duration },
+  currentDynamics: () => audio.dynamics, setBeatAccent: value => { audio.accent = value },
+  setPartDynamics: (part, amount, duration) => { audio.sectionDynamics = { part, amount, duration } }, setPart: (part,on) => { if(on)audio.parts.add(part) },
   startLevel: async (chart, hooks) => { audio.now=0; audio.parts=new Set(['piano','cello']); levelDone = hooks.onDone }, stopLevel() {},
   startFree: async () => { audio.freeStarted = true }, endFree: fn => { audio.ended = fn },
   setBandPlan() {}, createSwingEar: () => ({ hear: () => ({ accept: true, energy: 1 }) }),
   queuePart: (part, gain, quantum, landed) => { audio.queued.push({ part, gain, quantum, landed }) },
   setPartGain: (part, gain) => { audio.gains[part] = gain }, setTempo: bpm => { audio.tempo = bpm },
   partLevels: () => ({}), transportBeats: () => 0,
-  transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .4, PERFECT: .15, createWorld: () => world, createLane: () => lane, createSettings: () => settings, startPiece: async () => ({ duration: 1, countIn: 1 }), buildPieceChart: () => ({ cues: [], meter: 4, beat: 1, countIn: 1, duration: 1, bars: 1 }), PIECES: [],
+  transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .4, PERFECT: .15, createWorld: () => world, createLane: () => lane, createSettings: () => settings, startPiece: async chart => { audio.now = 0; return chart }, buildPieceChart, PIECES,
   startRing: ({ onGesture, onPreview }) => { ringGesture = onGesture; ringPreview = onPreview; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
-  createMixerHud: () => ({ update() {} }), lassoParts, pathLength, createMixer, PART_INFO, PARTS, LOOP_BARS, createTempo,
+  createMixerHud: () => ({ update() {} }), lassoParts, pathLength, createMixer, DUCK, PART_INFO, PARTS, LOOP_BARS, createTempo,
   // The camera is optional and the controller must work with it absent, which is what these
   // inert stubs represent: a tracker that never has a verdict is the no-camera path.
   createCameraTracker: () => ({ verdict: () => null, framesFor: () => [], status: () => ({ state: 'off', fps: 0, hands: { left: false, right: false }, mismatch: false }), onStatus() {}, enable: async () => false, disable() {}, video: null }),
@@ -65,9 +67,7 @@ const clickPart = part => {
 const [levelButton, threeButton, , freeButton] = node('#level-list').children
 const studyButtons = node('#level-list').children
 await levelButton.handlers.click()
-ringPreview({ hand: 'right', dir: 'down' })
-assert.deepEqual(previews, ['down'], 'right-hand preview is sent to the world during a level')
-assert.equal(node('#tally').textContent, '0000', 'a preview never scores')
+assert.equal(ringPreview, undefined, 'the stage only reacts to confirmed gestures')
 node('.ring-rerecord').open = true
 tick(chart.cues[0].time); key('ArrowDown')
 assert.equal(node('#tally').textContent, '0000', 'keyboard input in the supplemental dialog does not score a beat')
@@ -86,6 +86,7 @@ assert.equal(node('#tally').textContent,'3600')
 assert.equal((node('#stars').innerHTML.match(/lit/g) || []).length, 3)
 assert.ok(audio.parts.has('violin') && audio.parts.has('flute'))
 assert.equal(audio.dynamics,.7)
+assert.equal(audio.dynamicsDuration, chart.beat * 3, 'practice dynamics ramp over three beats')
 assert.ok(poses.some(p=>p[0]==='left'&&p[1]==='point'&&p[2]==='violin'))
 console.log('Full 36-event level via arrow keys, musician clicks and E/D: 100%, three stars, both parts enabled, dynamics applied')
 await node('#retry').handlers.click()
@@ -258,6 +259,10 @@ assert.equal(audio.dynamics, 1, 'uncalibrated palms do not change dynamics in fr
 palmCalibrationReady = true
 gesture('palm', 'left', { dir: 'up' })
 assert.equal(audio.dynamics, 1.2, 'calibrated palms control dynamics in free mode')
+assert.equal(audio.dynamicsDuration, 2, 'free dynamics ramp over one bar at 120 BPM')
+gesture('beat', 'right', { dir: 'down' })
+assert.equal(audio.dynamics, 1.2, 'a beat accent does not replace the palm dynamics target')
+assert.equal(audio.dynamicsDuration, 2)
 ringLive.clear()
 await node('#back').handlers.click()
 await freeButton.handlers.click()
@@ -269,10 +274,10 @@ assert.deepEqual(audio.queued.map(q => [q.part, q.gain, q.quantum]), [['violin',
 audio.queued.forEach(q => q.landed()); audio.queued = []
 key('f'); assert.equal(audio.queued.length, 0, 'selection clears after an entry')
 key('1'); key('e')
-assert.equal(audio.gains.violin, 1.25)
+assert.deepEqual(audio.sectionDynamics, { part: 'violin', amount: 1.25, duration: 2 })
 key('s')
 audio.queued.at(-1).landed(); audio.queued = []
-assert.equal(audio.gains.violin, 1.25)
+assert.deepEqual(audio.sectionDynamics, { part: 'violin', amount: 1.25, duration: 2 })
 assert.ok(Math.abs(audio.gains.flute - (1 - DUCK)) < 1e-9, 'accompaniment ducks while violin solos')
 key('Escape'); key('s')
 audio.queued.at(-1).landed(); audio.queued = []
@@ -326,3 +331,30 @@ console.log('Free mode: sections enter on the next phrase, solo ducking, tap tem
 }
 
 console.log('Auto-compensation: converges on the ring offset without oscillating')
+
+const canonButton = node('#level-list').children.find(button => button.innerHTML.includes('卡农'))
+await canonButton.handlers.click()
+const canon = buildPieceChart(PIECES[0])
+const accent = canon.cues.find(cue => cue.kind === 'beat' && cue.hand === 'both')
+tick(accent.time); key('ArrowDown'); key('K')
+assert.equal(pageHits.at(-1)[1], 'perfect', 'two hands complete the same accent')
+const circle = canon.cues.find(cue => cue.kind === 'circle')
+tick(circle.time)
+node('#view').handlers.pointerdown({ clientX: 0, clientY: 0, offsetX: 0, pointerId: 5 })
+for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {
+  node('#view').handlers.pointermove({ clientX, clientY, pointerId: 5 })
+}
+node('#view').handlers.pointerup({ clientX: 0, clientY: 0, pointerId: 5 })
+assert.deepEqual(poses.at(-1), ['left', 'circle'], 'a level lasso animates circle selection')
+const swell = canon.cues.find(cue => cue.kind === 'dynamics')
+tick(swell.time); gesture('palm', 'right', { dir: swell.direction })
+assert.deepEqual(poses.at(-1), ['right', 'palm', 'up'], 'the right ring can answer a swell while the left hand conducts')
+assert.ok(Math.abs(audio.dynamicsDuration - (swell.until - swell.time)) < 1e-9, 'a written swell follows the full phrase')
+const cut = canon.cues.find(cue => cue.kind === 'cut')
+tick(cut.time); gesture('fist', 'right')
+assert.deepEqual(poses.at(-1), ['right', 'fist'], 'the hand that closes plays the cutoff')
+assert.equal(pageHits.at(-1)[0].kind, 'cut')
+tick(canon.duration)
+await node('#retry').handlers.click()
+assert.equal(node('#session-title').textContent, PIECES[0].title, 'retry reopens the same classical excerpt')
+console.log('Classical modes: double accent, circle, right palm, cutoff and retry pass')

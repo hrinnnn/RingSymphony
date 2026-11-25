@@ -11,11 +11,12 @@ let bandHooks = null
 let bandPlan = { violin: "off", flute: "off", piano: "off" }
 let bandEnergy = 1
 
-// Each section: synth → gate (on/off × local gain × solo duck) → master (global dynamics) → reverb.
+// Each section: voice → entry/solo gate → section dynamics → beat accents → master dynamics → reverb.
 function ensure() {
   if (parts) return
   const reverb = new Tone.Reverb({ decay: 2.2, wet: 0.2 }).toDestination()
   const master = new Tone.Gain(1).connect(reverb)
+  const accents = new Tone.Gain(1).connect(master)
   const synths = {
     piano: new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "triangle" },
@@ -61,13 +62,15 @@ function ensure() {
   synths.horn.volume.value = -10
   const gates = {}
   const meters = {}
+  const sectionDynamics = {}
   for (const part of PARTS) {
     const gate = new Tone.Gain(0)
     const meter = new Tone.Meter({ normalRange: true, smoothing: 0.82 })
     synths[part].connect(gate)
     samplers[part].connect(gate)
-    gate.connect(master)
-    gate.connect(meter)
+    const dynamics = new Tone.Gain(1).connect(accents).connect(meter)
+    gate.connect(dynamics)
+    sectionDynamics[part] = dynamics
     gates[part] = gate
     meters[part] = meter
   }
@@ -76,9 +79,7 @@ function ensure() {
   synths.tick = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.02 } })
   synths.kick.volume.value = -1
   synths.tick.volume.value = -10
-  synths.kick.toDestination()
-  synths.tick.toDestination()
-  parts = { synths, samplers, gates, meters, master }
+  parts = { synths, samplers, gates, meters, sectionDynamics, accents, master }
 }
 
 function voice(part) {
@@ -131,8 +132,12 @@ function resetTransport(bpm, meter) {
     parts.gates[part].gain.cancelScheduledValues(0)
     parts.gates[part].gain.value = 0
   })
-  parts.master.gain.cancelScheduledValues(0)
-  parts.master.gain.value = 1
+  for (const { gain } of [...Object.values(parts.sectionDynamics), parts.accents, parts.master]) {
+    gain.cancelScheduledValues(0)
+    gain.value = 1
+  }
+  // Keep the reference pulse clear in levels. Free-mode drums are a playable section.
+  for (const drum of [parts.synths.kick, parts.synths.tick]) drum.disconnect().toDestination()
 }
 
 export function setPart(part, open) {
@@ -140,9 +145,22 @@ export function setPart(part, open) {
   parts.gates[part].gain.rampTo(open ? 1 : 0, 0.05)
 }
 
-export function setDynamics(amount) {
-  if (!parts) return
-  parts.master.gain.rampTo(Math.max(0.25, Math.min(1.8, amount)), 0.2)
+export function setDynamics(amount, duration = 0.2) {
+  parts?.master.gain.linearRampTo(Math.max(0.25, Math.min(1.8, amount)), duration)
+}
+
+export function setPartDynamics(part, amount, duration) {
+  parts?.sectionDynamics[part].gain.linearRampTo(amount, duration)
+}
+
+export function setBeatAccent(amount) {
+  parts?.accents.gain.linearRampTo(amount, 0.2)
+}
+
+export function currentDynamics() {
+  if (!parts) return 1
+  const now = Tone.immediate()
+  return parts.master.gain.getValueAtTime(now) * parts.accents.gain.getValueAtTime(now)
 }
 
 export async function startLevel(chart, hooks) {
@@ -169,7 +187,7 @@ export async function startPiece(piece, hooks) {
     ...event,
     time: Tone.Time(event.time).toSeconds() + bar,
   })), hooks)
-  const duration = bar * (piece.bars + 1)
+  const duration = piece.duration
   Tone.Transport.schedule((time) => {
     Tone.Draw.schedule(() => hooks.onDone?.(), time)
   }, duration)
@@ -236,6 +254,7 @@ export async function startFree(hooks) {
   await Tone.start()
   ensure()
   resetTransport(SAINTS_BPM, 4)
+  for (const drum of [parts.synths.kick, parts.synths.tick]) drum.disconnect().connect(parts.sectionDynamics.horn)
   bandHooks = hooks
   bandLive = true
   bandPlan = { violin: "off", flute: "off", piano: "off", cello: "on", horn: "on" }

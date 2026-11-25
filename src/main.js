@@ -1,9 +1,9 @@
-import { endFree, partLevels, queuePart, setBandPlan, setDynamics, setPart, setPartGain, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
+import { currentDynamics, endFree, partLevels, queuePart, setBandPlan, setBeatAccent, setDynamics, setPart, setPartDynamics, setPartGain, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
 import { buildChart, STUDIES } from "./chart.js"
 import { createMixerHud } from "./hud.js"
 import { GOOD, PERFECT } from "./judge.js"
 import { lassoParts, pathLength } from "./lasso.js"
-import { createMixer, PART_INFO, PARTS } from "./mixer.js"
+import { createMixer, DUCK, PART_INFO, PARTS } from "./mixer.js"
 import { createLane } from "./lane.js"
 import { startRing } from "./ring/index.js"
 import { createCameraTracker } from "./camera/tracker.js"
@@ -134,12 +134,16 @@ function scoreCue(cue, kind, delta) {
   tallyEl.textContent = String(counts.perfect * 100 + counts.good * 50).padStart(4, "0")
   lane.hit(cue, kind, delta)
   if (kind === "miss") return
-  if (cue.kind === "cue") { setPart(cue.part, true); world.pose("left", "point", cue.part) }
-  if (cue.kind === "circle") { cue.parts.forEach((part) => setPart(part, true)); world.pose("left", "point", cue.parts[0]) }
+  if (cue.kind === "cue") setPart(cue.part, true)
+  if (cue.kind === "circle") {
+    cue.parts.forEach((part) => setPart(part, true))
+    world.pose("left", "circle")
+  }
   if (cue.kind === "dynamics") {
-    dynamics = cue.direction === "up" ? 1.6 : 0.7
-    setDynamics(dynamics)
-    world.pose("left", cue.direction)
+    const duration = cue.until === undefined
+      ? chart.beat * 3
+      : Math.max(chart.beat, cue.until - Math.max(cue.time, songSeconds()))
+    setDynamics(cue.direction === "up" ? 1.6 : 0.7, duration)
   }
 }
 
@@ -172,12 +176,12 @@ function gradeDistance(distance) {
 // A "weak" beat cleared the low trigger but not the high one: it is only taken as a beat when it
 // lands near a cue the player was due to hit, so incidental motion is dropped instead of scored.
 function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong", which = "right") {
-  if (mode === "free") return freeBeat(direction)
+  if (mode === "free") return freeBeat(direction, which)
   if (mode !== "playing" && mode !== "count-in") return
   const hand = which
   if (!direction) {
     const found = nearest(at, hand, "beat")
-    if (found && tier !== "weak") scoreCue(found.cue, gradeDistance(found.distance), found.delta)
+    if (found && tier !== "weak") scoreBeat(found, hand, gradeDistance(found.distance), at)
     else if (fromRing && tier === "strong") {
       const now = inputNow()
       unclearRun = now - unclearAt < 6 ? unclearRun + 1 : 1
@@ -188,7 +192,7 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
     return
   }
   const found = nearest(at, hand, "beat")
-  world.pose(hand === "left" ? "left" : "right", direction)
+  world.pose(hand, "beat", direction)
   if (tier === "weak" && !(found && found.distance <= GOOD * 2)) return
   if (!found) return
   if (fromRing && found.cue.direction === direction && found.distance <= GOOD) {
@@ -198,24 +202,42 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
   let kind = gradeDistance(found.distance)
   // A wrong direction still counts when the time is right; it just cannot be Perfect.
   if (found.cue.direction && found.cue.direction !== direction && kind === "perfect") kind = "good"
+  scoreBeat(found, hand, kind, at)
+}
+
+function scoreBeat(found, hand, kind, at) {
+  if (kind !== "miss") palmQuietUntil[hand] = at + 0.5
   if (found.cue.hand === "both") {
-    const hands = found.cue.hands || (found.cue.hands = new Set())
-    hands.add(hand)
-    if (!(hands.has("left") && hands.has("right")) && kind === "perfect") kind = "good"
+    if (kind === "miss") return
+    const hits = found.cue.hits ??= {}
+    hits[hand] ??= { kind, delta: found.delta }
+    if (!hits.left || !hits.right) return
+    kind = hits.left.kind === "perfect" && hits.right.kind === "perfect" ? "perfect" : "good"
   }
-  if (hand === "left" && !found.cue.result) palmQuietUntil = at + 0.5
   scoreCue(found.cue, kind, found.delta)
 }
 
-let palmQuietUntil = -Infinity
-function playPalm(direction, at = inputNow()) {
-  // A scored left-hand beat owns the next half second, so the same swing is not also a diminuendo.
-  if (at < palmQuietUntil) return
-  if (mode === "free") return freeNudge(direction)
+const palmQuietUntil = { left: -Infinity, right: -Infinity }
+function resetHandInput() {
+  palmQuietUntil.left = palmQuietUntil.right = -Infinity
+  ring.resetGestureState?.()
+}
+
+function playPalm(direction, at = inputNow(), hand = "left", fromRing = false) {
+  if (at < palmQuietUntil[hand]) return
+  if (mode === "free") return freeNudge(direction, hand)
   if (mode !== "playing" && mode !== "count-in") return
-  world.pose("left", direction)
-  const found = nearest(at, "left")
-  if (!found || found.cue.kind !== "dynamics" || found.cue.direction !== direction) return
+  const found = nearest(at, hand, "dynamics")
+  const matches = found && found.cue.direction === direction
+  if (matches || !fromRing) world.pose(hand, "palm", direction)
+  if (matches) scoreCue(found.cue, gradeDistance(found.distance), found.delta)
+}
+
+function playCut(at = inputNow(), hand) {
+  if (mode !== "playing" && mode !== "count-in") return
+  const found = nearest(at, hand ?? "left", "cut")
+  if (!found || found.distance > GOOD) return
+  for (const side of hand ? [hand] : ["left", "right"]) world.pose(side, "fist")
   scoreCue(found.cue, gradeDistance(found.distance), found.delta)
 }
 
@@ -223,8 +245,8 @@ function playPoint(part, at = inputNow()) {
   if (mode === "free") return freeSelect(part)
   if (!part || (mode !== "playing" && mode !== "count-in")) return
   world.pose("left", "point", part)
-  const found = nearest(at, "left")
-  if (!found || found.cue.kind !== "cue" || found.cue.part !== part) return
+  const found = nearest(at, "left", "cue")
+  if (!found || found.cue.part !== part) return
   scoreCue(found.cue, gradeDistance(found.distance), found.delta)
 }
 
@@ -242,31 +264,28 @@ function onRing(event) {
     if (event.type === "beat") {
       const heard = (swingEar || createSwingEar()).hear(performance.now() / 1000, event.peakSpeed)
       if (!heard.accept) return
-      freeBeat(event.dir || "down")
+      freeBeat(event.dir || "down", event.hand, inputNow() - event.age)
       if (Number.isFinite(heard.energy)) {
         bandEnergy = bandEnergy * 0.7 + heard.energy * 0.3
         setBandPlan(bandNext, bandEnergy)
-        const amount = Math.max(0.4, Math.min(1.6, 0.35 + bandEnergy * 0.7))
-        dynamics = amount
-        setDynamics(amount)
+        setBeatAccent(Math.max(0.85, Math.min(1.12, 1 + (bandEnergy - 1) * 0.25)))
       }
       return
     }
-    if (event.type === "fist") return freeStop()
-    if (event.hand !== "left") return
-    if (event.type === "strike") freeStart()
+    if (event.type === "fist") return freeStop(event.hand)
+    if (event.type === "strike" && event.hand === "left") freeStart()
     else if (event.type === "palm") {
-      if (calibration.ready || snapshot.directionMode === "absolute") playPalm(event.dir)
+      if (event.hand === "right" || calibration.ready || snapshot.directionMode === "absolute") {
+        playPalm(event.dir, inputNow() - event.age, event.hand, true)
+      }
       else toast("请先校准左手抬掌/压掌")
     }
     return
   }
   if (mode !== "playing" && mode !== "count-in") return
   const at = inputNow() - event.age
-  // The fist belongs to free mode, where it winds the orchestra down over the bar. In a rhythm
-  // level it was an irreversible kill switch that either hand could trip on a single spike —
-  // a sharp conducting stroke makes much the same angular jerk as a clench.
-  if (event.type === "fist") return
+  // A fist only scores at a written cutoff. It never interrupts the backing track.
+  if (event.type === "fist") return playCut(at, event.hand)
   if (event.type === "beat") {
     gestureLog.record({
       at, fused: event.dir, ring: event.ringDir, ringReason: event.ringReason, camera: event.cameraDir,
@@ -280,7 +299,7 @@ function onRing(event) {
     })
     playBeat(event.dir, at, true, event.tier, event.hand)
   }
-  else if (event.hand === "left" && event.type === "palm") playPalm(event.dir, at)
+  else if (event.type === "palm") playPalm(event.dir, at, event.hand, true)
   else if (event.hand === "left" && event.type === "strike") {
     // Without a camera the strike cannot say who is pointed at, so it answers whichever entrance is due.
     const target = chart?.entries ? aimedSection() : null
@@ -298,9 +317,6 @@ const ring = startRing({
   // Synchronous and cheap — nothing in the beat path waits for a frame.
   cameraVerdict: (hand, at) => camera.verdict(hand, at),
   onDisagreement: (entry) => cameraLog.record({ ...entry, frames: camera.framesFor(entry.hand, entry.t) }),
-  onPreview: (event) => {
-    if (mode === "playing" || mode === "count-in") world.previewRight(event.dir)
-  },
   // A reversal is only rescued from return-suppression when the chart actually wants that
   // direction then, so a slow return cannot be excused by a cue for the opposite stroke.
   cueDue: (at, direction) => {
@@ -361,6 +377,7 @@ function autoCompensate() {
 function finish() {
   if (mode === "result") return
   stopLevel()
+  world.syncBeats?.(0)
   const total = cues.length
   const percent = Math.round(((counts.perfect + counts.good * 0.5) / total) * 100)
   const stars = percent >= 90 ? 3 : percent >= 70 ? 2 : percent >= 40 ? 1 : 0
@@ -456,7 +473,7 @@ async function begin(study = lastStudy) {
   ring.clearTiming()
   // Forget whatever the hands were doing before the level: otherwise the first beat can be
   // suppressed as the return of a stroke the player made on their way to starting.
-  ring.resetGestureState?.()
+  resetHandInput()
   ring.closePanel?.()
   settings.close()
   stopLevel()
@@ -470,7 +487,6 @@ async function begin(study = lastStudy) {
   deltas = []
   ringDeltas = []
   spawned = new Set()
-  dynamics = 1
   tallyEl.textContent = "0000"
   tallyLabel.textContent = "SCORE"
   sessionTitle.textContent = study.title
@@ -482,7 +498,6 @@ async function begin(study = lastStudy) {
   hintEl.innerHTML = [
     manual("right") ? "<span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或右半屏滑动 · 打拍（右手戒指未连接）</span>" : "<span>右手戒指 · 按箭头方向和节拍挥动</span>",
     manual("left") ? "<span>点击乐手 · 声部进入</span><span><kbd>E</kbd> 左侧上划 · 渐强</span><span><kbd>D</kbd> 左侧下划 · 渐弱</span>" : "<span>左手戒指 · 向前一指进入，掌心抬 / 压 = 渐强 / 渐弱</span>",
-    "<span>握拳 · 停止</span>",
   ].join("")
   world.setLevelHands(true)
   world.resize()
@@ -498,6 +513,7 @@ async function begin(study = lastStudy) {
 async function beginPiece(piece) {
   lastStudy = piece
   ring.clearTiming()
+  resetHandInput()
   ring.closePanel?.()
   settings.close()
   stopLevel()
@@ -506,10 +522,11 @@ async function beginPiece(piece) {
   mixer.reset()
   chart = buildPieceChart(piece)
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
+  gestureLog.begin(piece, cues)
+  ringDeltas = []
   counts = { perfect: 0, good: 0, miss: 0 }
   deltas = []
   spawned = new Set()
-  dynamics = 1
   tallyEl.textContent = "0000"
   tallyLabel.textContent = "SCORE"
   sessionTitle.textContent = piece.title
@@ -518,11 +535,11 @@ async function beginPiece(piece) {
   progressEl.style.width = "0%"
   setMode("count-in")
   statusEl.textContent = "预备"
-  hintEl.innerHTML = "<span>这一段该用哪只手，谱面上会告诉你</span><span>指、圈、渐强都直接出现在乐团身上</span>"
+  hintEl.innerHTML = "<span>方向键打拍 · I/J/K/L 左手</span><span>E/D 左手抬压 · R/V 右手抬压</span><span>拖画闭合圈选声部 · G 或握拳收束</span>"
   world.setLevelHands(true)
   world.resize()
   lane.resize()
-  const clock = await startPiece(piece, {
+  const clock = await startPiece(chart, {
     onVoice: (part) => world.emit?.(part),
     onNote: (note) => world.note?.(note.part, note),
     onDone: () => { if (cues.every((cue) => cue.result)) finish() },
@@ -536,6 +553,7 @@ async function beginPiece(piece) {
 
 async function beginFree() {
   stopLevel()
+  resetHandInput()
   world.reset()
   mixer.reset()
   tempo.reset(120)
@@ -590,14 +608,14 @@ function freeSelect(part) {
 function freeLasso(list) {
   if (!list.length) return
   mixer.selectOnly(list)
-  world.pose("left", "point", list[0])
+  world.pose("left", "circle")
   toast(`圈选 · ${names(list)}`)
 }
 
 function applyGains() {
   PARTS.forEach((part) => {
     if (!mixer.parts[part].on || part === "cello" || part === "horn") return
-    setPartGain(part, mixer.gainOf(part))
+    setPartGain(part, mixer.solo && !mixer.solo.has(part) ? 1 - DUCK : 1)
   })
 }
 
@@ -645,13 +663,13 @@ function freeStart() {
   mixer.clearSelection()
 }
 
-function freeStop() {
+function freeStop(hand = "left") {
   if (ending) return
   const list = [...mixer.selected]
   if (list.length) {
     list.forEach((part) => { bandNext[part] = "off" })
     const changed = mixer.request(list, false)
-    world.pose("left", "down")
+    world.pose(hand, "fist")
     setBandPlan(bandNext, bandEnergy)
     changed.forEach((part) => queuePart(part, 0, "2m", () => {
       mixer.commit(part)
@@ -666,7 +684,7 @@ function freeStop() {
   if (!mixer.anyOn()) { toast("乐队还没开始呢"); return }
   ending = true
   mixer.request(PARTS, false)
-  world.pose("left", "down")
+  world.pose(hand, "fist")
   toast("这一句结束就谢幕")
   endFree(() => {
     PARTS.forEach((part) => mixer.commit(part))
@@ -685,17 +703,18 @@ function freeStop() {
   })
 }
 
-function freeNudge(direction) {
-  world.pose("left", direction)
+function freeNudge(direction, hand = "left") {
+  world.pose(hand, "palm", direction)
+  const duration = 60 / tempo.bpm * 4
   const list = [...mixer.selected]
   if (list.length) {
     mixer.nudge(list, direction)
-    applyGains()
+    list.forEach((part) => setPartDynamics(part, mixer.parts[part].local, duration))
     toast(`${names(list)} · ${direction === "up" ? "渐强" : "渐弱"} ${Math.round(mixer.parts[list[0]].local * 100)}%`)
     return
   }
   dynamics = Math.max(0.4, Math.min(1.6, dynamics + (direction === "up" ? 0.2 : -0.2)))
-  setDynamics(dynamics)
+  setDynamics(dynamics, duration)
   toast(`全体 · ${direction === "up" ? "渐强" : "渐弱"} ${Math.round(dynamics * 100)}%`)
 }
 
@@ -715,9 +734,10 @@ function freeSolo() {
   toast(solo ? `${bandNames([...solo])} · 这一句结束独奏` : "这一句结束回到合奏")
 }
 
-function freeBeat(direction) {
-  world.pose("right", direction || "down")
+function freeBeat(direction, hand = "right", at) {
+  world.pose(hand, "beat", direction || "down")
   if (ending) return
+  if (at !== undefined) palmQuietUntil[hand] = at + 0.5
   const bpm = tempo.tap(performance.now() / 1000)
   setTempo(bpm)
   tallyEl.textContent = String(Math.round(bpm))
@@ -777,7 +797,7 @@ function freeLoop() {
   const pending = new Map(PARTS.filter((part) => mixer.parts[part].pending || (part in bandNow && bandNow[part] !== bandNext[part])).map((part) => [part, mixer.parts[part].pending || "in"]))
   const levels = partLevels?.() || {}
   hud.update(freeView(levels))
-  world.update(beats * 60 / 120, playing, { selected: mixer.selected, pending, solo: mixer.solo, dynamics, freeHands: true })
+  world.update(beats * 60 / 120, playing, { selected: mixer.selected, pending, solo: mixer.solo, dynamics: currentDynamics() })
 }
 
 function loop() {
@@ -793,19 +813,25 @@ function loop() {
     statusEl.textContent = "演奏"
   }
   progressEl.style.width = `${Math.min(100, now / chart.duration * 100)}%`
-  beatDots.forEach((dot, i) => dot.classList.toggle("active", Math.floor(now / chart.beat) % chart.meter === i))
+  const beatStep = chart.beatStep ?? chart.beat
+  const conductingBeat = now < chart.countIn
+    ? now / chart.beat
+    : (now - chart.countIn) / beatStep
+  beatDots.forEach((dot, i) => dot.classList.toggle("active", Math.floor(conductingBeat) % chart.meter === i))
   const nextGesture = cues.find((cue) => cue.kind !== "beat" && !cue.result && now <= (cue.until ?? cue.time + GOOD))
   const leftRing = !manual("left")
   const rightRing = !manual("right")
   let hint
+  const gestureLead = (cue) => cue.kind === "cut" ? chart.beat * 2 : cue.kind === "dynamics" ? chart.beat * 1.25 : warn
   if (now < chart.countIn) hint = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
-  else if (nextGesture && nextGesture.time - now < warn) {
+  else if (nextGesture && nextGesture.time - now < gestureLead(nextGesture)) {
     if (nextGesture.kind === "cue") hint = `指${PART_INFO[nextGesture.part].name}`
     else if (nextGesture.kind === "circle") hint = `圈住${names(nextGesture.parts)}`
     else if (nextGesture.kind === "cut") hint = "收束"
     else if (nextGesture.direction === "up") hint = "渐强"
     else hint = "渐弱"
-  } else hint = rightRing ? "箭头落到判定线时，按箭头的方向打拍" : "箭头落到判定线时，按同方向打拍"
+  } else if (chart.musicEnd !== undefined && now >= chart.musicEnd) hint = "余音"
+  else hint = rightRing ? "箭头落到判定线时，按箭头的方向打拍" : "箭头落到判定线时，按同方向打拍"
   if (cueHintEl.textContent !== hint) cueHintEl.textContent = hint
   if (mode === "playing") {
     const bar = Math.min(chart.bars, Math.floor((now - chart.countIn) / (chart.meter * chart.beat)) + 1)
@@ -818,11 +844,16 @@ function loop() {
       spawned.add(index)
       if (cue.kind === "cue") world.spawn(cue)
     }
-    const grace = ((cue.hand === "right" && rightRing) || (cue.hand === "left" && leftRing) ? 0.5 : LATE_GRACE) + delay
+    const ringCue = (cue.hand !== "left" && rightRing) || (cue.hand !== "right" && leftRing)
+    const grace = (ringCue ? 0.5 : LATE_GRACE) + delay
     const openUntil = (cue.until ?? cue.time + GOOD) + grace
-    if (!cue.result && now > openUntil) scoreCue(cue, "miss")
+    if (!cue.result && now > openUntil) {
+      const single = cue.hits?.left || cue.hits?.right
+      if (single) scoreCue(cue, "good", single.delta)
+      else scoreCue(cue, "miss")
+    }
   })
-  if (now >= chart.duration && cues.every((cue) => cue.result)) finish()
+  if (now >= chart.duration && cues.every((cue) => cue.result)) return finish()
   const playing = new Set(chart.entries ? chart.entries.on : ["piano", "cello"])
   if (!chart.entries) {
     if (cues.some((cue) => cue.kind === "cue" && cue.part === "violin" && cue.result && cue.result !== "miss")) playing.add("violin")
@@ -843,17 +874,17 @@ function loop() {
   const pending = new Map()
   for (const cue of cues) {
     if (cue.result || cue.kind === "beat") continue
-    const early = cue.kind === "dynamics" ? chart.beat * 1.25 : warn
+    const early = gestureLead(cue)
     if (now < cue.time - early || now > (cue.until ?? cue.time + 0.4)) continue
     for (const part of gestureParts(cue)) pending.set(part, "in")
   }
   const soon = cues.find((cue) => {
     if (cue.result || cue.kind === "beat") return false
-    const early = cue.kind === "dynamics" ? chart.beat * 1.25 : warn
+    const early = gestureLead(cue)
     return now >= cue.time - early && now <= (cue.until ?? cue.time + 0.4)
   })
   const hand = handLift()
-  const early = soon ? (soon.kind === "dynamics" ? chart.beat * 1.25 : warn) : warn
+  const early = soon ? gestureLead(soon) : warn
   const clock = soon && soon.until ? Math.min(1, Math.max(0, (now - soon.time) / Math.max(0.001, soon.until - soon.time))) : 1
   const shownLift = !soon ? 0 : soon.direction === "down" ? (hand == null ? 1 - clock : 1 - hand) : (hand == null ? clock : hand)
   const arrive = soon ? Math.min(1, Math.max(0, (now - (soon.time - early)) / early)) : 0
@@ -870,9 +901,9 @@ function loop() {
   const aimed = aimedSection()
   const selected = new Set()
   if (aimed) selected.add(aimed)
-  const beatPhase = ((now / chart.beat) % 1 + 1) % 1
-  world.syncBeats?.(now, cues, chart.beat)
-  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine, dynamics, beatPhase, arrive })
+  const beatPhase = conductingBeat % 1
+  world.syncBeats?.(now, cues, beatStep)
+  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine, dynamics: currentDynamics(), beatPhase, arrive })
 }
 
 // In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.
@@ -921,14 +952,26 @@ window.addEventListener("keydown", (event) => {
   const beat = { ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up" }[event.key]
   if (beat) {
     event.preventDefault()
-    const upcoming = cues.find((cue) => cue.kind === "beat" && !cue.result)
-    const which = upcoming?.hand === "left" ? "left" : "right"
-    if (manual(which)) playBeat(beat, inputNow(), false, "strong", which)
+    const at = inputNow()
+    let which = "right"
+    if (mode === "playing" || mode === "count-in") {
+      const left = nearest(at, "left", "beat")
+      const right = nearest(at, "right", "beat")
+      if (left && (!right || left.distance < right.distance)) which = "left"
+    }
+    if (manual(which)) playBeat(beat, at, false, "strong", which)
   }
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
   if (key === "e" && manual("left")) playPalm("up")
   if (key === "d" && manual("left")) playPalm("down")
-  if (mode !== "free") return
+  const leftBeat = { i: "up", j: "left", k: "down", l: "right" }[key]
+  if (leftBeat && manual("left")) playBeat(leftBeat, inputNow(), false, "strong", "left")
+  if (key === "r" && manual("right")) playPalm("up", inputNow(), "right")
+  if (key === "v" && manual("right")) playPalm("down", inputNow(), "right")
+  if (mode !== "free") {
+    if (key === "g") playCut()
+    return
+  }
   const part = PARTS.find((name) => PART_INFO[name].key === key)
   if (part) freeSelect(part)
   if (key === "f") freeStart()
@@ -950,7 +993,8 @@ function local(event) {
 
 view.addEventListener("pointerdown", (event) => {
   view.setPointerCapture(event.pointerId)
-  pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: mode === "free" || chart?.entries ? [local(event)] : null }
+  const circle = chart?.entries && (mode === "playing" || mode === "count-in") && nearest(inputNow(), "left", "circle")
+  pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: mode === "free" || circle ? [local(event)] : null }
   mouseX = event.offsetX
 })
 
@@ -960,8 +1004,14 @@ function swipeDirection(dx, dy) {
 
 function swipe(fromLeft, dx, dy) {
   const direction = swipeDirection(dx, dy)
-  if (fromLeft && (direction === "up" || direction === "down")) { if (manual("left")) playPalm(direction) }
-  else if (!fromLeft && manual("right")) playBeat(direction)
+  const hand = fromLeft ? "left" : "right"
+  if (!manual(hand)) return
+  const at = inputNow()
+  if (fromLeft && (direction === "up" || direction === "down")) {
+    const beat = chart?.entries && nearest(at, hand, "beat")
+    if (!beat || beat.distance > GOOD) return playPalm(direction, at, hand)
+  }
+  if (!fromLeft || chart?.entries) playBeat(direction, at, false, "strong", hand)
 }
 
 view.addEventListener("pointermove", (event) => {
@@ -998,7 +1048,7 @@ view.addEventListener("pointerup", (event) => {
   pointer = null
   if (trail) {
     lassoPath.setAttribute("d", "")
-    if (pathLength(trail) > 60) {
+    if (Math.hypot(dx, dy) <= 36 && pathLength(trail) > 60) {
       const parts = lassoParts(trail, world.screenPositions())
       if (mode === "free") freeLasso(parts)
       else {
@@ -1025,7 +1075,7 @@ function goHome() {
   setMode("home")
 }
 
-document.querySelector("#retry").addEventListener("click", () => begin())
+document.querySelector("#retry").addEventListener("click", () => PIECES.includes(lastStudy) ? beginPiece(lastStudy) : begin())
 document.querySelector("#back").addEventListener("click", goHome)
 exitEl.addEventListener("click", goHome)
 

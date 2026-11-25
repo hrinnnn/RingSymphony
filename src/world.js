@@ -594,14 +594,8 @@ function hand(right) {
   const group = new THREE.Group()
   const skin = material(0xf0c8ad)
   const ink = material(0x3a3f58)
-  let forearm = null, cuff = null
-  if (right) {
-    rod(group, [0, -0.32, 0.16], [0, -0.07, 0.02], 0.052, ink, 0.04)
-    rod(group, [0, -0.075, 0.028], [0, -0.04, 0.012], 0.046, ivory, 0.042)
-  } else {
-    forearm = makeRod(group, 0.052, ink, 0.04)
-    cuff = makeRod(group, 0.046, ivory, 0.042)
-  }
+  const forearm = makeRod(group, 0.052, ink, 0.04)
+  const cuff = makeRod(group, 0.046, ivory, 0.042)
   oval(group, [0.011, 0.011, 0.007], gilt, right ? 0.03 : -0.03, -0.045, 0.03)
   box(group, [0.1, 0.034, 0.1], skin, 0, 0.02, -0.02)
   oval(group, [0.048, 0.03, 0.04], skin, 0, 0.016, 0.035)
@@ -930,14 +924,6 @@ export function createWorld(canvas, laneCanvas) {
   let lastFrame = performance.now() / 1000
 
   const cueRings = []
-  const ghost = new THREE.Group()
-  scene.add(ghost)
-  const ghostSkin = glow(0xe6c98a, 0.9)
-  const ghostPalm = box(ghost, [0.16, 0.035, 0.22], ghostSkin)
-  const ghostFinger = box(ghost, [0.028, 0.028, 0.16], ghostSkin, 0, 0.01, -0.16)
-  ghostPalm.castShadow = false
-  ghostFinger.castShadow = false
-  ghost.visible = false
   const band = mesh(scene, new THREE.PlaneGeometry(1.4, 1.6), glow(0xe6c98a, 0))
   band.castShadow = false
   band.receiveShadow = false
@@ -986,7 +972,6 @@ export function createWorld(canvas, laneCanvas) {
   const arrowGeo = arrowShape()
   const arrowFace = glow(0xfff6df, 1)
   const arrowRim = glow(0x6b5124, 1)
-  const arrowTrail = glow(0xe6c98a, 0.28)
   const beatRoot = new THREE.Group()
   beatRoot.visible = false
   camera.add(beatRoot)
@@ -1002,25 +987,22 @@ export function createWorld(canvas, laneCanvas) {
   hitLine.receiveShadow = false
   hitGlow.receiveShadow = false
   const BEAT_ROT = { up: 0, right: -Math.PI / 2, down: Math.PI, left: Math.PI / 2 }
-  function makeArrow(mat, edged) {
+  function makeArrow() {
     const group = new THREE.Group()
-    if (edged) {
-      const rim = mesh(group, arrowGeo, arrowRim)
-      rim.scale.setScalar(1.18)
-      rim.position.z = -0.02
-      rim.castShadow = false
-      rim.receiveShadow = false
+    const rim = mesh(group, arrowGeo, arrowRim)
+    rim.scale.setScalar(1.18)
+    rim.position.z = -0.02
+    const face = mesh(group, arrowGeo, arrowFace)
+    for (const layer of [rim, face]) {
+      layer.castShadow = false
+      layer.receiveShadow = false
     }
-    const face = mesh(group, arrowGeo, mat)
-    face.castShadow = false
-    face.receiveShadow = false
     group.visible = false
     beatRoot.add(group)
     return group
   }
-  const flyers = Array.from({ length: 12 }, () => makeArrow(arrowFace, true))
-  const trails = Array.from({ length: 12 }, () => makeArrow(arrowTrail, false))
-  const swellSign = makeArrow(arrowFace, true)
+  const flyers = Array.from({ length: 12 }, makeArrow)
+  const swellSign = makeArrow()
   swellSign.removeFromParent()
   scene.add(swellSign)
   const meter = new THREE.Group()
@@ -1045,7 +1027,7 @@ export function createWorld(canvas, laneCanvas) {
     group.rotation.z = BEAT_ROT[direction] || 0
   }
   function syncBeats(now, cues = [], beat = 0.6) {
-    for (const group of [...flyers, ...trails]) group.visible = false
+    for (const group of flyers) group.visible = false
     const lead = Math.max(0.25, beat) * 3.4
     const visible = (cues || []).filter((cue) => cue.kind === "beat" && cue.direction && cue.time - now < lead && now - cue.time < 0.3 && (!cue.result || cue.result === "miss"))
     let slot = 0
@@ -1054,7 +1036,6 @@ export function createWorld(canvas, laneCanvas) {
         if (slot >= flyers.length) break
         const remain = cue.time - now
         placeArrow(flyers[slot], hand, remain, lead, cue.direction, 1.15)
-        placeArrow(trails[slot], hand, remain + lead * 0.16, lead, cue.direction, 0.7)
         slot += 1
       }
     }
@@ -1164,7 +1145,13 @@ export function createWorld(canvas, laneCanvas) {
   function reset() {
     cueRings.forEach(entry => entry.rings.forEach(remove)); cueRings.length = 0
     notes.forEach(note => { note.removeFromParent(); note.material.dispose() }); notes.length = 0
-    handStates.forEach(state => { state.until = 0; state.pose = 'rest'; state.preview = false })
+    handStates.forEach((state, index) => {
+      state.until = 0
+      state.pose = 'rest'
+      const item = index ? right : left
+      item.position.copy(rests[index])
+      item.rotation.set(index ? 0 : 0.45, 0, 0)
+    })
     syncBeats(0, [], 1)
     swellSign.visible = false
     meter.visible = false
@@ -1215,85 +1202,65 @@ export function createWorld(canvas, laneCanvas) {
       const state = handStates[index], active = t < state.until
       const rest = rests[index].clone()
       const age = t - (state.from || 0)
-      const u = age / (index ? 0.46 : 0.9)
-      let rx = index ? 0 : 0.45, ry = 0, rz = 0
-      const free = Boolean(sections.freeHands)
-      if (!active && free) {
-        if (index) {
-          const beat = ((seconds / 0.5) % 4 + 4) % 4
-          const glide = beat - Math.floor(beat)
-          const shaped = glide * glide * (3 - 2 * glide)
-          const corners = [[0, 0.07], [0, -0.12], [-0.16, -0.03], [0.16, 0.05], [0, 0.07]]
-          const slot = Math.floor(beat)
-          const from = corners[slot]
-          const to = corners[slot + 1]
-          rest.x += from[0] + (to[0] - from[0]) * shaped
-          rest.y += from[1] + (to[1] - from[1]) * shaped
-          rz = (to[0] - from[0]) * 1.4
-          rx = -0.2
+      const gesture = active ? state.pose : "rest"
+      const u = active ? clamp01(age / (state.until - state.from)) : 0
+      const direction = state.direction
+      let rz = 0
+
+      if (gesture === "beat") {
+        const stroke = ictus(u)
+        if (direction === "down" || direction === "up") {
+          rest.y += (direction === "up" ? 1 : -1) * 0.22 * stroke
         } else {
-          rest.x += Math.sin(seconds * 0.85) * 0.08
-          rest.y += Math.sin(seconds * 0.55 + 0.6) * 0.04
+          const side = direction === "right" ? 1 : -1
+          rest.x += side * 0.24 * stroke
+          rz = -side * 0.42 * stroke
         }
-      } else if (!active && !levelHands) rest.y += Math.sin(t * 1.6 + index) * 0.01
-      // Beats move the hand strictly in the screen plane (up / down / left / right), never toward or away from the player.
-      if (active && index) {
-        const a = ictus(u)
-        const flick = Math.sin(Math.pow(clamp01(u), 0.22) * Math.PI)
-        const reach = free ? 1.45 : 1
-        if (state.pose === "down") { rest.y -= 0.22 * a * reach }
-        else if (state.pose === "up") { rest.y += 0.22 * a * reach }
-        else if (state.pose === "left") { rest.x -= 0.3 * a * reach; rz = 0.55 * flick }
-        else if (state.pose === "right") { rest.x += 0.3 * a * reach; rz = -0.55 * flick }
-      } else if (active) {
-        const dynamics = state.pose === "up" || state.pose === "down"
-        const a = dynamics
-          ? smooth(age / 0.85) * (1 - smooth((age - 1.05) / 0.85))
-          : smooth(age / 0.2) * (1 - smooth((age - 0.55) / 0.35))
-        if (state.pose === "up") { rest.y += 0.17 * a; if (free) rest.x += 0.05 * a }
-        else if (state.pose === "down") { rest.y -= 0.12 * a; if (free) rest.x -= 0.04 * a }
-        else if (state.pose === "point") {
-          rest.y += 0.06 * a; rest.z -= (free ? 0.24 : 0.15) * a
-          if (state.aimX !== undefined) rest.x += (state.aimX - rest.x) * a
-        }
+      } else if (gesture === "palm") {
+        const lift = smooth(age / 0.85) * (1 - smooth((age - 1.05) / 0.85))
+        rest.y += (direction === "up" ? 0.17 : -0.12) * lift
+      } else if (gesture === "point") {
+        const reach = smooth(age / 0.2) * (1 - smooth((age - 0.55) / 0.35))
+        rest.y += 0.06 * reach
+        rest.z -= 0.17 * reach
+        if (state.aimX !== undefined) rest.x += (state.aimX - rest.x) * reach
+      } else if (gesture === "circle") {
+        const angle = smooth(u) * 2 * Math.PI
+        const side = index ? -1 : 1
+        rest.x += side * 0.13 * Math.sin(angle)
+        rest.y += 0.12 * (1 - Math.cos(angle))
+        rz = side * 0.22 * Math.sin(angle)
+      } else if (gesture === "fist") {
+        const close = smooth(age / 0.16) * (1 - smooth((age - 0.48) / 0.32))
+        rest.y += 0.07 * close
+        rz = (index ? -1 : 1) * 0.28 * close
       }
-      item.position.lerp(rest, index ? 0.5 : 0.28)
-      item.rotation.x = THREE.MathUtils.lerp(item.rotation.x, rx, 0.32)
-      item.rotation.y = THREE.MathUtils.lerp(item.rotation.y, ry, 0.32)
+
+      item.position.lerp(rest, index ? 0.5 : 0.4)
       item.rotation.z = THREE.MathUtils.lerp(item.rotation.z, rz, 0.32)
-      const poseName = active ? state.pose : "rest"
-      if (!index) {
-        const anchor = new THREE.Vector3(freeRests[0].x - 0.03, freeRests[0].y * Math.max(1, 1.4 / camera.aspect) - 0.42, freeRests[0].z + 0.16)
-          .sub(item.position).applyQuaternion(item.quaternion.clone().invert())
-        const wrist = new THREE.Vector3(0, -0.04, 0.012)
-        const cuffStart = wrist.clone().lerp(anchor, 0.1)
-        setRod(item.userData.forearm, anchor.toArray(), cuffStart.toArray())
-        setRod(item.userData.cuff, cuffStart.toArray(), wrist.toArray())
-        const table = {
-          rest: { curl: -0.12, spread: 0.04, thumb: -0.4 },
-          up: { curl: -0.12, spread: 0.04, thumb: -0.4 },
-          down: { curl: -0.12, spread: 0.04, thumb: -0.4 },
-          point: { curl: -1.05, spread: 0.03, thumb: -0.65, indexCurl: -0.08 },
-        }
-        const spec = table[poseName] || table.rest
-        item.userData.fingers.forEach((finger, i) => {
-          const curl = poseName === "point" && i === 0 ? spec.indexCurl : spec.curl
-          finger.rotation.x = THREE.MathUtils.lerp(finger.rotation.x, curl, 0.3)
-          finger.rotation.y = THREE.MathUtils.lerp(finger.rotation.y, (i - 1.5) * spec.spread, 0.3)
-          finger.userData.mid.rotation.x = Math.min(0, finger.rotation.x) * 0.85
-        })
-        item.userData.thumb.rotation.x = THREE.MathUtils.lerp(item.userData.thumb.rotation.x, spec.thumb, 0.3)
-      } else {
-        const squeeze = active ? ictus(u) * 0.22 : 0
-        item.userData.fingers.forEach((finger) => {
-          const curl = -1.22 - squeeze
-          finger.rotation.x = THREE.MathUtils.lerp(finger.rotation.x, curl, 0.35)
-          finger.userData.mid.rotation.x = Math.min(0, curl) * 0.9
-        })
-        if (item.userData.batonLag) {
-          item.userData.batonLag.rotation.z = THREE.MathUtils.lerp(item.userData.batonLag.rotation.z, -rz * 0.45, 0.14)
-          item.userData.batonLag.rotation.x = THREE.MathUtils.lerp(item.userData.batonLag.rotation.x, -rx * 0.2, 0.14)
-        }
+      const base = rests[index]
+      const anchor = new THREE.Vector3(base.x + (index ? 0.03 : -0.03), base.y - (index ? 0.32 : 0.42), base.z + 0.16)
+        .sub(item.position).applyQuaternion(item.quaternion.clone().invert())
+      const wrist = new THREE.Vector3(0, -0.04, 0.012)
+      const cuffStart = wrist.clone().lerp(anchor, 0.1)
+      setRod(item.userData.forearm, anchor.toArray(), cuffStart.toArray())
+      setRod(item.userData.cuff, cuffStart.toArray(), wrist.toArray())
+
+      const pointing = gesture === "point" || gesture === "circle"
+      const grip = index ? -1.22 : -0.12
+      const curl = gesture === "fist" ? -1.65 : pointing ? -1.05 : grip
+      const spread = index ? 0 : 0.04
+      item.userData.fingers.forEach((finger, i) => {
+        const target = pointing && i === 0 ? -0.08 : curl
+        finger.rotation.x = THREE.MathUtils.lerp(finger.rotation.x, target, 0.35)
+        finger.rotation.y = THREE.MathUtils.lerp(finger.rotation.y, (i - 1.5) * spread, 0.3)
+        finger.userData.mid.rotation.x = Math.min(0, finger.rotation.x) * 0.85
+      })
+      const thumb = gesture === "fist" ? -1.15 : pointing ? -0.65 : index ? -0.85 : -0.4
+      item.userData.thumb.rotation.x = THREE.MathUtils.lerp(item.userData.thumb.rotation.x, thumb, 0.3)
+      if (item.userData.batonLag) {
+        const baton = item.userData.batonLag
+        baton.rotation.z = THREE.MathUtils.lerp(baton.rotation.z, -rz * 0.45, 0.18)
       }
     })
     const asked = sections.prompt
@@ -1306,7 +1273,6 @@ export function createWorld(canvas, laneCanvas) {
         disc.userData.ring.material.opacity = 0.95
       })
     }
-    ghost.visible = false
     const marked = new Set([...sections.pending.keys(), ...askedNames])
     const shown = []
     sectionOrder.forEach((part, index) => {
@@ -1413,29 +1379,20 @@ export function createWorld(canvas, laneCanvas) {
       return { part: person.userData.part, x: (p.x + 1) / 2 * rect.width, y: (1 - p.y) / 2 * rect.height }
     })
   }
-  function pose(which, gesture, part) {
-    const state = handStates[which === 'right' ? 1 : 0]
-    const now = performance.now() / 1000
-    if (which === 'right' && state.preview && state.pose === gesture && now < state.until) {
-      state.preview = false
-      return
-    }
-    state.preview = false
-    state.pose = gesture; state.from = now
-    state.until = now + (which === 'right' ? 0.46 : gesture === 'up' || gesture === 'down' ? 1.9 : 0.9)
+  const poseDurations = { beat: 0.30, palm: 1.9, point: 0.9, circle: 0.92, fist: 0.8 }
+  function pose(which, gesture, detail) {
+    const state = handStates[which === "right" ? 1 : 0]
+    state.pose = gesture
+    state.from = performance.now() / 1000
+    state.until = state.from + poseDurations[gesture]
+    state.direction = gesture === "beat" || gesture === "palm" ? detail : undefined
     state.aimX = undefined
-    if (part) {
+    if (gesture === "point" && detail) {
       const pool = combo.visible ? comboMembers : players
-      const person = pool.find(p => p.userData.part === part)
+      const person = pool.find(p => p.userData.part === detail)
       const position = person.position.clone().add(new THREE.Vector3(0, 1.3, 0)).project(camera)
       state.aimX = THREE.MathUtils.clamp(position.x * 0.65, -0.65, 0.45)
     }
-  }
-  function previewRight(gesture) {
-    const state = handStates[1]
-    if (state.pose === gesture && performance.now() / 1000 < state.until) return
-    pose('right', gesture)
-    state.preview = true
   }
   function pick(clientX, clientY) {
     const rect = canvas.getBoundingClientRect()
@@ -1490,5 +1447,5 @@ export function createWorld(canvas, laneCanvas) {
     }
     return best
   }
-  return { resize, update, spawn, emit, note, sectionAt, pose, previewRight, pick, reset, setLevelHands, syncBeats, screenPositions, showCombo, players }
+  return { resize, update, spawn, emit, note, sectionAt, pose, pick, reset, setLevelHands, syncBeats, screenPositions, showCombo, players }
 }
