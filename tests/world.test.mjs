@@ -40,6 +40,28 @@ for (const player of world.players) {
   assert.equal(part, player.userData.part, `Picking ${player.userData.part}`)
 }
 console.log('Camera projection and musician raycast picking: all 13 pass')
+world.showChamber(true)
+for (const [w, h] of [[1440, 900], [390, 844]]) {
+  width = w; height = h; world.resize()
+  world.update(0.3, new Set(['violin', 'flute', 'horn', 'cello', 'piano']))
+  const points = world.screenPositions()
+  assert.equal(points.length, 5)
+  for (const point of points) {
+    assert.ok(point.x > 0 && point.x < w && point.y > 0 && point.y < h, `${point.part} is framed`)
+    assert.equal(world.pick(point.x, point.y), point.part, `${point.part} can be selected independently`)
+  }
+  const chamber = scene.children.find(object => object.visible && object.children.some(child => child.userData.part === 'piano'))
+  const performers = chamber.children.filter(child => child.userData.part)
+  const piano = performers.find(player => player.userData.part === 'piano')
+  const pianoBounds = new Three.Box3().setFromObject(piano, true)
+  for (const player of performers.filter(item => item !== piano)) {
+    const bounds = new Three.Box3().setFromObject(player, true)
+    assert.ok(bounds.max.x + 0.15 < pianoBounds.min.x, `${player.userData.part} clears the piano horizontally`)
+  }
+}
+world.showChamber(false)
+width = 1440; height = 900; world.resize()
+console.log('Chamber placement: five pickable performers and clearance around the piano')
 for (const part of ['violin', 'flute']) {
   const cue = { kind: 'cue', part, time: 7 }
   world.spawn(cue); world.update(5.5, new Set())

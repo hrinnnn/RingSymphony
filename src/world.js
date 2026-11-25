@@ -628,8 +628,10 @@ export function createWorld(canvas, laneCanvas) {
     ['piano', 3.2, -5.2],
   ]
   const RISER = { violin: 0, cello: 0.16, flute: 0.4, horn: 0.55, piano: 0.55 }
+  const orchestraRisers = new THREE.Group()
+  scene.add(orchestraRisers)
   for (const [x, height, z, depth, width, color] of [[0, 0.55, -4.7, 2.4, 8.2, 0x3a2a22], [2.7, 0.16, -2.15, 1.5, 2.6, 0x4a3428]]) {
-    const riser = box(scene, [width, height, depth], material(color), x, height / 2, z)
+    const riser = box(orchestraRisers, [width, height, depth], material(color), x, height / 2, z)
       box(riser, [width + 0.02, 0.03, 0.04], glow(0xe6c98a, 0.65), 0, height / 2 - 0.01, depth / 2)
   }
   layout.forEach(([part, x, z], i) => {
@@ -658,15 +660,20 @@ export function createWorld(canvas, laneCanvas) {
   const chamber = new THREE.Group()
   chamber.visible = false
   scene.add(chamber)
+  // Give the winds a low riser and leave the grand piano on its own side of the stage.
+  const windRiserHeight = 0.18
+  const windRiser = box(chamber, [3.45, windRiserHeight, 1.65], material(0x3a2a22), -0.66, windRiserHeight / 2, -3.47)
+  box(windRiser, [3.47, 0.016, 0.03], glow(0xe6c98a, 0.52), 0, windRiserHeight / 2 - 0.009, 0.825)
   const chamberPlayers = [
-    ["violin", -1.65, -2.5],
-    ["flute", -0.64, -2.7],
-    ["horn", 0.33, -2.85],
-    ["cello", 1.36, -2.6],
-    ["piano", 2.85, -3.3],
-  ].map(([part, x, z], i) => {
+    ["violin", -2.95, -2.18, 0],
+    ["flute", -1.47, -3.87, windRiserHeight],
+    ["horn", 0.11, -3.87, windRiserHeight],
+    ["cello", 1.43, -2.23, 0],
+    ["piano", 3.72, -3.5, 0],
+  ].map(([part, x, z, y], i) => {
     const person = musician(part, x, z, i * 2 + 1)
-    person.rotation.y = part === "piano" ? -0.85 : -x * 0.14
+    person.position.y = y
+    person.rotation.y = part === "piano" ? -0.55 : Math.atan2(-x, 4.7 - z) * 0.65
     chamber.add(person)
     return person
   })
@@ -1190,6 +1197,7 @@ export function createWorld(canvas, laneCanvas) {
   }
   function showChamber(on) {
     chamber.visible = on
+    orchestraRisers.visible = !on
     players.forEach((person) => { person.visible = !on })
     halos.forEach((disc) => { disc.visible = disc.userData.chamber === on })
   }
