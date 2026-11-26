@@ -66,7 +66,6 @@ let deltas = []
 // through a different path and must not steer a correction meant for the ring pipeline.
 let ringDeltas = []
 let mode = "home"
-let spawned = new Set()
 let dynamics = 1
 let pointer = null
 let toastTimer = 0
@@ -492,7 +491,6 @@ async function begin(study = lastStudy) {
   counts = { perfect: 0, good: 0, miss: 0 }
   deltas = []
   ringDeltas = []
-  spawned = new Set()
   tallyEl.textContent = "0000"
   tallyLabel.textContent = "SCORE"
   sessionTitle.textContent = study.title
@@ -531,7 +529,6 @@ async function beginPiece(piece) {
   ringDeltas = []
   counts = { perfect: 0, good: 0, miss: 0 }
   deltas = []
-  spawned = new Set()
   tallyEl.textContent = "0000"
   tallyLabel.textContent = "SCORE"
   sessionTitle.textContent = piece.title
@@ -759,8 +756,8 @@ function loop() {
   if (now < chart.countIn) hint = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
   else if (nextGesture && nextGesture.time - now < gestureLead(nextGesture)) {
     if (nextGesture.kind === "cue") hint = `指${PART_INFO[nextGesture.part].name}`
-    else if (nextGesture.kind === "circle") hint = `圈住${names(nextGesture.parts)}`
-    else if (nextGesture.kind === "cut") hint = "收束"
+    else if (nextGesture.kind === "circle") hint = `画圈 · ${names(nextGesture.parts)}`
+    else if (nextGesture.kind === "cut") hint = "握拳 · 收束"
     else if (nextGesture.direction === "up") hint = "渐强"
     else hint = "渐弱"
   } else if (chart.musicEnd !== undefined && now >= chart.musicEnd) hint = "余音"
@@ -772,11 +769,7 @@ function loop() {
   }
   // A positive input delay judges gestures earlier, so a cue must stay open that much longer.
   const delay = Math.max(0, settings.latency)
-  cues.forEach((cue, index) => {
-    if (!spawned.has(index) && cue.time - now < warn + 0.05) {
-      spawned.add(index)
-      if (cue.kind === "cue") world.spawn(cue)
-    }
+  for (const cue of cues) {
     const ringCue = (cue.hand !== "left" && rightRing) || (cue.hand !== "right" && leftRing)
     const grace = (ringCue ? 0.5 : LATE_GRACE) + delay
     const openUntil = (cue.until ?? cue.time + GOOD) + grace
@@ -785,7 +778,7 @@ function loop() {
       if (single) scoreCue(cue, "good", single.delta)
       else scoreCue(cue, "miss")
     }
-  })
+  }
   if (now >= chart.duration && cues.every((cue) => cue.result)) return finish()
   const playing = new Set(chart.entries ? chart.entries.on : ["piano", "cello"])
   if (!chart.entries) {

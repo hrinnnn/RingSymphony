@@ -63,17 +63,14 @@ world.showChamber(false)
 width = 1440; height = 900; world.resize()
 console.log('Chamber placement: five pickable performers and clearance around the piano')
 for (const part of ['violin', 'flute']) {
-  const cue = { kind: 'cue', part, time: 7 }
-  world.spawn(cue); world.update(5.5, new Set())
-  let rings = []
-  scene.traverse(o => { if(o.userData.person) rings.push(o) })
-  assert.equal(rings.length, part === 'violin' ? 5 : 2)
-  cue.result = 'perfect'; world.update(7, new Set()); assert.ok(rings.every(r => r.parent === null))
+  world.update(5.5, new Set(), {
+    selected: new Set(), pending: new Map([[part, 'in']]), prompt: { kind: 'point', part },
+  })
+  const target = world.screenPositions().find(point => point.part === part)
+  assert.equal(world.pick(target.x, target.y), part, 'point cues leave the musician selectable')
+  assert.ok(scene.children.every(o => o.geometry?.type !== 'RingGeometry'), 'no stand-alone rings appear over the musicians')
 }
-console.log('Section cues: circles anchored to 5 violinists / 2 flutists, removed after judgement')
-for (const direction of ['up','down']) { world.spawn({kind:'dynamics', direction, time: 9}); world.update(7.5, new Set()); world.pose('left','palm',direction); world.update(8,new Set()) }
-let pageObjects = 0; scene.traverse(o => { if (o.userData.cue || o.userData.person) pageObjects++ })
-assert.equal(pageObjects, 0, 'beats and dynamics are drawn on the page overlay, not in the hall')
+for (const direction of ['up','down']) { world.pose('left','palm',direction); world.update(8,new Set()) }
 world.pose('left','point','flute'); world.update(8,new Set())
 world.pose('right','beat','down'); world.update(8,new Set(['violin','flute','cello','piano']))
 assert.ok(world.players.filter(p=>p.userData.part === 'violin').some(p=>Math.abs(p.userData.moving.position.x)>0))

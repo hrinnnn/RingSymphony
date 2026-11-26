@@ -26,7 +26,7 @@ const ringLive = new Set()
 const ringErrors = []
 const poses = []
 let screenPositions = []
-const world = { resize() {}, update() {}, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
+const world = { resize() {}, update() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
 const pageHits = []
 const lane = { resize() {}, update() {}, reset() {}, hit: (...args) => pageHits.push(args) }
 const settings = { latency: 0, close() {}, suggest(bias) { settings.bias = bias } }

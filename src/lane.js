@@ -23,18 +23,18 @@ export function laneLayout(width, height) {
   }
 }
 
-// Camera-space flight. Every direction leaves the same point deep in the hall and grows
-// as it comes toward the judgment line; left and right only separate near the line.
+// Camera-space flight. Interpolate projected positions so the two paths stay
+// separate and upcoming arrows are spaced evenly on screen.
 export function beatFlight(hand, remain, lead) {
   const p = Math.min(1.08, Math.max(0, 1 - remain / lead))
   const farZ = -6.4
   const nearZ = -1.58
   const z = farZ + (nearZ - farZ) * Math.min(1, p)
   const closeness = Math.min(1, Math.max(0, (z - farZ) / (nearZ - farZ)))
-  const spread = closeness ** 2.15
+  const depth = -z
   return {
-    x: (hand === "left" ? -0.55 : 0.52) * spread,
-    y: 0.62 * (1 - closeness ** 1.05) - 0.32,
+    x: (hand === "left" ? -0.55 : 0.52) * (0.28 + 0.72 * closeness) * depth / -nearZ,
+    y: ((1 - closeness) * 0.16 - closeness * 0.32 / -nearZ) * depth,
     z,
     scale: (0.58 / Math.abs(z)) * 1.15,
   }

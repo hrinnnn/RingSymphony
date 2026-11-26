@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RingSymphony · 双戒指采集</title>
+    <style>
+      :root { color-scheme: dark; font: 16px/1.6 system-ui, sans-serif; background: #11151d; color: #f3ead8; }
+      body { width: min(680px, calc(100% - 32px)); margin: 6vh auto; }
+      h1, h2, p { margin: 0 0 12px; }
+      form, section { border: 1px solid #4c463c; padding: clamp(16px, 4vw, 28px); background: #1a202a; margin: 16px 0; }
+      label, progress { display: block; width: 100%; }
+      select, button { font: inherit; padding: 6px 12px; border: 1px solid #827052; border-radius: 4px; }
+      select { width: 100%; margin: 4px 0 12px; background: #11151d; }
+      button { cursor: pointer; background: #edcf93; color: #231b11; font-weight: 650; }
+      button:disabled { cursor: default; opacity: .45; }
+      #phase { font-size: clamp(26px, 6vw, 42px); line-height: 1.2; }
+      #phase[data-action="true"] { color: #ffda8d; }
+      #status, #result, .muted, .motion { color: #c1cbd4; }
+      .motion { font: 13px ui-monospace, monospace; }
+      .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+      a { color: #edcf93; }
+    </style>
+  </head>
+  <body>
+    <h1>双戒指动作采集</h1>
+    <p id="status" role="status">正在连接本机戒指桥接…</p>
+    <form id="setup">
+      <label>左手戒指 <span id="left-rate" class="motion"></span><select id="left"></select></label>
+      <label>右手戒指 <span id="right-rate" class="motion"></span><select id="right"></select></label>
+      <label>本组动作 <select id="exercise"></select></label>
+      <p id="instructions"></p>
+      <button id="start" disabled>开始这一组</button>
+    </form>
+    <section aria-label="采集进度">
+      <h2 id="phase">等两枚戒指上线</h2>
+      <p id="time" class="muted"></p>
+      <progress id="progress" max="1" value="0" aria-label="本组进度"></progress>
+      <div class="actions">
+        <button id="stop" disabled>提前结束</button>
+        <button id="download" disabled>下载本组 JSON</button>
+      </div>
+      <p id="result" role="status"></p>
+    </section>
+    <a href="/">打开 RingSymphony</a>
+    <script type="module" src="./gesture-capture.js"></script>
+  </body>
+</html>

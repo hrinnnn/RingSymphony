@@ -23,13 +23,14 @@ const far = beatFlight("right", 3, 3)
 const near = beatFlight("right", 0, 3)
 assert.ok(Math.abs(far.z) > Math.abs(near.z) + 2, "a beat starts deep in the hall")
 assert.ok(near.scale > far.scale * 2, "it grows as it flies toward the line")
-assert.ok(Math.abs(far.x) < 0.08 && Math.abs(near.x) > 0.4, "it leaves the center of the hall and lands on one hand")
+const projectedX = (point) => point.x / -point.z
+assert.ok(projectedX(far) > 0.07 && projectedX(far) < projectedX(near), "the right arrow has its own track from the far end")
 const left = beatFlight("left", 0, 3)
 assert.ok(left.x < -0.4 && near.x > 0.4, "left and right land on opposite sides of the line")
 assert.deepEqual(beatFlight("right", 1.2, 3), beatFlight("right", 1.2, 3))
 for (const direction of ["up", "down", "left", "right"]) {
   assert.ok(direction)
-  assert.ok(Math.abs(beatFlight("right", 2.4, 3).x) < Math.abs(near.x), "direction does not change the flight")
+  assert.ok(projectedX(beatFlight("right", 2.4, 3)) < projectedX(near), "an approaching beat moves toward the right end of its track")
 }
 
 const layout = laneLayout(1200, 800)
