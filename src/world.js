@@ -1,6 +1,5 @@
 import * as THREE from "three"
-import { beatFlight, laneLayout, stageFovRadians } from "./lane.js"
-import { createSectionOutline } from "./section-outline.js"
+import { beatFlight, laneLayout } from "./lane.js"
 
 // All scenery, people, instruments and UI geometry are original procedural assets.
 // Classical hall: black formal wear, one restrained accent per section, gold for the conductor.
@@ -542,7 +541,7 @@ function noteTexture(color, glyph) {
   }, 128, 128)
 }
 
-export function createWorld(canvas) {
+export function createWorld(canvas, laneCanvas) {
   paper = scoreMap()
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
@@ -558,14 +557,14 @@ export function createWorld(canvas) {
   camera.position.set(0, 2.2, 4.7)
   camera.lookAt(0, 1.25, -3)
   scene.add(camera)
-  scene.add(new THREE.HemisphereLight(0xd1ddf8, 0x684732, 0.84))
-  const key = new THREE.DirectionalLight(0xffdfad, 2.75); key.position.set(-3, 7, 4)
+  scene.add(new THREE.HemisphereLight(0xd9e6ff, 0x6d4224, 0.82))
+  const key = new THREE.DirectionalLight(0xffdfad, 3.55); key.position.set(-3, 7, 4)
   key.castShadow = false
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 25 })
   key.shadow.bias = -0.001; scene.add(key)
-  const rim = new THREE.DirectionalLight(0x8baaff, 0.62); rim.position.set(4, 4, -7); scene.add(rim)
+  const rim = new THREE.DirectionalLight(0x8baaff, 1.15); rim.position.set(4, 4, -7); scene.add(rim)
   for (const x of [-4, 0, 4]) {
-    const spot = new THREE.SpotLight(0xffd3a0, 9, 17, 0.51, 0.82, 1.7)
+    const spot = new THREE.SpotLight(0xffd3a0, 30, 17, 0.51, 0.82, 1.7)
     spot.position.set(x, 6, -1); spot.target.position.set(x * 0.7, 0, -3)
     scene.add(spot, spot.target)
     oval(scene, [0.09, 0.045, 0.09], glow(0xffe9bd), x, 5.8, -1)
@@ -642,6 +641,16 @@ export function createWorld(canvas) {
     scene.add(person); players.push(person)
   })
   const left = hand(false), right = hand(true)
+  const laneDepth = 1.65
+  const laneTexture = new THREE.CanvasTexture(laneCanvas)
+  laneTexture.colorSpace = THREE.SRGBColorSpace
+  let laneWidth = laneCanvas.width, laneHeight = laneCanvas.height
+  const lanePlane = mesh(camera, new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
+    map: laneTexture, transparent: true, depthWrite: false, toneMapped: false,
+  }), 0, 0, -laneDepth)
+  lanePlane.castShadow = false
+  lanePlane.receiveShadow = false
+  lanePlane.visible = false
   const freeRests = [new THREE.Vector3(-0.26, -0.26, -0.95), new THREE.Vector3(0.4, -0.35, -0.98)]
   const rests = freeRests.map(rest => rest.clone())
   let levelHands = false
@@ -668,31 +677,56 @@ export function createWorld(canvas) {
     chamber.add(person)
     return person
   })
+  const halos = [...players, ...chamberPlayers].map((person) => {
+    const color = SECTION_COLOR[person.userData.part]
+    const disc = mesh(scene, new THREE.CircleGeometry(0.5, 40), glow(color, 0), person.position.x, person.position.y + 0.025, person.position.z)
+    disc.rotation.x = -Math.PI / 2; disc.castShadow = false; disc.receiveShadow = false
+    const ring = mesh(disc, new THREE.RingGeometry(0.5, 0.58, 48), glow(0xffffff, 0))
+    ring.castShadow = false; ring.receiveShadow = false
+    disc.userData = { halo: true, part: null, of: person.userData.part, chamber: person.parent === chamber, ring }
+    disc.visible = !disc.userData.chamber
+    disc.renderOrder = 1
+    return disc
+  })
   const noteMaps = Object.fromEntries(Object.entries(SECTION_COLOR).map(([part, color]) => [part, ['♪', '♫', '♩'].map((glyph) => noteTexture(color, glyph))]))
   const notes = []
   const noteGeo = new THREE.PlaneGeometry(0.26, 0.26)
   let lastFrame = performance.now() / 1000
 
+  const cueRings = []
+  const band = mesh(scene, new THREE.PlaneGeometry(1.4, 1.6), glow(0xe6c98a, 0))
+  band.castShadow = false
+  band.receiveShadow = false
+  band.visible = false
   const sectionOrder = Object.keys(SECTION_COLOR)
-  const sectionNotes = new Map()
-  let outlinedParts = []
-  let outlineStrength = 0
-  const orchestraBodies = Object.fromEntries(sectionOrder.map(part => [part, players.filter(player => player.userData.part === part).map(player => player.userData.body)]))
-  const chamberBodies = Object.fromEntries(chamberPlayers.map(player => [player.userData.part, [player.userData.body]]))
-  function updateSectionOutline(t, dt, playing, { prompt, selected, pending }) {
-    let targetParts = []
-    if (prompt?.kind === "point") targetParts = [prompt.part]
-    else if (prompt?.kind === "circle" && Array.isArray(prompt.parts)) targetParts = prompt.parts
-    else if (!levelHands) targetParts = selected?.size ? [...selected] : [...pending.keys()]
-    const focus = sectionOrder.filter(part => targetParts.includes(part) ||
-      (playing.has(part) && (sectionNotes.get(part) ?? -Infinity) + 0.32 > t))
-    if (focus.length) {
-      if (!focus.some(part => outlinedParts.includes(part))) outlineStrength = 0
-      outlinedParts = focus
-    }
-    const edge = focus.length ? 1.9 : 0
-    outlineStrength = THREE.MathUtils.lerp(outlineStrength, edge, 1 - Math.exp(-dt * (edge ? 12 : 6)))
-  }
+  const beacons = sectionOrder.map(() => {
+    const group = new THREE.Group()
+    const gem = mesh(group, new THREE.OctahedronGeometry(0.16, 0), glow(0xfff1cc, 1), 0, 0.22, 0)
+    const stem = mesh(group, new THREE.CylinderGeometry(0.02, 0.02, 0.55, 8), glow(0xe6c98a, 0.95), 0, -0.18, 0)
+    gem.castShadow = false
+    stem.castShadow = false
+    gem.receiveShadow = false
+    stem.receiveShadow = false
+    group.visible = false
+    scene.add(group)
+    return group
+  })
+  const shafts = sectionOrder.map(() => {
+    const shaft = mesh(scene, new THREE.CylinderGeometry(0.035, 0.09, 1, 8), glow(0xffe3a8, 0.28))
+    shaft.castShadow = false
+    shaft.receiveShadow = false
+    shaft.visible = false
+    return shaft
+  })
+  const lamps = sectionOrder.map(() => {
+    const lamp = new THREE.PointLight(0xffe3a8, 0, 5.5, 1.2)
+    scene.add(lamp)
+    return lamp
+  })
+  const arch = mesh(scene, new THREE.TorusGeometry(1, 0.055, 8, 32, Math.PI), glow(0xfff1cc, 0.96))
+  arch.castShadow = false
+  arch.receiveShadow = false
+  arch.visible = false
   function arrowShape() {
     const shape = new THREE.Shape()
     shape.moveTo(0, 0.36)
@@ -716,28 +750,6 @@ export function createWorld(canvas) {
   // A soft warm-dark shadow under the gold line, not an outline on it: it
   // seats the line on the floor without drawing a black edge of its own.
   const hitEdge = box(beatRoot, [1.72, 0.022, 0.004], glow(0x2b1d0f, 0.3), 0, -0.325, -1.588)
-  const tracks = ["left", "right"].map((hand) => {
-    const far = beatFlight(hand, 1, 1)
-    const near = beatFlight(hand, 0, 1)
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute([
-      far.x - 0.28, far.y, far.z, far.x + 0.28, far.y, far.z,
-      near.x - 0.19, near.y, near.z, near.x + 0.19, near.y, near.z,
-    ], 3))
-    geometry.setIndex([0, 2, 1, 1, 2, 3])
-    const track = mesh(beatRoot, geometry, glow(0x0a101e, 0.24))
-    track.material.depthTest = false
-    track.material.fog = false
-    track.castShadow = track.receiveShadow = false
-    track.renderOrder = 7
-    return track
-  })
-  const sectionOutline = createSectionOutline(renderer, scene, camera, tracks)
-  for (const [i, marker] of [hitEdge, hitGlow, hitLine].entries()) {
-    marker.material.depthTest = false
-    marker.material.fog = false
-    marker.renderOrder = 8 + i
-  }
   hitEdge.castShadow = false
   hitEdge.receiveShadow = false
   hitLine.castShadow = false
@@ -745,14 +757,12 @@ export function createWorld(canvas) {
   hitLine.receiveShadow = false
   hitGlow.receiveShadow = false
   const BEAT_ROT = { up: 0, right: -Math.PI / 2, down: Math.PI, left: Math.PI / 2 }
-  function makeArrow(overlay = false) {
+  function makeArrow() {
     const group = new THREE.Group()
-    const rim = mesh(group, arrowGeo, overlay ? beatRim : arrowRim)
+    const rim = mesh(group, arrowGeo, arrowRim)
     rim.scale.setScalar(1.18)
     rim.position.z = -0.02
-    const face = mesh(group, arrowGeo, overlay ? beatFace : arrowFace)
-    rim.renderOrder = 0
-    face.renderOrder = 1
+    const face = mesh(group, arrowGeo, arrowFace)
     for (const layer of [rim, face]) {
       layer.castShadow = false
       layer.receiveShadow = false
@@ -761,77 +771,41 @@ export function createWorld(canvas) {
     beatRoot.add(group)
     return group
   }
-  const beatFace = arrowFace.clone()
-  const beatRim = arrowRim.clone()
-  beatRim.color.setHex(0x493618)
-  for (const mat of [beatFace, beatRim]) {
-    mat.depthTest = false
-    mat.fog = false
-    mat.toneMapped = false
-  }
-  const flyers = Array.from({ length: 12 }, () => makeArrow(true))
+  const flyers = Array.from({ length: 12 }, makeArrow)
   const swellSign = makeArrow()
   swellSign.removeFromParent()
   scene.add(swellSign)
-  const pointCue = new THREE.Group()
-  pointCue.name = "Point cue"
-  pointCue.visible = false
-  scene.add(pointCue)
-  const pointGem = mesh(pointCue, new THREE.OctahedronGeometry(0.16), glow(0xfff1cc), 0.675, 0.21)
-  const pointShaft = mesh(pointCue, new THREE.CylinderGeometry(0.035, 0.09, 1.4, 8), glow(0xffe3a8, 0.38), 0, -1.03)
-  const pointRail = box(pointCue, [1.35, 0.09, 0.03], glow(0x3a3124, 0.92))
-  const pointFill = box(pointCue, [1.35, 0.09, 0.04], glow(0xfff1cc), 0, 0, 0.012)
-  const pointHead = mesh(pointCue, new THREE.SphereGeometry(0.09, 12, 10), glow(0xfff6df), 0, 0, 0.06)
-  for (const piece of [pointGem, pointShaft, pointRail, pointFill, pointHead]) {
+  const meter = new THREE.Group()
+  const rail = mesh(meter, new THREE.BoxGeometry(1.35, 0.09, 0.03), glow(0x3a3124, 0.92))
+  const fill = mesh(meter, new THREE.BoxGeometry(1.35, 0.09, 0.04), glow(0xfff1cc, 1), 0, 0, 0.012)
+  const head = mesh(meter, new THREE.SphereGeometry(0.09, 12, 10), glow(0xfff6df, 1))
+  for (const piece of [rail, fill, head]) {
     piece.castShadow = false
     piece.receiveShadow = false
   }
-  const pointCenter = new THREE.Vector3()
-  function updatePointCue(prompt, ensemble, t) {
-    pointCue.visible = false
-    if (prompt?.kind !== "point") return
-    const people = ensemble.filter(person => person.userData.part === prompt.part)
-    if (!people.length) return
-    pointCenter.set(0, 0, 0)
-    for (const person of people) pointCenter.add(person.position)
-    pointCenter.divideScalar(people.length)
-
-    pointCue.visible = true
-    pointCue.position.set(pointCenter.x, pointCenter.y + 2.58, pointCenter.z)
-    pointGem.position.y = 0.21 + Math.sin(t * 3) * 0.07
-    pointGem.scale.setScalar(1.5 + Math.sin(t * 4) * 0.12)
-    const arrival = clamp01(prompt.arrival ?? 0)
-    pointFill.scale.x = Math.max(0.02, arrival)
-    pointFill.position.x = -0.675 + 0.675 * pointFill.scale.x
-    pointHead.position.x = -0.675 + 1.35 * arrival
-    pointHead.scale.setScalar(arrival > 0.92 ? 1.45 : 1)
-  }
+  meter.visible = false
+  scene.add(meter)
   function beatHands(cue) {
     if (cue.hand === "both") return ["left", "right"]
     return [cue.hand === "left" ? "left" : "right"]
   }
-  let unitsPerPixel = 0.002
-  let nearArrowPixels = 85
-  function placeArrow(group, hand, remain, lead, direction, slot) {
+  function placeArrow(group, hand, remain, lead, direction, mul = 1) {
     const flight = beatFlight(hand, remain, lead)
     group.visible = true
     group.position.set(flight.x, flight.y, flight.z)
-    const progress = clamp01(1 - remain / lead)
-    const size = nearArrowPixels * (0.45 + 0.55 * progress)
-    group.scale.setScalar(unitsPerPixel * -flight.z * size / 0.66)
-    group.renderOrder = 40 - slot
+    group.scale.setScalar(Math.max(0.18, flight.scale * mul))
     group.rotation.z = BEAT_ROT[direction] || 0
   }
   function syncBeats(now, cues = [], beat = 0.6) {
     for (const group of flyers) group.visible = false
-    const lead = Math.max(0.25, beat) * 2.75
+    const lead = Math.max(0.25, beat) * 3.4
     const visible = (cues || []).filter((cue) => cue.kind === "beat" && cue.direction && cue.time - now < lead && now - cue.time < 0.3 && (!cue.result || cue.result === "miss"))
     let slot = 0
     for (const cue of visible) {
       for (const hand of beatHands(cue)) {
         if (slot >= flyers.length) break
         const remain = cue.time - now
-        placeArrow(flyers[slot], hand, remain, lead, cue.direction, slot)
+        placeArrow(flyers[slot], hand, remain, lead, cue.direction, 1.15)
         slot += 1
       }
     }
@@ -863,15 +837,12 @@ export function createWorld(canvas) {
     const rect = canvas.getBoundingClientRect()
     if (!rect.width || !rect.height) return
     renderer.setSize(rect.width, rect.height, false)
-    sectionOutline.resize(rect.width, rect.height)
     camera.aspect = rect.width / rect.height
     // Keep the full orchestra in portrait layouts too.
-    const fov = stageFovRadians(camera.aspect)
-    const halfFovTangent = Math.tan(fov / 2)
-    camera.fov = THREE.MathUtils.radToDeg(fov)
+    camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(53 / 2)) * Math.max(1, 1.4 / camera.aspect)))
     camera.updateProjectionMatrix()
-    unitsPerPixel = 2 * halfFovTangent / rect.height
-    nearArrowPixels = THREE.MathUtils.clamp(Math.min(rect.width, rect.height) * 0.105, 50, 90)
+    const planeHeight = 2 * laneDepth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+    lanePlane.scale.set(planeHeight * camera.aspect, planeHeight, 1)
     rests.forEach((rest, index) => {
       rest.copy(freeRests[index])
       if (!levelHands) {
@@ -881,10 +852,25 @@ export function createWorld(canvas) {
       const target = laneLayout(rect.width, rect.height)[index ? "right" : "left"].target
       const palm = new THREE.Vector3(0, 0.02, -0.02).applyAxisAngle(new THREE.Vector3(1, 0, 0), index ? 0 : 0.45)
       const depth = -(rest.z + palm.z)
-      const halfHeight = halfFovTangent * depth
+      const halfHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * depth
       rest.x = (target.x / rect.width * 2 - 1) * halfHeight * camera.aspect - palm.x
       rest.y = (1 - (target.y + rect.height * 0.1) / rect.height * 2) * halfHeight - palm.y
     })
+  }
+  // The lane canvas is composited on a plane behind the hands; the hall marks who is due to enter.
+  function spawn(cue) {
+    if (cue.kind !== 'cue') return
+    const people = players.filter(p => p.userData.part === cue.part)
+    const rings = people.map(person => {
+      const ring = mesh(scene, new THREE.RingGeometry(0.24, 0.31, 64), glow(SECTION_COLOR[cue.part]))
+      mesh(ring, new THREE.RingGeometry(0.315, 0.34, 64), glow(0xffffff, 0.9))
+      const center = new THREE.Vector3(); person.getWorldPosition(center)
+      ring.position.copy(center).add(new THREE.Vector3(0, 1.42, 0.12))
+      ring.lookAt(camera.position)
+      ring.userData = { person }
+      return ring
+    })
+    cueRings.push({ cue, rings })
   }
   const pitchTextures = new Map()
   function pitchTexture(pitch) {
@@ -919,10 +905,15 @@ export function createWorld(canvas) {
     note.userData = { age: 0, sway: Math.random() * 6, drift: (Math.random() - 0.5) * 0.12 }
     notes.push(note)
   }
+  function remove(group) {
+    group.removeFromParent()
+    group.traverse(obj => {
+      if (obj.geometry) obj.geometry.dispose()
+      if (obj.material) obj.material.dispose()
+    })
+  }
   function reset() {
-    sectionNotes.clear()
-    outlinedParts = []
-    outlineStrength = 0
+    cueRings.forEach(entry => entry.rings.forEach(remove)); cueRings.length = 0
     notes.forEach(note => { note.removeFromParent(); note.material.dispose() }); notes.length = 0
     handStates.forEach((state, index) => {
       state.until = 0
@@ -933,17 +924,38 @@ export function createWorld(canvas) {
     })
     syncBeats(0, [], 1)
     swellSign.visible = false
-    pointCue.visible = false
+    meter.visible = false
   }
-  const NO_SECTIONS = { pending: new Map() }
+  const NO_SECTIONS = { selected: new Set(), pending: new Map(), solo: null }
   function update(seconds, playing, sections = NO_SECTIONS) {
     const t = performance.now() / 1000
     const dt = Math.min(0.1, Math.max(0, t - lastFrame)); lastFrame = t
-    const ensemble = chamber.visible ? chamberPlayers : players
-    animatePlayers(ensemble, seconds, playing, sections, t)
-    updateSectionOutline(t, dt, playing, sections)
-    const asked = sections.prompt
-    updatePointCue(asked, ensemble, t)
+    animatePlayers(chamber.visible ? chamberPlayers : players, seconds, playing, sections, t)
+    for (const part of Object.keys(suits)) {
+      const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
+      const energy = (mood - 0.55) / 1.05
+      const phase = sections.beatPhase ?? 0
+      const pulse = Math.exp(-phase * 6)
+      const living = playing.has(part) ? 0.22 + energy * 0.5 + pulse * 0.28 : 0
+      const lit = sections.pending.has(part) ? 1.15 : sections.selected.has(part) ? Math.max(0.45, living) : living
+      suits[part].coat.emissive.copy(suits[part].color).multiplyScalar(lit)
+      suits[part].deep.emissive.copy(suits[part].color).multiplyScalar(lit * 0.85)
+      suits[part].pants.emissive.copy(suits[part].color).multiplyScalar(lit * 0.65)
+    }
+    halos.forEach((disc) => {
+      const part = disc.userData.of
+      const selected = sections.selected.has(part)
+      const pending = sections.pending.has(part)
+      const soloing = sections.solo?.has(part)
+      const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
+      const energy = (mood - 0.55) / 1.05
+      const pulse = Math.exp(-(sections.beatPhase ?? 0) * 6)
+      const living = playing.has(part) ? 0.2 + energy * 0.38 + pulse * 0.22 : 0
+      const target = selected ? Math.max(0.55, living) : pending ? 0.85 : soloing ? 0.4 : living
+      disc.material.opacity = THREE.MathUtils.lerp(disc.material.opacity, target, 0.25)
+      disc.userData.ring.material.opacity = selected || pending ? 1 : soloing ? 0.6 : playing.has(part) ? 0.25 + energy * 0.35 : 0
+      disc.scale.setScalar(pending ? 1.6 : playing.has(part) ? 1 + pulse * 0.08 : 1)
+    })
     for (let i = notes.length - 1; i >= 0; i--) {
       const note = notes[i], data = note.userData
       data.age += dt
@@ -1020,20 +1032,114 @@ export function createWorld(canvas) {
         baton.rotation.z = THREE.MathUtils.lerp(baton.rotation.z, -rz * 0.45, 0.18)
       }
     })
-    const targets = asked?.kind === "swell"
-      ? ensemble.filter(person => asked.parts === "all" || asked.parts?.includes(person.userData.part))
-      : []
-    if (targets.length) {
+    const asked = sections.prompt
+    const askedNames = asked ? (asked.parts === "all" ? Object.keys(SECTION_COLOR) : [].concat(asked.part || asked.parts || [])) : []
+    if (asked) {
+      halos.forEach((disc) => {
+        if (!askedNames.includes(disc.userData.of)) return
+        const lifted = asked.kind === "swell" ? 0.2 + (asked.lift ?? asked.progress ?? 0) * 0.55 : 0.72
+        disc.material.opacity = Math.max(disc.material.opacity, lifted)
+        disc.userData.ring.material.opacity = 0.95
+      })
+    }
+    const marked = new Set([...sections.pending.keys(), ...askedNames])
+    const shown = []
+    const ensemble = chamber.visible ? chamberPlayers : players
+    sectionOrder.forEach((part, index) => {
+      const beacon = beacons[index]
+      const shaft = shafts[index]
+      const lamp = lamps[index]
+      const people = marked.has(part) ? ensemble.filter((person) => person.userData.part === part) : []
+      if (!people.length) {
+        beacon.visible = false
+        shaft.visible = false
+        const crew = playing.has(part) ? ensemble.filter((person) => person.userData.part === part) : []
+        if (!crew.length) { lamp.intensity = 0; return }
+        const spot = crew.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / crew.length)
+        const mood = Math.min(1.6, Math.max(0.55, sections.dynamics ?? 1))
+        const pulse = Math.exp(-(sections.beatPhase ?? 0) * 6)
+        lamp.intensity = 3 + ((mood - 0.55) / 1.05) * 8 + pulse * 5
+        lamp.position.set(spot.x, spot.y + 1.45, spot.z + 0.3)
+        return
+      }
+      const center = people.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / people.length)
+      const swelling = asked?.kind === "swell"
+      lamp.intensity = asked?.kind === "cut" ? 5 : 24
+      lamp.position.set(center.x, center.y + 1.5, center.z + 0.35)
+      if (swelling) {
+        beacon.visible = false
+        shaft.visible = false
+      } else {
+        beacon.visible = true
+        beacon.position.set(center.x, center.y + 2.35 + Math.sin(t * 3 + index) * 0.07, center.z)
+        beacon.rotation.x = asked?.kind === "cut" ? Math.PI : 0
+        beacon.scale.setScalar(1.5 + Math.sin(t * 4 + index) * 0.12)
+        shaft.visible = asked?.kind !== "cut"
+        shaft.scale.set(1, 1.4, 1)
+        shaft.position.set(center.x, center.y + 1.55, center.z)
+      }
+      shown.push(center.clone())
+    })
+    if (asked?.kind === "circle" && shown.length >= 2) {
+      const left = shown.reduce((best, spot) => spot.x < best.x ? spot : best)
+      const right = shown.reduce((best, spot) => spot.x > best.x ? spot : best)
+      const span = Math.max(0.8, right.x - left.x)
+      arch.visible = true
+      arch.position.set((left.x + right.x) / 2, Math.max(left.y, right.y) + 2.65, (left.z + right.z) / 2)
+      arch.scale.set(span / 2, span * 0.22, 1)
+      arch.rotation.set(0, 0, 0)
+    } else arch.visible = false
+    const arrive = Math.min(1, Math.max(0, sections.arrive ?? 0))
+    if (asked && shown.length) {
+      const center = shown.reduce((sum, spot) => sum.add(spot), new THREE.Vector3()).multiplyScalar(1 / shown.length)
+      meter.visible = true
+      meter.position.set(center.x, center.y + 2.85, center.z)
+      fill.scale.x = Math.max(0.02, arrive)
+      fill.position.x = -0.675 + 0.675 * arrive
+      head.position.set(-0.675 + 1.35 * arrive, 0, 0.06)
+      head.scale.setScalar(arrive > 0.92 ? 1.45 : 1)
+      if (shown.length === 1) {
+        const only = sectionOrder.findIndex((part) => marked.has(part))
+        if (only >= 0 && beacons[only].visible) {
+          beacons[only].position.set(center.x + 0.675, center.y + 2.85, center.z)
+        }
+      }
+    } else meter.visible = false
+    const targets = players.filter((person) => askedNames.includes(person.userData.part))
+    if (asked?.kind === "swell" && targets.length) {
       const center = targets.reduce((sum, person) => sum.add(person.position), new THREE.Vector3()).multiplyScalar(1 / targets.length)
       const lift = Math.max(0.15, asked.lift ?? asked.progress ?? 0)
+      const column = 0.5 + lift * 2.4
+      band.visible = true
+      band.position.set(center.x, center.y + column / 2, center.z + 0.25)
+      band.scale.set(Math.max(0.9, targets.length * 0.28), column / 1.6, 1)
+      band.material.opacity = 0.34 + lift * 0.45
       swellSign.visible = true
       swellSign.rotation.set(0, 0, asked.dir === "down" ? Math.PI : 0)
-      swellSign.position.set(center.x, center.y + 1.65 + lift * 0.68, center.z + 0.75)
-      swellSign.scale.setScalar(0.65)
-    } else swellSign.visible = false
+      swellSign.position.set(center.x, center.y + 1.25 + lift * 2.2, center.z + 0.75)
+      swellSign.scale.setScalar(1.7)
+    } else {
+      band.visible = false
+      swellSign.visible = false
+    }
     if (sections.score !== undefined) paintScore(sections.score)
-    const outlineBodies = chamber.visible ? chamberBodies : orchestraBodies
-    sectionOutline.render(outlinedParts.flatMap(part => outlineBodies[part]), outlineStrength, dt)
+    for (let i = cueRings.length - 1; i >= 0; i--) {
+      const { cue, rings } = cueRings[i], remain = cue.time - seconds
+      if (remain < -0.25 || cue.result) { rings.forEach(remove); cueRings.splice(i, 1); continue }
+      rings.forEach(ring => {
+        ring.scale.setScalar(1 + Math.sin(t * 7) * 0.08)
+        ring.material.opacity = 0.18 + Math.sin(t * 7) * 0.06
+      })
+    }
+    if (lanePlane.visible) {
+      if (laneCanvas.width !== laneWidth || laneCanvas.height !== laneHeight) {
+        laneTexture.dispose()
+        laneWidth = laneCanvas.width
+        laneHeight = laneCanvas.height
+      }
+      laneTexture.needsUpdate = true
+    }
+    renderer.render(scene, camera)
   }
   function screenPositions() {
     const rect = canvas.getBoundingClientRect()
@@ -1062,6 +1168,8 @@ export function createWorld(canvas) {
     const rect = canvas.getBoundingClientRect()
     const mouse = new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1)
     const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, camera)
+    const ringHit = ray.intersectObjects(cueRings.flatMap(entry => entry.rings), false)[0]
+    if (ringHit) return ringHit.object.userData.person.userData.part
     const pool = chamber.visible ? chamberPlayers : players
     const hit = ray.intersectObjects(pool, true)[0]
     let node = hit?.object
@@ -1070,15 +1178,17 @@ export function createWorld(canvas) {
   }
   function setLevelHands(value) {
     levelHands = value
+    lanePlane.visible = value
     beatRoot.visible = value
-    if (!value) swellSign.visible = false
+    if (!value) {
+      swellSign.visible = false
+      meter.visible = false
+    }
   }
   // One bow, breath or key-press per note. `dur` is seconds, `vel` is 0..1.
   function note(part, info = {}) {
     const start = performance.now() / 1000
     const dur = Math.max(0.12, info.dur || 0.4)
-    const previousEnd = sectionNotes.get(part) ?? -Infinity
-    sectionNotes.set(part, Math.max(previousEnd, start + dur))
     const vel = Math.min(1, Math.max(0, info.vel ?? 0.6))
     const mark = (person, i) => {
       if (person.userData.part === part) person.userData.stroke = { start: start + (i % 3) * 0.03, dur, vel, pitch: info.pitch || 0 }
@@ -1089,6 +1199,7 @@ export function createWorld(canvas) {
     chamber.visible = on
     orchestraRisers.visible = !on
     players.forEach((person) => { person.visible = !on })
+    halos.forEach((disc) => { disc.visible = disc.userData.chamber === on })
   }
   // Which section a horizontal screen position is pointing at. Used by the camera hand.
   function sectionAt(clientX) {
@@ -1106,5 +1217,5 @@ export function createWorld(canvas) {
     }
     return best
   }
-  return { resize, update, emit, note, sectionAt, pose, pick, reset, setLevelHands, syncBeats, screenPositions, showChamber, players }
+  return { resize, update, spawn, emit, note, sectionAt, pose, pick, reset, setLevelHands, syncBeats, screenPositions, showChamber, players }
 }

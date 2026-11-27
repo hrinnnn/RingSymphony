@@ -1,4 +1,4 @@
-import { endFree, freeMix, partLevels, playFree, queueFreeSections, queueFreeSolo, setDynamics, setFreeExpression, setFreeSectionDynamics, setPart, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
+import { currentDynamics, endFree, freeMix, partLevels, playFree, queueFreeSections, queueFreeSolo, setDynamics, setFreeExpression, setFreeSectionDynamics, setPart, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
 import { buildChart, STUDIES } from "./chart.js"
 import { createMixerHud } from "./hud.js"
 import { createConductor, FREE_BARS, FREE_BPM, FREE_METER, FREE_SCORE } from "./free-music.js"
@@ -26,7 +26,6 @@ const levelList = document.querySelector("#level-list")
 const accuracyEl = document.querySelector("#accuracy")
 const countsEl = document.querySelector("#counts")
 const timingEl = document.querySelector("#timing")
-const timingChart = document.querySelector("#timing-chart")
 const starsEl = document.querySelector("#stars")
 const toolsEl = document.querySelector("#tools")
 const toastEl = document.querySelector("#toast")
@@ -44,7 +43,7 @@ const boundHands = captureHands && (captureHands.left || captureHands.right) && 
 let capturedRun = null
 
 const laneCanvas = document.querySelector("#lane")
-const world = createWorld(view)
+const world = createWorld(view, laneCanvas)
 const lane = createLane(laneCanvas)
 const settings = createSettings({ button: document.querySelector("#settings-btn"), panel: document.querySelector("#settings-panel") })
 const beatDots = [...document.querySelectorAll(".beat-dot")]
@@ -72,6 +71,7 @@ let deltas = []
 // through a different path and must not steer a correction meant for the ring pipeline.
 let ringDeltas = []
 let mode = "home"
+let spawned = new Set()
 let dynamics = 1
 let pointer = null
 let toastTimer = 0
@@ -115,7 +115,6 @@ function setMode(next) {
   toolsEl.hidden = next !== "free"
   exitEl.hidden = next === "home"
   if (conductEl && next !== "playing" && next !== "count-in") conductEl.hidden = true
-  if (next !== "playing" && next !== "count-in") delete cueHintEl.dataset.circle
   document.body.dataset.mode = next
   if (next === "home") { statusEl.textContent = "选关"; world.resize() }
 }
@@ -269,10 +268,7 @@ function scoreBeat(found, hand, kind, at, reason) {
   if (found.cue.hand === "both") {
     if (kind === "miss") return
     const hits = found.cue.hits ??= {}
-    if (!hits[hand]) {
-      hits[hand] = { kind, delta: found.delta, reason }
-      lane.pulse(hand, kind)
-    }
+    hits[hand] ??= { kind, delta: found.delta, reason }
     if (!hits.left || !hits.right) return
     kind = hits.left.kind === "perfect" && hits.right.kind === "perfect" ? "perfect" : "good"
     const reasons = [hits.left.reason, hits.right.reason]
@@ -437,36 +433,6 @@ function timingSummary() {
   settings.suggest(deltas.length >= 6 && Math.abs(mean) >= 15 ? mean : null)
 }
 
-function showBeatTiming() {
-  const offsets = cues
-    .filter(cue => cue.kind === "beat" && (cue.result === "perfect" || cue.result === "good"))
-    .flatMap(cue => cue.hits ? Object.values(cue.hits).map(hit => hit.delta) : [cue.delta])
-    .filter(Number.isFinite)
-  timingChart.hidden = !offsets.length
-  if (!offsets.length) return
-
-  const binMs = 50
-  const sideBins = Math.ceil(GOOD * 1000 / binMs)
-  const limit = sideBins * binMs
-  const bins = Array(sideBins * 2 + 1).fill(0)
-  for (const offset of offsets) {
-    const distance = Math.min(sideBins, Math.round(Math.abs(offset) * 1000 / binMs))
-    bins[sideBins + Math.sign(offset) * distance] += 1
-  }
-  const peak = Math.max(...bins)
-  const bars = bins.map((count, i) => {
-    const ms = (i - sideBins) * binMs
-    const side = ms < 0 ? "early" : ms > 0 ? "late" : "center"
-    return `<i class="${side}" style="height:${count / peak * 100}%" title="${ms > 0 ? "+" : ""}${ms} ms · ${count} 次"></i>`
-  }).join("")
-  timingChart.innerHTML = `<figcaption>击拍时差 <span>${offsets.length} 次命中</span></figcaption>
-    <div class="timing-bars" aria-hidden="true">${bars}</div>
-    <div class="timing-axis" aria-hidden="true"><span>偏早 −${limit} ms</span><span>0 ms</span><span>+${limit} ms 偏晚</span></div>`
-  const early = bins.slice(0, sideBins).reduce((sum, count) => sum + count, 0)
-  const late = offsets.length - early - bins[sideBins]
-  timingChart.setAttribute("aria-label", `击拍时差。偏早 ${early} 次，接近零 ${bins[sideBins]} 次，偏晚 ${late} 次。`)
-}
-
 // After a level, nudge 延迟补偿 toward the offset the player's ring beats actually showed.
 //
 // Only after a level, never during one: adjusting mid-play moves the judgement window while the
@@ -505,7 +471,6 @@ function finish() {
   accuracyEl.textContent = `${percent}%`
   countsEl.innerHTML = `<span class="perfect">Perfect ${counts.perfect}</span><span class="good">Good ${counts.good}</span><span class="miss">Miss ${counts.miss}</span>`
   timingSummary()
-  showBeatTiming()
   showGestureReport()
   autoCompensate()
   starsEl.innerHTML = [0, 1, 2].map((i) => `<i class="${i < stars ? "lit" : ""}">★</i>`).join("")
@@ -601,6 +566,7 @@ async function begin(study = lastStudy) {
   settings.close()
   stopLevel()
   world.reset()
+  spawned = new Set()
   lane.reset()
   chart = buildChart(study)
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
@@ -642,6 +608,7 @@ async function beginPiece(piece) {
   settings.close()
   stopLevel()
   world.reset()
+  spawned = new Set()
   lane.reset()
   chart = buildPieceChart(piece)
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
@@ -846,7 +813,10 @@ function freeLoop() {
       solo, ducked: Boolean(run?.solo && open.has(part) && !solo), level: levels[part] }]
   }))
   hud.update(view)
-  world.update(beats * 60 / FREE_BPM, open, { selected: freeSelection, pending, beatHz: FREE_BPM / 60 })
+  world.update(beats * 60 / FREE_BPM, open, {
+    selected: freeSelection, pending, solo: run?.solo ? new Set([run.solo]) : null, dynamics: currentDynamics(),
+    beatPhase: beats % 1, beatHz: FREE_BPM / 60,
+  })
 }
 
 function loop() {
@@ -870,21 +840,13 @@ function loop() {
   const nextGesture = cues.find((cue) => cue.kind !== "beat" && !cue.result && now <= (cue.until ?? cue.time + GOOD))
   const leftRing = !manual("left")
   const rightRing = !manual("right")
-  const inputAt = now - settings.latency
-  const circle = cues.find(cue => cue.kind === "circle" && !cue.result &&
-    now >= Math.max(chart.countIn, cue.time - chart.beat * 2) && inputAt <= cue.until)
-  const circlePhase = circle ? (heldCueOpen(circle, inputAt) ? "active" : "prepare") : ""
-  if (circlePhase) cueHintEl.dataset.circle = circlePhase
-  else delete cueHintEl.dataset.circle
   let hint
-  const gestureLead = (cue) => cue.kind === "cut" || cue.kind === "circle" ? chart.beat * 2 : cue.kind === "dynamics" ? chart.beat * 1.25 : warn
+  const gestureLead = (cue) => cue.kind === "cut" ? chart.beat * 2 : cue.kind === "dynamics" ? chart.beat * 1.25 : warn
   if (now < chart.countIn) hint = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
-  else if (circle) {
-    const instruction = `鼠标圈住${names(circle.parts)}`
-    hint = circlePhase === "active" ? instruction : `准备画圈 · ${instruction}`
-  } else if (nextGesture && nextGesture.kind !== "circle" && nextGesture.time - now < gestureLead(nextGesture)) {
+  else if (nextGesture && nextGesture.time - now < gestureLead(nextGesture)) {
     if (nextGesture.kind === "cue") hint = `指${PART_INFO[nextGesture.part].name}`
-    else if (nextGesture.kind === "cut") hint = "握拳 · 收束"
+    else if (nextGesture.kind === "circle") hint = `圈住${names(nextGesture.parts)}`
+    else if (nextGesture.kind === "cut") hint = "收束"
     else if (nextGesture.direction === "up") hint = "渐强"
     else hint = "渐弱"
   } else if (chart.musicEnd !== undefined && now >= chart.musicEnd) hint = "余音"
@@ -896,7 +858,11 @@ function loop() {
   }
   // A positive input delay judges gestures earlier, so a cue must stay open that much longer.
   const delay = Math.max(0, settings.latency)
-  for (const cue of cues) {
+  cues.forEach((cue, index) => {
+    if (!spawned.has(index) && cue.time - now < warn + 0.05) {
+      spawned.add(index)
+      if (cue.kind === "cue") world.spawn(cue)
+    }
     const ringCue = (cue.hand !== "left" && rightRing) || (cue.hand !== "right" && leftRing)
     const grace = (ringCue ? 0.5 : LATE_GRACE) + delay
     const openUntil = (cue.until ?? cue.time + GOOD) + grace
@@ -905,7 +871,7 @@ function loop() {
       if (single) scoreCue(cue, "good", single.delta, single.reason)
       else scoreCue(cue, "miss")
     }
-  }
+  })
   if (now >= chart.duration && cues.every((cue) => cue.result)) return finish()
   const playing = new Set(chart.entries ? chart.entries.on : ["piano", "cello"])
   if (!chart.entries) {
@@ -937,8 +903,10 @@ function loop() {
     return now >= cue.time - early && now <= (cue.until ?? cue.time + 0.4)
   })
   const hand = handLift()
+  const early = soon ? gestureLead(soon) : warn
   const clock = soon && soon.until ? Math.min(1, Math.max(0, (now - soon.time) / Math.max(0.001, soon.until - soon.time))) : 1
   const shownLift = !soon ? 0 : soon.direction === "down" ? (hand == null ? 1 - clock : 1 - hand) : (hand == null ? clock : hand)
+  const arrive = soon ? Math.min(1, Math.max(0, (now - (soon.time - early)) / early)) : 0
   const prompt = soon && {
     kind: soon.kind === "cue" ? "point" : soon.kind === "dynamics" ? "swell" : soon.kind,
     part: soon.part,
@@ -946,12 +914,15 @@ function loop() {
     dir: soon.direction,
     progress: clock,
     lift: shownLift,
-    arrival: soon.kind === "cue" ? 1 - (soon.time - now) / gestureLead(soon) : undefined,
   }
   const scoreLine = conductLine(now)
   lane.update(now, chart, cues)
+  const aimed = aimedSection()
+  const selected = new Set()
+  if (aimed) selected.add(aimed)
+  const beatPhase = conductingBeat % 1
   world.syncBeats?.(now, cues, beatStep)
-  world.update(now, playing, { pending, prompt, score: scoreLine })
+  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine, dynamics: currentDynamics(), beatPhase, arrive })
 }
 
 // In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.

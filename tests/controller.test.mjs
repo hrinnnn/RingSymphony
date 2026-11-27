@@ -26,9 +26,9 @@ const ringLive = new Set()
 const ringErrors = []
 const poses = []
 let screenPositions = []
-const world = { resize() {}, update() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
+const world = { resize() {}, update() {}, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
 const pageHits = []
-const lane = { resize() {}, update() {}, reset() {}, pulse() {}, hit: (...args) => pageHits.push(args) }
+const lane = { resize() {}, update() {}, reset() {}, hit: (...args) => pageHits.push(args) }
 const settings = { latency: 0, close() {}, suggest(bias) { settings.bias = bias } }
 globalThis.document = { body: makeNode(), querySelector: node, querySelectorAll: () => Array.from({length:4},makeNode), createElement: makeNode }
 globalThis.window = { addEventListener: (name,fn) => keys[name]=fn, setTimeout() {}, clearTimeout() {} }
@@ -359,12 +359,8 @@ tick(accent.time); key('ArrowDown'); key('K')
 assert.equal(pageHits.at(-1)[1], 'perfect', 'two hands complete the same accent')
 const circle = canon.cues.find(cue => cue.kind === 'circle')
 screenPositions = [{ part: 'violin', x: 25, y: 25 }, { part: 'flute', x: 75, y: 75 }]
-tick(circle.time - canon.beat)
-assert.equal(node('#cue-hint').dataset.circle, 'prepare', 'a circle previews before the mouse window opens')
-assert.match(node('#cue-hint').textContent, /准备画圈.*小提琴.*长笛/)
 tick(circle.time)
-assert.equal(node('#cue-hint').dataset.circle, 'active')
-assert.match(node('#cue-hint').textContent, /^鼠标圈住.*小提琴.*长笛/)
+assert.match(node('#cue-hint').textContent, /^圈住.*小提琴.*长笛/)
 node('#view').handlers.pointerdown({ clientX: 0, clientY: 0, offsetX: 0, pointerId: 5 })
 for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {
   node('#view').handlers.pointermove({ clientX, clientY, pointerId: 5 })
@@ -372,7 +368,7 @@ for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {
 node('#view').handlers.pointerup({ clientX: 0, clientY: 0, pointerId: 5 })
 assert.deepEqual(poses.at(-1), ['left', 'circle'], 'a level lasso animates circle selection')
 tick(circle.time + 0.02)
-assert.equal(node('#cue-hint').dataset.circle, undefined, 'the prompt clears when the lasso scores')
+assert.doesNotMatch(node('#cue-hint').textContent, /^圈住/, 'the prompt clears when the lasso scores')
 const swell = canon.cues.find(cue => cue.kind === 'dynamics')
 tick(swell.time); gesture('palm', 'right', { dir: swell.direction })
 assert.deepEqual(poses.at(-1), ['right', 'palm', 'up'], 'the right ring can answer a swell while the left hand conducts')
