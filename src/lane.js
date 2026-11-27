@@ -9,6 +9,9 @@ const GRADE = {
 const FONT = '"Segoe UI", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif'
 const clamp01 = (t) => Math.min(1, Math.max(0, t))
 const alpha = (hex, a) => `${hex}${Math.round(clamp01(a) * 255).toString(16).padStart(2, "0")}`
+const HANDS = ["left", "right"]
+const FLASH_MS = 180
+const FEEDBACK_MS = 540
 
 export function laneLayout(width, height) {
   const r = Math.max(24, Math.min(46, Math.min(width, height) * 0.058))
@@ -40,13 +43,26 @@ export function beatFlight(hand, remain, lead) {
   }
 }
 
+export function stageFovRadians(aspect) {
+  return 2 * Math.atan(Math.tan(53 * Math.PI / 360) * Math.max(1, 1.4 / aspect))
+}
+
+export function beatLandings(width, height) {
+  const pixelsPerUnit = height / (2 * Math.tan(stageFovRadians(width / height) / 2))
+  return Object.fromEntries(HANDS.map((hand) => {
+    const { x, y, z } = beatFlight(hand, 0, 1)
+    return [hand, { x: width / 2 + (x / -z) * pixelsPerUnit, y: height / 2 - (y / -z) * pixelsPerUnit }]
+  }))
+}
+
 export function createLane(canvas) {
   const g = canvas.getContext("2d")
   let width = 0
   let height = 0
   let ratio = 1
-  let layout = null
-  const fx = []
+  let landings
+  const flashes = new Map()
+  const feedback = new Map()
 
   function resize() {
     const rect = canvas.getBoundingClientRect()
@@ -56,10 +72,14 @@ export function createLane(canvas) {
     height = rect.height
     canvas.width = Math.round(width * ratio)
     canvas.height = Math.round(height * ratio)
-    layout = laneLayout(width, height)
+    landings = beatLandings(width, height)
   }
 
-  function reset() { fx.length = 0 }
+  function reset() {
+    flashes.clear()
+    feedback.clear()
+    g.clearRect(0, 0, width, height)
+  }
 
   function text(value, x, y, size, color, weight = 600, spacing = 0, outline = null, shadow = 0) {
     g.font = `${weight} ${size}px ${FONT}`
@@ -88,64 +108,68 @@ export function createLane(canvas) {
     if (spacing) g.letterSpacing = "0px"
   }
 
-  function effects(chart) {
-    const nowMs = performance.now()
-    const lit = { left: {}, right: {} }
-    for (let i = fx.length - 1; i >= 0; i -= 1) {
-      const item = fx[i]
-      const age = (nowMs - item.born) / 1000
-      if (age > 0.8) { fx.splice(i, 1); continue }
-      const lane = layout[item.cue.hand === "both" ? "right" : item.cue.hand] || layout.right
-      const { x, y } = lane.target
-      const grade = GRADE[item.kind]
-      const t = age / 0.8
-      const side = item.cue.hand === "left" ? "left" : "right"
-      if (item.cue.direction && item.kind !== "miss" && age < 0.25) lit[side][item.cue.direction] = 1
-      const radius = layout.r * (1 + t * 1.8)
-      g.lineWidth = 5 * (1 - t)
-      g.strokeStyle = alpha(grade.ink, (1 - t) * 0.5)
+  function drawReceptor(hand, nowMs) {
+    const { x, y } = landings[hand]
+    const flash = flashes.get(hand)
+    const intensity = flash ? clamp01(1 - (nowMs - flash.born) / FLASH_MS) : 0
+    g.beginPath()
+    g.moveTo(x, y - 7)
+    g.lineTo(x, y + 8)
+    g.lineWidth = 5
+    g.strokeStyle = "#1d1510"
+    g.stroke()
+    g.lineWidth = 2
+    g.strokeStyle = hand === "left" ? "#c0baa6" : "#e6cc94"
+    g.stroke()
+    if (intensity > 0) {
+      const halfWidth = 10 + 22 * (1 - intensity)
       g.beginPath()
-      g.arc(x, y, radius, 0, Math.PI * 2)
+      g.moveTo(x - halfWidth, y)
+      g.lineTo(x + halfWidth, y)
+      g.lineWidth = 1 + intensity * 3
+      g.strokeStyle = alpha(flash.color, intensity)
       g.stroke()
-      g.lineWidth = 3 * (1 - t)
-      g.strokeStyle = alpha(grade.color, 1 - t)
-      g.beginPath()
-      g.arc(x, y, radius, 0, Math.PI * 2)
-      g.stroke()
-      const lift = y - layout.r * 1.7 - t * 20
-      g.save()
-      g.globalAlpha = 1 - Math.max(0, t - 0.55) / 0.45
-      // Overshoot to 1.14 in the first 90ms, settle by 260ms, then hold.
-      const pop = t < 0.1125 ? 0.86 + (t / 0.1125) * 0.28 : t < 0.325 ? 1.14 - ((t - 0.1125) / 0.2125) * 0.14 : 1
-      g.translate(x, lift)
-      g.scale(pop, pop)
-      text(grade.text, 0, 0, 19, grade.color, 800, 3, grade.ink, 10)
-      g.restore()
-      g.save()
-      g.globalAlpha = 1 - Math.max(0, t - 0.55) / 0.45
-      if (item.timing) text(item.timing.text, x, lift + 21, 12, item.timing.color, 700, 1, "#160f06", 6)
-      g.restore()
     }
-    return lit
   }
 
-  function frame(now, chart, cues) {
+  function drawFeedback(nowMs) {
+    const offset = Math.max(42, Math.min(76, width * 0.065))
+    for (const [hand, item] of feedback) {
+      const progress = (nowMs - item.born) / FEEDBACK_MS
+      if (progress >= 1) { feedback.delete(hand); continue }
+      const target = landings[hand]
+      const x = target ? target.x + (hand === "left" ? -offset : offset) : width / 2
+      const y = landings.right.y + (target ? -26 : 28) - progress * 8
+      g.save()
+      g.globalAlpha = 1 - clamp01((progress - 0.6) / 0.4)
+      text(item.grade.text, x, y, width < 600 ? 13 : 16, item.grade.color, 800, 1, item.grade.ink, 6)
+      if (item.detail) text(item.detail, x, y + 17, 11, "#f5e4c6", 700, 0, "#160f06", 4)
+      g.restore()
+    }
+  }
+
+  function frame(now, chart) {
     if (!width) resize()
     if (!width) return
     g.setTransform(ratio, 0, 0, ratio, 0, 0)
     g.clearRect(0, 0, width, height)
     if (!chart) return
-    effects(chart)
+    const nowMs = performance.now()
+    for (const hand of HANDS) drawReceptor(hand, nowMs)
+    drawFeedback(nowMs)
+  }
+
+  function pulse(hand, kind) {
+    flashes.set(hand, { color: GRADE[kind].color, born: performance.now() })
   }
 
   // `delta` is the signed gesture error in seconds, negative = early.
-  function hit(cue, kind, delta) {
-    const sec = Math.abs(delta ?? 0)
-    const timing = kind !== "miss" && sec >= 0.025
-      ? { text: `${delta < 0 ? "偏早" : "偏晚"} ${Math.round(sec * 1000)}ms`, color: delta < 0 ? "#cfe4dc" : "#f2dcae" }
-      : null
-    fx.push({ cue, kind, timing, born: performance.now() })
+  function hit(cue, kind, delta, reason) {
+    const ms = Math.round(Math.abs(delta ?? 0) * 1000)
+    const timing = kind !== "miss" && ms >= 25 ? `${delta < 0 ? "偏早" : "偏晚"} ${ms} ms` : null
+    feedback.set(cue.hand, { grade: GRADE[kind], detail: reason || timing, born: performance.now() })
+    if (cue.kind === "beat" && cue.hand !== "both" && kind !== "miss") pulse(cue.hand, kind)
   }
 
-  return { resize, reset, update: frame, hit }
+  return { resize, reset, update: frame, hit, pulse }
 }

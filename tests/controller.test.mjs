@@ -28,7 +28,7 @@ const poses = []
 let screenPositions = []
 const world = { resize() {}, update() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
 const pageHits = []
-const lane = { resize() {}, update() {}, reset() {}, hit: (...args) => pageHits.push(args) }
+const lane = { resize() {}, update() {}, reset() {}, pulse() {}, hit: (...args) => pageHits.push(args) }
 const settings = { latency: 0, close() {}, suggest(bias) { settings.bias = bias } }
 globalThis.document = { body: makeNode(), querySelector: node, querySelectorAll: () => Array.from({length:4},makeNode), createElement: makeNode }
 globalThis.window = { addEventListener: (name,fn) => keys[name]=fn, setTimeout() {}, clearTimeout() {} }
@@ -113,6 +113,7 @@ assert.equal(audio.dynamics,1)
 tick(chart.cues[0].time+.1199); key('ArrowDown')
 tick(chart.cues[1].time+.2499); key('ArrowLeft')
 tick(chart.cues[2].time); key('ArrowLeft') // wrong direction, but the time is exact
+assert.equal(pageHits.at(-1)[3], '方向不符', 'a wrong direction has distinct feedback')
 tick(chart.duration)
 assert.equal(counts(),'Perfect 1 Good 2 Miss 33')
 assert.match(node('#timing').innerHTML, /偏晚 2/, 'the result screen counts late hits')
@@ -242,6 +243,7 @@ ringLive.add('right')
 tick(ringStudy.cues[0].time)
 gesture('beat', 'right', { dir: null })
 assert.equal(node('#tally').textContent, '0100', 'an unclear direction is judged on time alone')
+assert.equal(pageHits.at(-1)[3], '方向未识别')
 const previousErrors = ringErrors.length
 await node('#retry').handlers.click()
 ringLive.add('right')
@@ -249,6 +251,7 @@ tick(ringStudy.cues[0].time)
 gesture('beat', 'right', { dir: 'up' })
 assert.equal(ringErrors.length, previousErrors, 'a wrong-direction beat must not be used for latency compensation')
 assert.equal(node('#tally').textContent, '0050', 'a wrong direction on time is Good, not a miss')
+assert.equal(pageHits.at(-1)[3], '方向不符')
 ringLive.clear()
 await node('#back').handlers.click()
 
@@ -356,13 +359,20 @@ tick(accent.time); key('ArrowDown'); key('K')
 assert.equal(pageHits.at(-1)[1], 'perfect', 'two hands complete the same accent')
 const circle = canon.cues.find(cue => cue.kind === 'circle')
 screenPositions = [{ part: 'violin', x: 25, y: 25 }, { part: 'flute', x: 75, y: 75 }]
+tick(circle.time - canon.beat)
+assert.equal(node('#cue-hint').dataset.circle, 'prepare', 'a circle previews before the mouse window opens')
+assert.match(node('#cue-hint').textContent, /准备画圈.*小提琴.*长笛/)
 tick(circle.time)
+assert.equal(node('#cue-hint').dataset.circle, 'active')
+assert.match(node('#cue-hint').textContent, /^鼠标圈住.*小提琴.*长笛/)
 node('#view').handlers.pointerdown({ clientX: 0, clientY: 0, offsetX: 0, pointerId: 5 })
 for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {
   node('#view').handlers.pointermove({ clientX, clientY, pointerId: 5 })
 }
 node('#view').handlers.pointerup({ clientX: 0, clientY: 0, pointerId: 5 })
 assert.deepEqual(poses.at(-1), ['left', 'circle'], 'a level lasso animates circle selection')
+tick(circle.time + 0.02)
+assert.equal(node('#cue-hint').dataset.circle, undefined, 'the prompt clears when the lasso scores')
 const swell = canon.cues.find(cue => cue.kind === 'dynamics')
 tick(swell.time); gesture('palm', 'right', { dir: swell.direction })
 assert.deepEqual(poses.at(-1), ['right', 'palm', 'up'], 'the right ring can answer a swell while the left hand conducts')

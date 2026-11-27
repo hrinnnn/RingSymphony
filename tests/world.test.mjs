@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { buildChart, STUDIES } from '../src/chart.js'
 import { eventsFor } from '../src/score.js'
 import { PERFECT, GOOD } from '../src/judge.js'
-import { laneLayout, beatFlight } from '../src/lane.js'
+import { laneLayout, beatFlight, beatLandings, stageFovRadians } from '../src/lane.js'
 const noop = () => {}
 let rendered
 class TestRenderer {
@@ -17,16 +17,17 @@ class TestRenderer {
 globalThis.__THREE = { ...Three, WebGLRenderer: TestRenderer }
 globalThis.__laneLayout = laneLayout
 globalThis.__beatFlight = beatFlight
+globalThis.__stageFovRadians = stageFovRadians
 globalThis.window = { devicePixelRatio: 1 }
 globalThis.document = { createElement: () => ({ getContext: () => new Proxy({}, { get: () => noop, set: () => true }) }) }
 const source = (await readFile(new URL('../src/world.js', import.meta.url), 'utf8'))
   .replace('import * as THREE from "three"', 'const THREE = globalThis.__THREE')
-  .replace('import { beatFlight, laneLayout } from "./lane.js"', 'const laneLayout = globalThis.__laneLayout; const beatFlight = globalThis.__beatFlight')
+  .replace('import { beatFlight, laneLayout, stageFovRadians } from "./lane.js"', 'const laneLayout = globalThis.__laneLayout; const beatFlight = globalThis.__beatFlight; const stageFovRadians = globalThis.__stageFovRadians')
+  .replace('import { createSectionOutline } from "./section-outline.js"', 'const createSectionOutline = (renderer, scene, camera) => ({ resize() {}, render(objects, strength) { globalThis.__outline = { objects, strength }; renderer.render(scene, camera) } })')
 const { createWorld } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 let width = 1440, height = 900
 const canvas = { getBoundingClientRect: () => ({ width, height, left: 0, top: 0 }) }
-const laneCanvas = { width: 1440, height: 900 }
-const world = createWorld(canvas, laneCanvas)
+const world = createWorld(canvas)
 world.resize(); world.update(0, new Set())
 assert.equal(world.players.length, 13)
 const { scene, camera } = rendered
@@ -66,10 +67,19 @@ for (const part of ['violin', 'flute']) {
   world.update(5.5, new Set(), {
     selected: new Set(), pending: new Map([[part, 'in']]), prompt: { kind: 'point', part },
   })
+  assert.deepEqual(globalThis.__outline.objects, world.players.filter(player => player.userData.part === part).map(player => player.userData.body))
   const target = world.screenPositions().find(point => point.part === part)
   assert.equal(world.pick(target.x, target.y), part, 'point cues leave the musician selectable')
   assert.ok(scene.children.every(o => o.geometry?.type !== 'RingGeometry'), 'no stand-alone rings appear over the musicians')
 }
+world.update(5.5, new Set(), {
+  selected: new Set(), pending: new Map(), prompt: { kind: 'circle', parts: ['violin', 'flute'] },
+})
+assert.deepEqual(globalThis.__outline.objects, world.players.filter(player => ['violin', 'flute'].includes(player.userData.part)).map(player => player.userData.body))
+world.update(7, new Set(), {
+  selected: new Set(), pending: new Map(), prompt: { kind: 'swell', dir: 'up', parts: 'all', lift: 1 },
+})
+assert.ok(!scene.children.some(o => o.visible && o.geometry?.type === 'PlaneGeometry' && o.material.transparent && o.scale.x > 2.5), 'a swell does not add a large transparent panel')
 for (const direction of ['up','down']) { world.pose('left','palm',direction); world.update(8,new Set()) }
 world.pose('left','point','flute'); world.update(8,new Set())
 world.pose('right','beat','down'); world.update(8,new Set(['violin','flute','cello','piano']))
@@ -80,6 +90,21 @@ assert.ok(rightHand && leftHand)
 const realPerformance = globalThis.performance
 let visualTime = 1000
 globalThis.performance = { now: () => visualTime }
+world.reset()
+world.note('cello', { dur: 3 })
+world.note('piano', { dur: 3 })
+world.note('flute', { dur: 3 })
+const pointCue = { pending: new Map(), prompt: { kind: 'point', part: 'violin' } }
+visualTime += 1700
+world.update(5, new Set(['cello', 'piano']), pointCue)
+assert.deepEqual(new Set(globalThis.__outline.objects), new Set(world.players
+  .filter(player => ['violin', 'cello', 'piano'].includes(player.userData.part))
+  .map(player => player.userData.body)), 'sustained audible parts remain outlined together during a point cue')
+visualTime += 1700
+world.update(7, new Set(['cello', 'piano']), pointCue)
+assert.deepEqual(globalThis.__outline.objects, world.players
+  .filter(player => player.userData.part === 'violin')
+  .map(player => player.userData.body), 'finished notes leave only the point cue target outlined')
 const settle = () => { for (let i = 0; i < 12; i++) world.update(8, new Set()) }
 for (const [side, hand] of [['left', leftHand], ['right', rightHand]]) {
   for (const [direction, axis, sign] of [['up', 'y', 1], ['down', 'y', -1], ['left', 'x', -1], ['right', 'x', 1]]) {
@@ -99,10 +124,6 @@ assert.ok(beatRoot)
 assert.equal(beatRoot.children.filter(child => child.isGroup && child.visible).length, 1, 'one right-hand note draws exactly one arrow')
 world.setLevelHands(false)
 console.log('Both hands: all four beats move in the screen plane, with one arrow per note')
-const lanePlane = camera.children.find(child => child.material?.map?.image === laneCanvas)
-assert.ok(lanePlane && !lanePlane.visible && lanePlane.material.depthTest && !lanePlane.material.depthWrite)
-let laneDisposals = 0
-lanePlane.material.map.addEventListener('dispose', () => { laneDisposals += 1 })
 function sleeveEnds() {
   const { forearm, cuff } = leftHand.userData
   const end = (object, y) => object.localToWorld(new Three.Vector3(0, y, 0))
@@ -150,15 +171,19 @@ world.pose('left', 'point'); visualTime += 200; settle()
 assert.ok(Math.abs(leftHand.position.x - leftRest.x) < 0.02, 'an untargeted point does not retain the previous target')
 for (const [w, h] of [[1440, 900], [800, 600], [375, 667]]) {
   width = w; height = h
-  const expectedDisposals = laneDisposals + (laneCanvas.width !== w || laneCanvas.height !== h ? 1 : 0)
-  laneCanvas.width = w; laneCanvas.height = h
   world.setLevelHands(true); world.resize()
-  assert.ok(lanePlane.visible && lanePlane.position.z < leftHand.position.z && lanePlane.position.z < rightHand.position.z, 'lane is in the scene behind both hands')
   visualTime += 5000; world.reset()
   for (let i = 0; i < 50; i++) world.update(8, new Set())
-  assert.equal(laneDisposals, expectedDisposals, 'the lane texture is recreated exactly once when its dimensions change')
-  const corner = lanePlane.localToWorld(new Three.Vector3(0.5, 0.5, 0)).project(camera)
-  assert.ok(Math.abs(corner.x - 1) < 1e-8 && Math.abs(corner.y - 1) < 1e-8, 'lane plane covers the viewport after resize')
+  world.syncBeats(1, [{ kind: 'beat', time: 1, hand: 'both', direction: 'down' }], 0.6)
+  world.update(8, new Set())
+  const arrows = beatRoot.children.filter(child => child.isGroup && child.visible)
+  const landings = beatLandings(w, h)
+  for (const [index, hand] of ['left', 'right'].entries()) {
+    const arrow = arrows[index].getWorldPosition(new Three.Vector3()).project(camera)
+    const projectedX = (arrow.x + 1) / 2 * w
+    const projectedY = (1 - arrow.y) / 2 * h
+    assert.ok(Math.abs(projectedX - landings[hand].x) < 0.01 && Math.abs(projectedY - landings[hand].y) < 0.01, `${hand} judgment mark aligns with its note at ${w}x${h}`)
+  }
   const targets = laneLayout(width, height)
   for (const [hand, item] of [['left', leftHand], ['right', rightHand]]) {
     const projected = item.localToWorld(new Three.Vector3(0, 0.02, -0.02)).project(camera)
@@ -167,7 +192,7 @@ for (const [w, h] of [[1440, 900], [800, 600], [375, 667]]) {
   }
 }
 world.setLevelHands(false)
-assert.equal(lanePlane.visible, false, 'free mode hides the lane plane')
+assert.equal(beatRoot.visible, false, 'free mode hides the beat lanes')
 width = 1440; height = 900; world.resize()
 visualTime += 5000; world.reset(); settle()
 assert.ok(Math.abs(leftHand.position.x + 0.26) < 0.01 && Math.abs(rightHand.position.x - 0.4) < 0.01, 'free mode restores the original hand positions')

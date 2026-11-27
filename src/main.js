@@ -1,4 +1,4 @@
-import { currentDynamics, endFree, freeMix, partLevels, playFree, queueFreeSections, queueFreeSolo, setDynamics, setFreeExpression, setFreeSectionDynamics, setPart, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
+import { endFree, freeMix, partLevels, playFree, queueFreeSections, queueFreeSolo, setDynamics, setFreeExpression, setFreeSectionDynamics, setPart, setTempo, songSeconds, startFree, startLevel, startPiece, stopLevel, transportBeats } from "./audio.js"
 import { buildChart, STUDIES } from "./chart.js"
 import { createMixerHud } from "./hud.js"
 import { createConductor, FREE_BARS, FREE_BPM, FREE_METER, FREE_SCORE } from "./free-music.js"
@@ -26,6 +26,7 @@ const levelList = document.querySelector("#level-list")
 const accuracyEl = document.querySelector("#accuracy")
 const countsEl = document.querySelector("#counts")
 const timingEl = document.querySelector("#timing")
+const timingChart = document.querySelector("#timing-chart")
 const starsEl = document.querySelector("#stars")
 const toolsEl = document.querySelector("#tools")
 const toastEl = document.querySelector("#toast")
@@ -38,7 +39,7 @@ const reportEl = document.querySelector("#gesture-report")
 const DIR_LABEL = { up: "上", down: "下", left: "左", right: "右" }
 
 const laneCanvas = document.querySelector("#lane")
-const world = createWorld(view, laneCanvas)
+const world = createWorld(view)
 const lane = createLane(laneCanvas)
 const settings = createSettings({ button: document.querySelector("#settings-btn"), panel: document.querySelector("#settings-panel") })
 const beatDots = [...document.querySelectorAll(".beat-dot")]
@@ -109,6 +110,7 @@ function setMode(next) {
   toolsEl.hidden = next !== "free"
   exitEl.hidden = next === "home"
   if (conductEl && next !== "playing" && next !== "count-in") conductEl.hidden = true
+  if (next !== "playing" && next !== "count-in") delete cueHintEl.dataset.circle
   document.body.dataset.mode = next
   if (next === "home") { statusEl.textContent = "选关"; world.resize() }
 }
@@ -120,13 +122,16 @@ function toast(text) {
   toastTimer = window.setTimeout(() => toastEl.classList.toggle("show", false), 1600)
 }
 
-function scoreCue(cue, kind, delta) {
+function scoreCue(cue, kind, delta, reason) {
   if (cue.result) return
   cue.result = kind
   counts[kind] += 1
-  if (kind !== "miss" && delta !== undefined) deltas.push(delta)
+  if (kind !== "miss" && delta !== undefined) {
+    deltas.push(delta)
+    if (cue.kind === "beat") cue.delta = delta
+  }
   tallyEl.textContent = String(counts.perfect * 100 + counts.good * 50).padStart(4, "0")
-  lane.hit(cue, kind, delta)
+  lane.hit(cue, kind, delta, reason)
   if (kind === "miss") return
   if (cue.kind === "cue") setPart(cue.part, true)
   if (cue.kind === "circle") {
@@ -141,12 +146,16 @@ function scoreCue(cue, kind, delta) {
   }
 }
 
+function heldCueOpen(cue, at) {
+  return at >= cue.time - 0.15 && at <= cue.until
+}
+
 function nearest(now, hand, kind) {
   let best = null
   let distance = Infinity
   for (const cue of cues) {
     if (cue.result || (cue.hand !== hand && cue.hand !== "both") || (kind && cue.kind !== kind)) continue
-    const gap = cue.until ? (now < cue.time - 0.15 || now > cue.until ? Infinity : 0) : Math.abs(now - cue.time)
+    const gap = cue.until ? (heldCueOpen(cue, now) ? 0 : Infinity) : Math.abs(now - cue.time)
     if (gap < distance) {
       distance = gap
       best = cue
@@ -175,7 +184,10 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
   const hand = which
   if (!direction) {
     const found = nearest(at, hand, "beat")
-    if (found && tier !== "weak") scoreBeat(found, hand, gradeDistance(found.distance), at)
+    if (found && tier !== "weak") {
+      const kind = gradeDistance(found.distance)
+      scoreBeat(found, hand, kind, at, found.cue.direction && kind !== "miss" ? "方向未识别" : undefined)
+    }
     else if (fromRing && tier === "strong") {
       const now = inputNow()
       unclearRun = now - unclearAt < 6 ? unclearRun + 1 : 1
@@ -195,20 +207,26 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
   }
   let kind = gradeDistance(found.distance)
   // A wrong direction still counts when the time is right; it just cannot be Perfect.
-  if (found.cue.direction && found.cue.direction !== direction && kind === "perfect") kind = "good"
-  scoreBeat(found, hand, kind, at)
+  const wrongDirection = found.cue.direction && found.cue.direction !== direction
+  if (wrongDirection && kind === "perfect") kind = "good"
+  scoreBeat(found, hand, kind, at, wrongDirection && kind !== "miss" ? "方向不符" : undefined)
 }
 
-function scoreBeat(found, hand, kind, at) {
+function scoreBeat(found, hand, kind, at, reason) {
   if (kind !== "miss") palmQuietUntil[hand] = at + 0.5
   if (found.cue.hand === "both") {
     if (kind === "miss") return
     const hits = found.cue.hits ??= {}
-    hits[hand] ??= { kind, delta: found.delta }
+    if (!hits[hand]) {
+      hits[hand] = { kind, delta: found.delta, reason }
+      lane.pulse(hand, kind)
+    }
     if (!hits.left || !hits.right) return
     kind = hits.left.kind === "perfect" && hits.right.kind === "perfect" ? "perfect" : "good"
+    const reasons = [hits.left.reason, hits.right.reason]
+    reason = reasons.includes("方向不符") ? "方向不符" : reasons.find(Boolean)
   }
-  scoreCue(found.cue, kind, found.delta)
+  scoreCue(found.cue, kind, found.delta, reason)
 }
 
 const palmQuietUntil = { left: -Infinity, right: -Infinity }
@@ -353,6 +371,36 @@ function timingSummary() {
   settings.suggest(deltas.length >= 6 && Math.abs(mean) >= 15 ? mean : null)
 }
 
+function showBeatTiming() {
+  const offsets = cues
+    .filter(cue => cue.kind === "beat" && (cue.result === "perfect" || cue.result === "good"))
+    .flatMap(cue => cue.hits ? Object.values(cue.hits).map(hit => hit.delta) : [cue.delta])
+    .filter(Number.isFinite)
+  timingChart.hidden = !offsets.length
+  if (!offsets.length) return
+
+  const binMs = 50
+  const sideBins = Math.ceil(GOOD * 1000 / binMs)
+  const limit = sideBins * binMs
+  const bins = Array(sideBins * 2 + 1).fill(0)
+  for (const offset of offsets) {
+    const distance = Math.min(sideBins, Math.round(Math.abs(offset) * 1000 / binMs))
+    bins[sideBins + Math.sign(offset) * distance] += 1
+  }
+  const peak = Math.max(...bins)
+  const bars = bins.map((count, i) => {
+    const ms = (i - sideBins) * binMs
+    const side = ms < 0 ? "early" : ms > 0 ? "late" : "center"
+    return `<i class="${side}" style="height:${count / peak * 100}%" title="${ms > 0 ? "+" : ""}${ms} ms · ${count} 次"></i>`
+  }).join("")
+  timingChart.innerHTML = `<figcaption>击拍时差 <span>${offsets.length} 次命中</span></figcaption>
+    <div class="timing-bars" aria-hidden="true">${bars}</div>
+    <div class="timing-axis" aria-hidden="true"><span>偏早 −${limit} ms</span><span>0 ms</span><span>+${limit} ms 偏晚</span></div>`
+  const early = bins.slice(0, sideBins).reduce((sum, count) => sum + count, 0)
+  const late = offsets.length - early - bins[sideBins]
+  timingChart.setAttribute("aria-label", `击拍时差。偏早 ${early} 次，接近零 ${bins[sideBins]} 次，偏晚 ${late} 次。`)
+}
+
 // After a level, nudge 延迟补偿 toward the offset the player's ring beats actually showed.
 //
 // Only after a level, never during one: adjusting mid-play moves the judgement window while the
@@ -390,6 +438,7 @@ function finish() {
   accuracyEl.textContent = `${percent}%`
   countsEl.innerHTML = `<span class="perfect">Perfect ${counts.perfect}</span><span class="good">Good ${counts.good}</span><span class="miss">Miss ${counts.miss}</span>`
   timingSummary()
+  showBeatTiming()
   showGestureReport()
   autoCompensate()
   starsEl.innerHTML = [0, 1, 2].map((i) => `<i class="${i < stars ? "lit" : ""}">★</i>`).join("")
@@ -724,10 +773,7 @@ function freeLoop() {
       solo, ducked: Boolean(run?.solo && open.has(part) && !solo), level: levels[part] }]
   }))
   hud.update(view)
-  world.update(beats * 60 / FREE_BPM, open, {
-    selected: freeSelection, pending, solo: run?.solo ? new Set([run.solo]) : null, dynamics: currentDynamics(),
-    beatPhase: beats % 1, beatHz: FREE_BPM / 60,
-  })
+  world.update(beats * 60 / FREE_BPM, open, { selected: freeSelection, pending, beatHz: FREE_BPM / 60 })
 }
 
 function loop() {
@@ -751,12 +797,20 @@ function loop() {
   const nextGesture = cues.find((cue) => cue.kind !== "beat" && !cue.result && now <= (cue.until ?? cue.time + GOOD))
   const leftRing = !manual("left")
   const rightRing = !manual("right")
+  const inputAt = now - settings.latency
+  const circle = cues.find(cue => cue.kind === "circle" && !cue.result &&
+    now >= Math.max(chart.countIn, cue.time - chart.beat * 2) && inputAt <= cue.until)
+  const circlePhase = circle ? (heldCueOpen(circle, inputAt) ? "active" : "prepare") : ""
+  if (circlePhase) cueHintEl.dataset.circle = circlePhase
+  else delete cueHintEl.dataset.circle
   let hint
-  const gestureLead = (cue) => cue.kind === "cut" ? chart.beat * 2 : cue.kind === "dynamics" ? chart.beat * 1.25 : warn
+  const gestureLead = (cue) => cue.kind === "cut" || cue.kind === "circle" ? chart.beat * 2 : cue.kind === "dynamics" ? chart.beat * 1.25 : warn
   if (now < chart.countIn) hint = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
-  else if (nextGesture && nextGesture.time - now < gestureLead(nextGesture)) {
+  else if (circle) {
+    const instruction = `鼠标圈住${names(circle.parts)}`
+    hint = circlePhase === "active" ? instruction : `准备画圈 · ${instruction}`
+  } else if (nextGesture && nextGesture.kind !== "circle" && nextGesture.time - now < gestureLead(nextGesture)) {
     if (nextGesture.kind === "cue") hint = `指${PART_INFO[nextGesture.part].name}`
-    else if (nextGesture.kind === "circle") hint = `画圈 · ${names(nextGesture.parts)}`
     else if (nextGesture.kind === "cut") hint = "握拳 · 收束"
     else if (nextGesture.direction === "up") hint = "渐强"
     else hint = "渐弱"
@@ -775,7 +829,7 @@ function loop() {
     const openUntil = (cue.until ?? cue.time + GOOD) + grace
     if (!cue.result && now > openUntil) {
       const single = cue.hits?.left || cue.hits?.right
-      if (single) scoreCue(cue, "good", single.delta)
+      if (single) scoreCue(cue, "good", single.delta, single.reason)
       else scoreCue(cue, "miss")
     }
   }
@@ -810,10 +864,8 @@ function loop() {
     return now >= cue.time - early && now <= (cue.until ?? cue.time + 0.4)
   })
   const hand = handLift()
-  const early = soon ? gestureLead(soon) : warn
   const clock = soon && soon.until ? Math.min(1, Math.max(0, (now - soon.time) / Math.max(0.001, soon.until - soon.time))) : 1
   const shownLift = !soon ? 0 : soon.direction === "down" ? (hand == null ? 1 - clock : 1 - hand) : (hand == null ? clock : hand)
-  const arrive = soon ? Math.min(1, Math.max(0, (now - (soon.time - early)) / early)) : 0
   const prompt = soon && {
     kind: soon.kind === "cue" ? "point" : soon.kind === "dynamics" ? "swell" : soon.kind,
     part: soon.part,
@@ -824,12 +876,8 @@ function loop() {
   }
   const scoreLine = conductLine(now)
   lane.update(now, chart, cues)
-  const aimed = aimedSection()
-  const selected = new Set()
-  if (aimed) selected.add(aimed)
-  const beatPhase = conductingBeat % 1
   world.syncBeats?.(now, cues, beatStep)
-  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine, dynamics: currentDynamics(), beatPhase, arrive })
+  world.update(now, playing, { pending, prompt, score: scoreLine })
 }
 
 // In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.
@@ -843,7 +891,7 @@ function aimedSection() {
   return world.sectionAt?.(x) || null
 }
 
-// Camera y grows downward. A raised hand is the filled part of a swell; without a camera the band follows the clock.
+// Camera y grows downward. Normalize the hand height for the dynamics prompt.
 function handLift() {
   const seen = camera.hand?.("left")
   if (!seen) return null
