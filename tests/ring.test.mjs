@@ -153,6 +153,37 @@ console.log('Left ring: rising recordings yield mostly up, falling recordings mo
     order.forEach(address => send(hub, address, 1))
     assert.deepEqual(hub.snapshot().rings.map(r => [r.address, r.hand]), [['A', 'right'], ['B', 'left']], `order ${order}`)
   }
+
+  const bound = createRingInput({ boundHands: { left: 'B', right: 'A' }, now: () => clock, WebSocketImpl: null, storage })
+  const connected = (...devices) => bound.feed({
+    ...status, rings: status.rings.map(ring => ({ ...ring, connected: devices.includes(ring.address) })),
+  })
+  connected('Z', 'B')
+  send(bound, 'Z', 1)
+  send(bound, 'B', 1)
+  clock += 0.6
+  send(bound, 'Z', 2)
+  assert.equal(bound.live('left'), true)
+  assert.equal(bound.live('right'), false, 'another streaming ring cannot take the bound right hand')
+  connected('Z', 'B', 'A')
+  send(bound, 'A', 1)
+  bound.swap()
+  bound.setRole('B', 'right')
+  assert.deepEqual(bound.snapshot().rings.map(r => [r.address, r.hand]), [['Z', null], ['A', 'right'], ['B', 'left']])
+  connected('Z', 'B')
+  assert.equal(bound.live('right'), false)
+  assert.equal(bound.snapshot().rings.find(r => r.address === 'A').hand, 'right', 'an offline ring retains its binding')
+  connected('Z', 'B', 'A')
+  send(bound, 'A', 2)
+  assert.equal(bound.live('right'), true, 'a returning ring resumes its designated role')
+  assert.equal(JSON.parse(store.get('ringsymphony.roles.v2')).A, 'left', 'capture bindings do not write to normal game preferences')
+
+  const single = createRingInput({ boundHands: { left: 'B' }, now: () => clock, WebSocketImpl: null, storage })
+  single.feed(status)
+  send(single, 'A', 1)
+  send(single, 'B', 1)
+  assert.equal(single.live('left'), true, 'single capture uses the selected hand')
+  assert.equal(single.live('right'), false, 'the other hand stays available to manual input')
 }
 console.log('Input hub: offline rings ignored, auto left/right, swap, persisted roles and compensation, liveness, event age: pass')
 

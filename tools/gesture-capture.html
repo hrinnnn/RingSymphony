@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>RingSymphony · 双戒指采集</title>
+    <title>RingSymphony · 戒指动作采集</title>
     <style>
       :root { color-scheme: dark; font: 16px/1.6 system-ui, sans-serif; background: #11151d; color: #f3ead8; }
       body { width: min(680px, calc(100% - 32px)); margin: 6vh auto; }
@@ -17,32 +17,60 @@
       #phase { font-size: clamp(26px, 6vw, 42px); line-height: 1.2; }
       #phase[data-action="true"] { color: #ffda8d; }
       #status, #result, .muted, .motion { color: #c1cbd4; }
+      #directory { overflow-wrap: anywhere; }
       .motion { font: 13px ui-monospace, monospace; }
       .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-      a { color: #edcf93; }
+      #game-panel { position: fixed; inset: 0; display: flex; flex-direction: column; background: #11151d; }
+      #game-panel[hidden] { display: none; }
+      .game-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 16px; border-bottom: 1px solid #4c463c; }
+      #game-frame { flex: 1; width: 100%; border: 0; }
+      #save-game:empty { display: none; }
     </style>
   </head>
   <body>
-    <h1>双戒指动作采集</h1>
+    <h1>戒指动作采集</h1>
     <p id="status" role="status">正在连接本机戒指桥接…</p>
+    <p id="directory" class="muted">正在检查本机保存目录…</p>
     <form id="setup">
+      <label>录制范围
+        <select id="capture-scope">
+          <option value="both">双戒指</option>
+          <option value="left">只录左手</option>
+          <option value="right">只录右手</option>
+        </select>
+      </label>
+      <p class="muted">请手动指定左右手戒指。转一下手腕，看对应设备的角速度数值确认。</p>
       <label>左手戒指 <span id="left-rate" class="motion"></span><select id="left"></select></label>
       <label>右手戒指 <span id="right-rate" class="motion"></span><select id="right"></select></label>
+      <p><button id="swap-hands" type="button" disabled>交换左右</button></p>
       <label>本组动作 <select id="exercise"></select></label>
       <p id="instructions"></p>
+      <p id="group-count" class="muted"></p>
       <button id="start" disabled>开始这一组</button>
     </form>
     <section aria-label="采集进度">
-      <h2 id="phase">等两枚戒指上线</h2>
+      <h2 id="phase">等待选定戒指就绪</h2>
       <p id="time" class="muted"></p>
       <progress id="progress" max="1" value="0" aria-label="本组进度"></progress>
       <div class="actions">
         <button id="stop" disabled>提前结束</button>
-        <button id="download" disabled>下载本组 JSON</button>
+        <button id="retry-save" type="button" hidden>重试保存</button>
       </div>
       <p id="result" role="status"></p>
     </section>
-    <a href="/">打开 RingSymphony</a>
+    <section aria-labelledby="game-heading">
+      <h2 id="game-heading">整局录制</h2>
+      <p>预备到结算期间，选定戒指的原始 IMU 和本关判定会自动保存。单戒指游玩时，另一只手可用键盘或鼠标。</p>
+      <button id="open-game" type="button" disabled>打开游戏并录制</button>
+    </section>
+    <div id="game-panel" hidden>
+      <div class="game-bar">
+        <button id="close-game" type="button">返回采集</button>
+        <span id="game-status" role="status"></span>
+        <span id="save-game" role="status"></span>
+        <button id="retry-game-save" type="button" hidden>重试保存</button>
+      </div>
+    </div>
     <script type="module" src="./gesture-capture.js"></script>
   </body>
 </html>

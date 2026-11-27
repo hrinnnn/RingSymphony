@@ -4,9 +4,9 @@ import { createRingPanel } from "./panel.js"
 // Wires the ring input into the page. `onGesture` receives { type, hand, age, ... } with age already latency-compensated.
 // `cueDue(time, direction)` is asked whether the chart expects that stroke then, which is how a real
 // down-beat is told apart from the return of an up-beat.
-export function startRing({ onGesture, onPreview, cueDue, cameraVerdict, onDisagreement }) {
+export function startRing({ onGesture, onPreview, cueDue, cameraVerdict, onDisagreement, boundHands }) {
   const url = new URLSearchParams(globalThis.location?.search).get("ring") || `ws://${globalThis.location?.hostname || "127.0.0.1"}:8787`
-  const input = createRingInput({ url, onEvent: onGesture, onPreview, cueDue, cameraVerdict, onDisagreement })
+  const input = createRingInput({ url, onEvent: onGesture, onPreview, cueDue, cameraVerdict, onDisagreement, boundHands })
   const panel = createRingPanel({
     button: document.querySelector("#ring-btn"),
     panel: document.querySelector("#ring-panel"),

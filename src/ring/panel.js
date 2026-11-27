@@ -12,7 +12,7 @@ export function createRingPanel({ button, panel, input }) {
     <div class="panel-head"><h3>指环</h3><button type="button" class="panel-close" data-act="close-panel" aria-label="关闭">×</button></div>
     <p class="ring-link"></p>
     <ul class="ring-list"></ul>
-    <div class="ring-actions"><button type="button" data-act="swap">交换左右</button></div>
+    <div class="ring-actions"><button type="button" data-act="swap">交换左右</button><span class="ring-bound-note" hidden>左右手由采集页指定</span></div>
     <div class="ring-calibration">
       <strong>右手方向识别</strong>
       <div class="ring-mode">
@@ -65,6 +65,8 @@ export function createRingPanel({ button, panel, input }) {
     <p class="ring-note">右手击拍，左手抬/压掌，握拳停止。</p>`
   const linkEl = panel.querySelector(".ring-link")
   const listEl = panel.querySelector(".ring-list")
+  const swapEl = panel.querySelector('[data-act="swap"]')
+  const boundNote = panel.querySelector(".ring-bound-note")
   const compEl = panel.querySelector(".ring-comp-value")
   const errorEl = panel.querySelector(".ring-error-text")
   const applyEl = panel.querySelector('[data-act="apply"]')
@@ -194,6 +196,8 @@ export function createRingPanel({ button, panel, input }) {
 
   function render() {
     const snap = input.snapshot()
+    swapEl.hidden = snap.rolesLocked
+    boundNote.hidden = !snap.rolesLocked
     const live = snap.rings.filter((ring) => ring.connected)
     button.dataset.state = !snap.link.open ? "off" : live.length ? "on" : "wait"
     button.textContent = !snap.link.open ? "指环 · 桥接未连接" : live.length ? `指环 · ${live.length} 枚在线` : "指环 · 等待数据"
@@ -205,6 +209,7 @@ export function createRingPanel({ button, panel, input }) {
       li.dataset.live = ring.connected ? "1" : "0"
       const bar = Math.min(100, Math.round(ring.activity * 8))
       li.innerHTML = `<b>${HAND_LABEL[ring.hand] ?? "未分配"}</b><span>${ring.name ?? ring.address}</span><em>${ring.connected ? `${Math.round(ring.rate)} Hz` : "离线"}${ring.gaps ? ` · 丢 ${ring.gaps}` : ""}</em><i style="width:${bar}%"></i>`
+      if (snap.rolesLocked) return li
       for (const hand of ["right", "left"]) {
         if (ring.hand === hand) continue
         const set = document.createElement("button")

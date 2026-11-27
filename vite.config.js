@@ -7,6 +7,7 @@ import { createReadStream } from "node:fs"
 import { cp, stat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { dirname, join, normalize } from "node:path"
+import { captureStorage } from "./tools/capture-storage.mjs"
 
 const wasmDir = join(dirname(fileURLToPath(import.meta.resolve("@mediapipe/tasks-vision"))), "wasm")
 
@@ -38,7 +39,16 @@ function mediapipeWasm() {
 }
 
 export default {
-  plugins: [mediapipeWasm()],
+  plugins: [mediapipeWasm(), captureStorage()],
   // The model is 7.5MB; inlining it or warning about its size adds nothing.
-  build: { assetsInlineLimit: 0, chunkSizeWarningLimit: 4096 },
+  build: {
+    assetsInlineLimit: 0,
+    chunkSizeWarningLimit: 4096,
+    rollupOptions: {
+      input: {
+        game: fileURLToPath(new URL("./index.html", import.meta.url)),
+        capture: fileURLToPath(new URL("./tools/gesture-capture.html", import.meta.url)),
+      },
+    },
+  },
 }

@@ -37,6 +37,11 @@ const sessionSub = document.querySelector("#session-sub")
 const tallyLabel = document.querySelector("#tally-label")
 const reportEl = document.querySelector("#gesture-report")
 const DIR_LABEL = { up: "上", down: "下", left: "左", right: "右" }
+const captureParams = new URLSearchParams(window.location?.search)
+const captureHost = captureParams.get("capture") === "1" && window.parent !== window ? window.parent : null
+const captureHands = captureHost && { left: captureParams.get("left"), right: captureParams.get("right") }
+const boundHands = captureHands && (captureHands.left || captureHands.right) && captureHands.left !== captureHands.right ? captureHands : null
+let capturedRun = null
 
 const laneCanvas = document.querySelector("#lane")
 const world = createWorld(view)
@@ -98,7 +103,7 @@ function levelButton(icon, tone, title, detail, tag, onClick) {
   levelList.append(button)
 }
 STUDIES.forEach((study, i) => levelButton(["♪", "♩", "♬"][i], ["var(--pink)", "var(--sky)", "var(--butter)"][i], study.title, study.blurb, study.tag, () => begin(study)))
-levelButton("♫", "var(--mint)", "自由指挥 · 萨蒂", "第一号吉诺佩第 · 五声部室内乐<br>挥拍控制速度，点选乐手控制编排", "自由模式", beginFree)
+if (!captureHost) levelButton("♫", "var(--mint)", "自由指挥 · 萨蒂", "第一号吉诺佩第 · 五声部室内乐<br>挥拍控制速度，点选乐手控制编排", "自由模式", beginFree)
 PIECES.forEach((piece) => levelButton("♪", "var(--gold, #e6c98a)", piece.title, piece.sub, piece.tag, () => beginPiece(piece)))
 
 function setMode(next) {
@@ -120,6 +125,53 @@ function toast(text) {
   toastEl.classList.toggle("show", true)
   window.clearTimeout?.(toastTimer)
   toastTimer = window.setTimeout(() => toastEl.classList.toggle("show", false), 1600)
+}
+
+function captureMessage(action, data) {
+  captureHost?.postMessage({ type: `ringsymphony-capture:${action}`, ...data }, window.location.origin)
+}
+
+function captureCanStart() {
+  if (!captureHost) return true
+  if (!boundHands || Object.entries(boundHands).some(([hand, address]) => address && !ring.input.live(hand))) {
+    toast("请等采集页选定的戒指开始传输")
+    return false
+  }
+  return true
+}
+
+function startCapture(study) {
+  if (!captureHost) return null
+  capturedRun = {
+    id: crypto.randomUUID(),
+    level: { title: study.title, bpm: chart.bpm, meter: chart.meter },
+    settings: {
+      latencyMs: Math.round(settings.latency * 1000),
+      ringCompensationMs: Math.round(ring.input.compensation * 1000),
+      directionMode: ring.input.directionMode,
+      camera: camera.status().state,
+    },
+    events: [],
+  }
+  captureMessage("start", { id: capturedRun.id, level: capturedRun.level, atMs: performance.timeOrigin + performance.now() })
+  return capturedRun
+}
+
+function markCaptureClock(run) {
+  if (run && capturedRun === run) {
+    run.clock = { atMs: performance.timeOrigin + performance.now(), songSeconds: songSeconds() }
+  }
+}
+
+function finishCapture(reason) {
+  if (!capturedRun) return
+  captureMessage("finish", {
+    id: capturedRun.id,
+    reason,
+    game: { ...capturedRun, counts, cues, chart: { countIn: chart.countIn, duration: chart.duration, beat: chart.beat },
+      report: JSON.parse(gestureLog.toJSON()) },
+  })
+  capturedRun = null
 }
 
 function scoreCue(cue, kind, delta, reason) {
@@ -308,6 +360,7 @@ function onRing(event) {
   }
   if (mode !== "playing" && mode !== "count-in") return
   const at = inputNow() - event.age
+  capturedRun?.events.push({ ...event, at, receivedAtMs: performance.timeOrigin + performance.now() })
   // A fist only scores at a written cutoff. It never interrupts the backing track.
   if (event.type === "fist") return playCut(at, event.hand)
   if (event.type === "beat") {
@@ -335,6 +388,7 @@ function onRing(event) {
 }
 
 const ring = startRing({
+  boundHands,
   onGesture: onRing,
   // The camera answers where the ring is blind: up and down sit about 166 degrees apart in the
   // ring's own axes, so no threshold separates a down-stroke from the return of an up-stroke.
@@ -358,8 +412,20 @@ const cameraPanel = createCameraPanel({
   offer: document.querySelector("#camera-offer"),
 })
 // A stored "on" is honoured without asking again; anything else leaves getUserMedia uncalled.
-cameraPanel.resume()
-cameraPanel.offerIfUnasked()
+if (!captureHost) {
+  cameraPanel.resume()
+  cameraPanel.offerIfUnasked()
+} else {
+  cameraPanel.render()
+  window.addEventListener("message", event => {
+    if (event.source === captureHost && event.origin === window.location.origin && event.data?.type === "ringsymphony-capture:stop") {
+      finishCapture("stopped")
+      goHome()
+      captureMessage("closed")
+    }
+  })
+  captureMessage("ready")
+}
 
 function timingSummary() {
   if (!deltas.length) { timingEl.innerHTML = ""; settings.suggest(null); return }
@@ -430,6 +496,7 @@ function autoCompensate() {
 
 function finish() {
   if (mode === "result") return
+  finishCapture("complete")
   stopLevel()
   world.syncBeats?.(0)
   const total = cues.length
@@ -508,6 +575,7 @@ function showGestureReport() {
 }
 
 async function begin(study = lastStudy) {
+  if (!captureCanStart()) return
   const ringSnapshot = ring.input?.snapshot()
   // Only the template classifier needs calibration; the absolute one has nothing to be ready for,
   // so gating on it would make the no-calibration mode impossible to actually start a level in.
@@ -555,15 +623,18 @@ async function begin(study = lastStudy) {
   world.setLevelHands(true)
   world.resize()
   lane.resize()
+  const run = startCapture(study)
   await startLevel(chart, {
     onVoice: (part) => world.emit?.(part),
     onNote: (note) => world.note?.(note.part, note),
     onDone: () => { if (cues.every((cue) => cue.result)) finish() },
   })
+  markCaptureClock(run)
   setDynamics(1)
 }
 
 async function beginPiece(piece) {
+  if (!captureCanStart()) return
   lastStudy = piece
   ring.clearTiming()
   resetHandInput()
@@ -590,6 +661,7 @@ async function beginPiece(piece) {
   world.setLevelHands(true)
   world.resize()
   lane.resize()
+  const run = startCapture(piece)
   const clock = await startPiece(chart, {
     onVoice: (part) => world.emit?.(part),
     onNote: (note) => world.note?.(note.part, note),
@@ -597,6 +669,7 @@ async function beginPiece(piece) {
   })
   chart.duration = clock.duration
   chart.countIn = clock.countIn
+  markCaptureClock(run)
   setDynamics(1)
 }
 
@@ -1045,6 +1118,7 @@ view.addEventListener("pointerup", (event) => {
 })
 
 function goHome() {
+  finishCapture("returned")
   stopLevel()
   world.showChamber?.(false)
   ending = false

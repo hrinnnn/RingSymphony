@@ -37,6 +37,7 @@ export function createRingInput({
   now = () => performance.now() / 1000,
   WebSocketImpl = globalThis.WebSocket,
   storage = globalThis.localStorage,
+  boundHands = null,
   // Asked whether a right-hand cue is due near a gesture time, so a reversal the music called for
   // is not mistaken for a return stroke. Kept as a callback to leave this module chart-agnostic.
   cueDue = () => false,
@@ -49,6 +50,8 @@ export function createRingInput({
   onDisagreement = () => {},
 } = {}) {
   const rings = new Map()
+  const boundRoles = boundHands && new Map(Object.entries(boundHands).filter(([, address]) => address)
+    .map(([hand, address]) => [address, hand]))
   // Only roles the player chose explicitly are stored; automatic ones are re-derived from who is online.
   const roles = readJson(storage, ROLE_KEY, {})
   let compensation = Number(readJson(storage, COMP_KEY, 0)) || 0
@@ -247,6 +250,10 @@ export function createRingInput({
 
   function allocate() {
     allocatedAt = now()
+    if (boundRoles) {
+      for (const ring of rings.values()) assign(ring, present(ring) ? (boundRoles.get(ring.address) ?? null) : null)
+      return
+    }
     const all = [...rings.values()]
     const online = all.filter(present).sort((a, b) => (a.address < b.address ? -1 : 1))
     for (const ring of all) if (!present(ring)) assign(ring, null)
@@ -600,6 +607,7 @@ export function createRingInput({
   }
 
   function setRole(address, hand) {
+    if (boundRoles) return
     const ring = rings.get(address)
     if (!ring) return
     for (const other of rings.values()) {
@@ -642,6 +650,7 @@ export function createRingInput({
       return directionMode
     },
     swap() {
+      if (boundRoles) return
       const left = [...rings.values()].find((ring) => ring.hand === "left")
       const right = [...rings.values()].find((ring) => ring.hand === "right")
       if (left) assign(left, null)
@@ -758,6 +767,7 @@ export function createRingInput({
         // Which classifier is live, so the panel can show it and the exported log can record it.
         // A session's numbers mean nothing without knowing which path produced them.
         directionMode,
+        rolesLocked: Boolean(boundRoles),
         directionStats: { ...directionStats },
         cameraStats: { ...cameraStats, ringDistrusted: fusion.distrusted },
         automaticCalibration: autoStatus(t),
@@ -771,7 +781,7 @@ export function createRingInput({
           .map((ring) => ({
             address: ring.address,
             name: ring.name,
-            hand: ring.hand,
+            hand: boundRoles ? (boundRoles.get(ring.address) ?? null) : ring.hand,
             // The camera stamps its frames on the page clock, so it needs this to compare them
             // against ring events, which carry device time.
             offset: ring.offset,
