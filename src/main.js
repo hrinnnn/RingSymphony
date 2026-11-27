@@ -87,6 +87,7 @@ let swingEar = null
 let lastStudy = STUDIES[0]
 // A ring gesture reaches the page a little after it happened; keep a cue open that long past its Good window.
 const LATE_GRACE = 0.12
+const RING_GESTURE_GRACE = { dynamics: 0.75, circle: 2.85, cue: 0.65 }
 // The user's input delay (Settings) is subtracted from every gesture time: a gesture is judged that much earlier than it arrived.
 const inputNow = () => songSeconds() - settings.latency
 const TIMING_EDGE = 0.03
@@ -251,7 +252,7 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
   const wrongDirection = found?.cue.direction && found.cue.direction !== direction
   // Give the real stroke a chance to score when a return movement is close to the same note.
   // Misses from the ring are recorded on expiry, and weak conflicting strokes leave the note open.
-  if (fromRing && (found?.distance > GOOD || (tier === "weak" && (!found || wrongDirection)))) return
+  if (fromRing && (!found || found.distance > GOOD || (tier === "weak" && wrongDirection))) return
   world.pose(hand, "beat", direction)
   if (!found) return
   if (fromRing && found.cue.direction === direction && found.distance <= GOOD) {
@@ -292,7 +293,7 @@ function playPalm(direction, at = inputNow(), hand = "left", fromRing = false) {
   if (mode !== "playing" && mode !== "count-in") return
   const found = nearest(at, hand, "dynamics")
   const matches = found && found.cue.direction === direction
-  if (at < palmQuietUntil[hand] && !(fromRing && matches && found.distance <= GOOD)) return
+  if (fromRing && (!matches || found.distance > GOOD)) return
   if (matches || !fromRing) world.pose(hand, "palm", direction)
   if (matches) scoreCue(found.cue, gradeDistance(found.distance), found.delta)
 }
@@ -380,10 +381,12 @@ function onRing(event) {
   if (mode !== "playing" && mode !== "count-in") return
   const at = inputNow() - event.age
   capturedRun?.events.push({ ...event, at, receivedAtMs: performance.timeOrigin + performance.now() })
+  gestureLog.recordLatency(event, at)
   // A fist only scores at a written cutoff. It never interrupts the backing track.
   if (event.type === "fist") return playCut(at, event.hand)
   if (event.type === "circle" && event.hand === "left") {
-    const found = nearest(at, "left", "circle")
+    const found = nearest(at, "left", "circle") ??
+      (event.duration ? nearest(at - event.duration, "left", "circle") : null)
     if (found) scoreCue(found.cue, "perfect", 0)
     return
   }
@@ -396,7 +399,7 @@ function onRing(event) {
       // What the absolute classifier measured, and which classifier it was. Carried so an exported
       // log can say why a stroke failed, not only that it did.
       yaw: event.ringYaw, vertical: event.ringVertical, peakSpeed: event.peakSpeed,
-      mode: event.directionMode,
+      mode: event.directionMode, timing: event.timing,
     })
     playBeat(event.dir, at, true, event.tier, event.hand)
   }
@@ -411,21 +414,29 @@ function onRing(event) {
   }
 }
 
+function upcomingRingBeat(hand, age, dir) {
+  if (mode !== "playing" && mode !== "count-in") return null
+  const found = nearest(inputNow() - age, hand, "beat")
+  return found && found.cue.direction === dir && !found.cue.hits?.[hand] ? found : null
+}
+
 const ring = startRing({
   boundHands,
   onGesture: onRing,
+  onPreview: ({ hand, age, dir }) => {
+    const found = upcomingRingBeat(hand, age, dir)
+    if (found && found.distance <= GOOD) world.pose(hand, "beatPreview", dir)
+  },
   cutoffDue: (hand, age) => (mode === "playing" || mode === "count-in") && Boolean(activeCutoff(inputNow() - age, hand)),
   // The camera answers where the ring is blind: up and down sit about 166 degrees apart in the
   // ring's own axes, so no threshold separates a down-stroke from the return of an up-stroke.
   // Synchronous and cheap — nothing in the beat path waits for a frame.
   cameraVerdict: (hand, at) => camera.verdict(hand, at),
   onDisagreement: (entry) => cameraLog.record({ ...entry, frames: camera.framesFor(entry.hand, entry.t) }),
-  // A reversal is only rescued from return-suppression when the chart actually wants that
-  // direction then, so a slow return cannot be excused by a cue for the opposite stroke.
-  cueDue: (at, direction) => {
-    if (mode !== "playing" && mode !== "count-in") return false
-    const found = nearest(at, "right", "beat")
-    return Boolean(found && found.cue.direction === direction && found.distance <= GOOD)
+  // Only a close, unscored cue for this hand can rescue a reversal that looks like a return.
+  cueDue: (hand, age, dir) => {
+    const found = upcomingRingBeat(hand, age, dir)
+    return Boolean(found && found.distance <= PERFECT)
   },
 })
 
@@ -480,9 +491,12 @@ const AUTO_COMP_MAX_MOVE = 0.08
 
 function autoCompensate() {
   if (!ring?.input || ringDeltas.length < AUTO_COMP_MIN_SAMPLES) return
-  const mean = ringDeltas.reduce((sum, d) => sum + d, 0) / ringDeltas.length
-  if (Math.abs(mean) < AUTO_COMP_DEADZONE) return
-  const move = Math.max(-AUTO_COMP_MAX_MOVE, Math.min(AUTO_COMP_MAX_MOVE, mean * AUTO_COMP_STEP))
+  const sorted = [...ringDeltas].sort((a, b) => a - b)
+  const trim = Math.floor(sorted.length * 0.15)
+  const center = sorted.slice(trim, sorted.length - trim)
+  const median = (center[Math.floor((center.length - 1) / 2)] + center[Math.floor(center.length / 2)]) / 2
+  if (Math.abs(median) < AUTO_COMP_DEADZONE) return
+  const move = Math.max(-AUTO_COMP_MAX_MOVE, Math.min(AUTO_COMP_MAX_MOVE, median * AUTO_COMP_STEP))
   const before = ring.input.compensation
   ring.input.compensation += move
   const applied = Math.round((ring.input.compensation - before) * 1000)
@@ -528,13 +542,16 @@ function worstTransitions(summary) {
 function showGestureReport() {
   const summary = gestureLog.summary()
   if (!reportEl) return
-  if (!summary.matched) {
+  if (!summary.matched && !Object.keys(summary.latency).length) {
     reportEl.innerHTML = '<p class="report-empty">这一关没有可对照的击拍</p>'
     return
   }
   const pct = (part) => part.answered ? Math.round((part.right / part.answered) * 100) + "%" : "—"
   const line = (label, part) => `<span><b>${label}</b> ${pct(part)} <small>(${part.right}/${part.answered}${part.silent ? `，${part.silent} 次未作答` : ""})</small></span>`
   const timing = summary.timing
+  const latencyNames = { beat: "挥拍", palm: "抬压掌", strike: "前指", circle: "画圈", fist: "握拳" }
+  const latencyText = Object.entries(summary.latency).map(([type, row]) =>
+    `<span><b>${latencyNames[type]}</b> 检测 ${row.detectionDelayMs} ms · 传输 ${row.transportAgeMs} ms</span>`).join("")
   // Spread, not just the mean: a consistent offset is one slider away from fixed, a wide spread is
   // not correctable by any single number, and only the second means the player should keep practising.
   const timingText = timing
@@ -546,6 +563,7 @@ function showGestureReport() {
   reportEl.innerHTML = `
     <div class="report-row">${line("戒指方向", summary.ring)}${line("摄像头", summary.camera)}${line("最终采用", summary.fused)}</div>
     <div class="report-row"><span><b>时间</b> ${timingText}</span><span><b>击拍</b> ${summary.matched}/${summary.cues}</span></div>
+    ${latencyText ? `<div class="report-row" aria-label="戒指延迟中位数">${latencyText}</div>` : ""}
     ${worst.length ? `<p class="report-confusion">常见误判：${worst.map((w) => `${DIR_LABEL[w.want]}→${DIR_LABEL[w.got]} ${w.n} 次`).join(" · ")}</p>` : ""}
     ${worstTransitions(summary)}
     ${Object.keys(summary.ringSilence).length ? `<p class="report-confusion">戒指未作答：${Object.entries(summary.ringSilence).map(([k, n]) => `${k} ${n}`).join(" · ")}</p>` : ""}
@@ -900,7 +918,7 @@ function loop() {
   const delay = Math.max(0, settings.latency)
   for (const cue of cues) {
     const ringCue = (cue.hand !== "left" && rightRing) || (cue.hand !== "right" && leftRing)
-    const grace = (ringCue ? 0.5 : LATE_GRACE) + delay
+    const grace = (ringCue ? RING_GESTURE_GRACE[cue.kind] ?? 0.5 : LATE_GRACE) + delay
     const openUntil = (cue.until ?? cue.time + GOOD) + grace
     if (!cue.result && now > openUntil) {
       const single = cue.hits?.left || cue.hits?.right

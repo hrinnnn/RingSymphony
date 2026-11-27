@@ -98,7 +98,7 @@ const OPPOSITE = { down: "up", up: "down", left: "right", right: "left" }
 // Mean gravity direction and mean linear acceleration over the approach to a peak, both in the
 // ring's own axes. The caller supplies frames carrying `up`, the gravity estimate the detector
 // already maintains — recomputing it here would mean running a second filter over the same data.
-export function gravityFrame(frames, peakTime, window = 0.15) {
+export function gravityFrame(frames, peakTime, window = 0.15, driveEnd = DRIVE_END) {
   const slice = frames.filter((frame) => frame.t >= peakTime - window && frame.t <= peakTime && frame.up)
   if (slice.length < 5) return null
   const mean = (pick) => {
@@ -117,16 +117,18 @@ export function gravityFrame(frames, peakTime, window = 0.15) {
   if (!rotation) return null
   // Gravity removed: what is left is the hand being driven, which is what carries up/down. Taken
   // over the drive alone — see DRIVE_END — so the brake into the peak cannot cancel it.
-  const drive = slice.filter((frame) => frame.t <= peakTime - DRIVE_END)
+  const drive = slice.filter((frame) => frame.t <= peakTime - driveEnd)
   let linear = null
+  let linMag = 0
   if (drive.length >= DRIVE_MIN_FRAMES) {
     const sum = [0, 0, 0]
     for (const frame of drive) {
       for (let axis = 0; axis < 3; axis += 1) sum[axis] += (frame.acc[axis] - G * frame.up[axis]) / drive.length
     }
+    linMag = norm(sum)
     linear = unit(sum)
   }
-  return { gravity, linear, rotation }
+  return { gravity, linear, rotation, linMag }
 }
 
 // Which direction a stroke went, from geometry alone.
@@ -137,19 +139,20 @@ export function gravityFrame(frames, peakTime, window = 0.15) {
 //            hand about vertical; a vertical one does not. Its sign is the side swept to.
 //   vertical how much of the hand's linear acceleration is along gravity, and which way.
 //
-// Horizontal is tested first because it is the stronger and cleaner of the two: a left/right sweep
-// produces almost pure yaw (|yaw| ≥ 0.76 on every labelled horizontal stroke), while a vertical
-// stroke's small residual yaw never approaches the bar.
 export function classifyAbsolute(frame) {
   if (!frame) return { direction: null, reason: "数据不足或断帧", yaw: null, vertical: null }
-  const { gravity, linear, rotation } = frame
+  const { gravity, linear, rotation, linMag = 9.81 } = frame
   const yaw = dot(rotation, gravity)
   const vertical = linear ? dot(linear, gravity) : null
+  const verticalClear = Math.abs(vertical) >= AXIS_FLOOR && Math.abs(vertical * linMag) >= 1.25
+  // Linear acceleration is sensitive to braking and concurrent movement.
+  // Ask it to show a larger relative advantage over the steadier yaw signal.
+  const verticalWins = verticalClear && (Math.abs(yaw) < AXIS_FLOOR || Math.abs(yaw) < Math.abs(vertical) * 0.73)
+  if (verticalWins) {
+    return { direction: vertical > 0 ? "up" : "down", reason: null, yaw, vertical }
+  }
   if (Math.abs(yaw) >= AXIS_FLOOR) {
     return { direction: yaw > 0 ? "left" : "right", reason: null, yaw, vertical }
-  }
-  if (vertical !== null && Math.abs(vertical) >= AXIS_FLOOR) {
-    return { direction: vertical > 0 ? "up" : "down", reason: null, yaw, vertical }
   }
   return { direction: null, reason: "动作方向不明确", yaw, vertical }
 }
@@ -158,21 +161,31 @@ export function classifyAbsolute(frame) {
 // against its own up vector avoids mixing device axes as the wrist rotates. A clear
 // vertical impulse can resolve a moderate sideways component during an up/down stroke.
 export function classifyAbsoluteStroke(frames, peakTime) {
-  const base = classifyAbsolute(gravityFrame(frames, peakTime))
-  if (base.direction === "up" || base.direction === "down") return base
+  const features = gravityFrame(frames, peakTime)
+  const base = classifyAbsolute(features)
   const approach = frames.filter(frame => frame.up && frame.t >= peakTime - 0.18 && frame.t <= peakTime)
-  if (approach.length < 5) return base
-  // Preserve the usual gravity-frame decision when the approach was captured continuously.
   const sparse = approach.some((frame, i) => i > 0 && frame.t - approach[i - 1].t > 0.025)
-  if (base.direction && !sparse) return base
+  if (base.direction && features?.linear && (!sparse || Math.abs(base.yaw) > 0.57)) return base
+  if (approach.length < 2) return base
 
   let yawRotation = 0
   let rotation = 0
   let drive = 0
   let driveDirection = null
+  let weightedUp = 0
+  let weightedMagnitude = 0
+  let weight = 0
   for (const [i, frame] of approach.entries()) {
     yawRotation += dot(frame.gyr, frame.up)
     rotation += norm(frame.gyr)
+    if (frame.t <= peakTime - 0.02) {
+      // Weight the observed samples in the pre-peak window without extending
+      // any single reading across a long interval with missing IMU data.
+      const dt = Math.min(0.04, (approach[i + 1]?.t ?? peakTime - 0.02) - frame.t)
+      weightedUp += (dot(frame.acc, frame.up) - G) * dt
+      weightedMagnitude += norm(frame.acc.map((value, axis) => value - G * frame.up[axis])) * dt
+      weight += dt
+    }
     const first = approach[i - 2]
     if (!first || frame.t - first.t > 0.03 || frame.t > peakTime - 0.025) continue
     const middle = approach[i - 1]
@@ -186,7 +199,11 @@ export function classifyAbsoluteStroke(frames, peakTime) {
     }
   }
   const yaw = rotation > 1e-6 ? yawRotation / rotation : 0
-  if (Math.abs(yaw) < 0.67 && Math.abs(drive) >= 1.25) {
+  if (!driveDirection && weight > 0 && weightedMagnitude > 1e-6) {
+    drive = weightedUp / weight
+    driveDirection = weightedUp / weightedMagnitude
+  }
+  if (Math.abs(yaw) < 0.55 && Math.abs(drive) >= 1.25) {
     return { direction: drive > 0 ? "up" : "down", reason: null, yaw, vertical: driveDirection }
   }
   if (!base.direction && Math.abs(yaw) > 0.48) {

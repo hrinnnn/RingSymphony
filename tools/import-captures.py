@@ -75,9 +75,12 @@ def gameplay_for(record, origins, aliases):
 def session_for(record, frames, aliases):
     streams, origins = streams_for(record, frames, aliases)
     result = {key: record[key] for key in ("kind", "durationMs", "finishReason")}
+    for key in ("playerId", "wearNote", "dominantHand", "preflight", "forcedHealth", "quality"):
+        if key in record:
+            result[key] = record[key]
     result["streams"] = streams
     if record["kind"] == "group":
-        for key in ("exercise", "performingHand", "direction", "plannedCount", "trials"):
+        for key in ("exercise", "performingHand", "direction", "plannedCount", "trials", "bpm"):
             if key in record:
                 result[key] = record[key]
         if result["finishReason"] == "complete":

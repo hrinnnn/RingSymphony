@@ -1,9 +1,11 @@
 // Connects to the Ring Studio bridge (WebSocket), keeps per-ring clock/role state and turns IMU frames into gestures.
 // Gesture events carry `age`: seconds between the gesture happening and "now", so the game can place it on its own clock.
 import { createBeatDetector, createGravity, createHandDetector } from "./detectors.js"
-import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION, MAX_SHORT_GAP, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "./direction.js"
+import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "./direction.js"
 import { classifyAbsolute, classifyAbsoluteStroke, createReversalFilter, gravityFrame } from "./absolute.js"
 import { createFusion, fuseDirection } from "../camera/fuse.js"
+import { createClockOffset, createGyroBias } from "./signal.js"
+import { causalFeatures, createCausalClassifier } from "./causal-classifier.js"
 
 const ROLE_KEY = "ringsymphony.roles.v2"
 const COMP_KEY = "ringsymphony.compensation"
@@ -20,8 +22,8 @@ const CAL_KEY = "ringsymphony.calibration.v1"
 // normally, which is what keeps the panel a working rollback.
 const MODE_KEY = "ringsymphony.direction-mode.v2"
 export const DIRECTION_MODES = ["template", "absolute"]
-const GRAVITY_GAP = 0.12
-const GRAVITY_STEP = 0.018
+const RESET_GAP = 0.2
+const GRAVITY_STEP = 0.02
 
 function readJson(storage, key, fallback) {
   try {
@@ -35,11 +37,12 @@ function readJson(storage, key, fallback) {
 export function createRingInput({
   url = "ws://127.0.0.1:8787",
   onEvent = () => {},
-  onPreview = () => {},
+  onPreview,
   now = () => performance.now() / 1000,
   WebSocketImpl = globalThis.WebSocket,
   storage = globalThis.localStorage,
   boundHands = null,
+  causalModel,
   // Asked whether a right-hand cue is due near a gesture time, so a reversal the music called for
   // is not mistaken for a return stroke. Kept as a callback to leave this module chart-agnostic.
   cueDue = () => false,
@@ -53,6 +56,7 @@ export function createRingInput({
   onDisagreement = () => {},
 } = {}) {
   const rings = new Map()
+  let classifier = createCausalClassifier(causalModel)
   const boundRoles = boundHands && new Map(Object.entries(boundHands).filter(([, address]) => address)
     .map(([hand, address]) => [address, hand]))
   // Only roles the player chose explicitly are stored; automatic ones are re-derived from who is online.
@@ -199,7 +203,7 @@ export function createRingInput({
   // them without it would restore a calibration that silently no longer matches the live feed.
   function saveCalibration(hand = "right") {
     const ring = [...rings.values()].find((candidate) => candidate.hand === hand)
-    const body = direction.serialise(hand, ring?.gyroBias ?? null)
+    const body = direction.serialise(hand, ring?.bias.value ?? null)
     if (!body) return
     try {
       storage?.setItem(CAL_KEY, JSON.stringify(body))
@@ -212,7 +216,7 @@ export function createRingInput({
     const result = direction.restore(readJson(storage, CAL_KEY, null), ring.address, hand)
     // Restoring templates without their bias is worse than not restoring at all: the panel would
     // show 校准完成 while every direction feature carried an offset the templates do not expect.
-    if (result.ok) ring.gyroBias = result.gyroBias
+    if (result.ok && result.gyroBias) ring.bias = createGyroBias(result.gyroBias)
     return result.ok
   }
 
@@ -234,7 +238,7 @@ export function createRingInput({
     // About 8° of observed motion separates a deliberate low-speed stroke from a brief
     // wrist correction. Template mode already filters returns using calibrated geometry.
     const beatTravel = hand === "left" || directionMode === "absolute" ? 0.14 : 0
-    return createHandDetector(hand, { ...options, beatTravel })
+    return createHandDetector(hand, { ...options, beatTravel, earlyBeat: true })
   }
 
   function assign(ring, hand) {
@@ -250,8 +254,9 @@ export function createRingInput({
     ring.calibrationDetector = null
     ring.calibrationStart = null
     ring.returnFilter.reset(); ring.reversalFilter.reset()
-    ring.gyroBias = null
     ring.history = []
+    ring.beatPreview = null
+    ring.lastFeature = null
     // After the reset, not before: a restored calibration brings its own bias, and clearing it
     // here would leave the panel showing 校准完成 while the live feed carried an offset the
     // templates were never built against.
@@ -296,11 +301,50 @@ export function createRingInput({
   function ensure(address, name) {
     let ring = rings.get(address)
     if (!ring) {
-      ring = { address, name, hand: null, detector: null, calibrationDetector: null, calibrationStart: null, returnFilter: createReturnFilter(), reversalFilter: createReversalFilter(), gravity: createGravity(), gyroBias: null, history: [], offset: null, frames: 0, rate: 0, rateFrames: 0, rateAt: now(), activity: 0, lastSeen: 0, firstSeen: now(), gaps: 0, lastSeq: null, lastT: null, connected: true, previewAt: -Infinity }
+      ring = { address, name, hand: null, detector: null, calibrationDetector: null, calibrationStart: null, returnFilter: createReturnFilter(), reversalFilter: createReversalFilter(), gravity: createGravity(), bias: createGyroBias(), history: [], clock: createClockOffset(), offset: null, frames: 0, rate: 0, rateFrames: 0, rateAt: now(), activity: 0, lastSeen: 0, firstSeen: now(), gaps: 0, lastSeq: null, lastT: null, connected: true, beatPreview: null }
       rings.set(address, ring)
     }
     if (name) ring.name = name
     return ring
+  }
+
+  function previewBeat(ring, t, arrival) {
+    if (!onPreview) return
+    const candidate = ring.detector.beatCandidate
+    const absolute = ring.hand === "left" || directionMode === "absolute"
+    // Gravity-frame previews have no calibrated axis to agree with, so wait for more
+    // rotation than in template mode. This threshold never removes a confirmed beat.
+    if (!candidate || candidate.peakSpeed < (absolute ? 2.5 : 1.1) || candidate.travel < (absolute ? 0.1 : 0.035)) return
+    const { onsetT } = candidate
+    const previous = ring.beatPreview?.onsetT === onsetT ? ring.beatPreview : null
+    if (previous?.sentAt !== undefined) return
+    const frames = ring.history.filter(frame => frame.t >= Math.max(onsetT, t - 0.1))
+    if (frames.length < 5 || frames.some((frame, i) => i > 0 && frame.t - frames[i - 1].t > 0.025)) return
+
+    const age = Math.max(0, arrival - (t + ring.offset)) + compensation
+    let dir = null
+    if (absolute) {
+      const prediction = classifyAbsolute(gravityFrame(frames, t, 0.1, 0.012))
+      const confidence = prediction.direction === "left" || prediction.direction === "right" ? prediction.yaw : prediction.vertical
+      if (Math.abs(confidence) >= 0.68) dir = prediction.direction
+      if (dir && ring.reversalFilter.isReversal(dir, t) && !cueDue(ring.hand, age, dir)) dir = null
+    } else if (direction.status(arrival).ready) {
+      const { gyr } = frames.at(-1)
+      const length = Math.hypot(...gyr)
+      if (length > 0) {
+        const axis = gyr.map(value => value / length)
+        if (!ring.returnFilter.isReturn(axis, t, -0.5)) dir = direction.classify(axis, ring.address)
+      }
+    }
+    if (!dir) {
+      ring.beatPreview = null
+      ring.lastFeature = null
+    } else if (previous?.dir !== dir) {
+      ring.beatPreview = { onsetT, dir, since: t }
+    } else if (t - previous.since >= (absolute ? 0.026 : 0.018)) {
+      previous.sentAt = arrival
+      onPreview({ hand: ring.hand, dir, age })
+    }
   }
 
   function frame(message) {
@@ -319,15 +363,15 @@ export function createRingInput({
     if (ring.lastSeq !== null && message.sequence - ring.lastSeq > 1) ring.gaps += message.sequence - ring.lastSeq - 1
     ring.lastSeq = message.sequence
     const gap = ring.lastT === null ? 0 : t - ring.lastT
-    const preserveGravity = ring.hand !== "right" || directionMode === "absolute"
     // A device restart rewinds the clock; start over instead of mixing two time bases.
-    if (ring.lastT !== null && (gap <= 0 || gap > (ring.hand === "right" ? MAX_SHORT_GAP : 0.05))) {
+    if (ring.lastT !== null && (gap <= 0 || gap > RESET_GAP)) {
+      ring.beatPreview = null
       if (t <= ring.lastT) {
-        ring.offset = null
+        ring.clock.reset()
+        ring.bias = createGyroBias()
         if (ring.hand === "right") {
           if (automatic) stopAutomatic("右手指环时钟重置，连续校准已停止")
           direction.reset()
-          ring.gyroBias = null
           ring.calibrationDetector = null
           ring.calibrationStart = null
         }
@@ -336,8 +380,7 @@ export function createRingInput({
       const restarted = t <= ring.lastT
       const calibration = direction.status(arrival)
       if (restarted) { ring.returnFilter.reset(); ring.reversalFilter.reset() }
-      if (automatic && automatic.address === ring.address && automatic.state === "settle" &&
-          (t <= ring.lastT || t - ring.lastT > 0.12)) automatic.stillFrames = []
+      if (automatic?.address === ring.address && automatic.state === "settle") automatic.stillFrames = []
       if (restarted) {
         ring.detector = ring.hand ? createLiveDetector(ring.hand, ring.hand === "right" && calibration.ready ? { beatFloor: calibration.beatFloor } : {}) : null
         if (ring.calibrationDetector) ring.calibrationDetector = createBeatDetector({ beatFloor: 0.65, adaptiveFloor: false })
@@ -345,21 +388,15 @@ export function createRingInput({
         ring.detector?.gap()
         ring.calibrationDetector?.gap()
       }
-      // Keep the pose reference across a short interruption in absolute mode. The gesture
-      // detectors still clear their partial strokes, and gravity integration below is bounded
-      // so the first returning gyro sample does not stand in for the whole missing interval.
-      if (!preserveGravity || restarted || gap > GRAVITY_GAP) {
-        ring.history = []
-        ring.gravity.reset()
-        ring.lastGravityT = null
-      }
+      ring.history = []
+      ring.gravity.reset()
+      ring.lastGravityT = null
     }
     ring.lastT = t
     if (!ring.hand || arrival - allocatedAt > 0.5) allocate()
 
     // Offset between device and page clocks: the smallest (arrival − t) is the least delayed frame.
-    const sample = arrival - t
-    ring.offset = ring.offset === null || sample < ring.offset ? sample : ring.offset + (sample - ring.offset) * 0.0002
+    ring.offset = ring.clock.push(arrival, t)
 
     ring.activity += (Math.hypot(...message.gyr) - ring.activity) * 0.05
     if (!ring.detector) return
@@ -373,7 +410,7 @@ export function createRingInput({
         const deviation = Math.sqrt(frames.reduce((sum, frame) => sum + frame.gyr.reduce((value, component, axis) => value + (component - mean[axis]) ** 2, 0), 0) / frames.length)
         if (deviation < 0.35) {
           if (automatic.estimateBias) {
-            ring.gyroBias = mean
+            ring.bias = createGyroBias(mean)
             ring.history = []
             ring.detector = createLiveDetector("right")
             automatic.estimateBias = false
@@ -384,44 +421,19 @@ export function createRingInput({
         }
       }
     }
-    const gyr = ring.hand === "right" && ring.gyroBias
-      ? message.gyr.map((value, axis) => value - ring.gyroBias[axis])
-      : message.gyr
+    const gyroBias = ring.bias.update(t, message.acc, message.gyr, Math.max(0, gap))
+    const gyr = message.gyr.map((value, axis) => value - gyroBias[axis])
     const w = Math.hypot(...gyr)
     if (ring.hand) {
       // Both hands keep a gravity history. The left hand has no calibration template — its beat
       // direction is read from this frame — and the filter needs every packet to stay converged.
-      const dt = ring.lastGravityT == null ? 0.005 : Math.min(preserveGravity ? GRAVITY_STEP : 0.05, Math.max(0.001, t - ring.lastGravityT))
+      const dt = ring.lastGravityT == null ? 0.005 : Math.min(GRAVITY_STEP, Math.max(0.001, t - ring.lastGravityT))
       ring.lastGravityT = t
-      const up = ring.gravity.update(message.acc, gyr, dt)
+      const up = ring.gravity.update(message.acc, gyr, dt, gap > 0.025)
       ring.history.push({ t, gyr, acc: message.acc, up: up ? [...up] : null })
       while (ring.history.length && ring.history[0].t < t - 0.8) ring.history.shift()
     }
     const capturing = ring.hand === "right" && direction.status(arrival).pending
-    if (ring.hand === "right" && !capturing && !automatic && arrival - ring.previewAt >= 0.03) {
-      const calibration = direction.status(arrival)
-      if (directionMode === "absolute") {
-        // No calibration to gate on, so the floor is the detector's own minimum rather than one
-        // derived from recorded waves. Classified from the live frame instead of the 150ms window
-        // the beat path uses: a preview is a hint about what the hand is doing right now, and it
-        // must stay cheap enough to run at frame rate.
-        const up = ring.history.length ? ring.history[ring.history.length - 1].up : null
-        if (w >= 0.65 && up) {
-          const predicted = classifyAbsolute(gravityFrame(ring.history, t, 0.08)).direction
-          if (predicted && !ring.reversalFilter.isReversal(predicted, t)) {
-            ring.previewAt = arrival
-            onPreview({ hand: "right", dir: predicted })
-          }
-        }
-      } else if (calibration.ready && w >= Math.max(0.65, calibration.beatFloor * 0.7)) {
-        const feature = gyr.map((value) => value / w)
-        const predicted = direction.classify(feature, ring.address)
-        if (predicted && !ring.returnFilter.isReturn(feature, t, -0.5)) {
-          ring.previewAt = arrival
-          onPreview({ hand: "right", dir: predicted })
-        }
-      }
-    }
     if (capturing && ring.calibrationDetector) {
       const candidate = ring.calibrationDetector.push(t, w)
       if (candidate && candidate.t > ring.calibrationStart) {
@@ -455,10 +467,24 @@ export function createRingInput({
       }
     }
     const confirmShortFist = cutoffDue
-      ? () => cutoffDue(ring.hand, Math.max(0, arrival - (t + ring.offset)) + compensation)
+      ? (at = t) => cutoffDue(ring.hand, Math.max(0, arrival - (at + ring.offset)) + compensation)
       : undefined
-    for (const event of ring.detector.push({ t, acc: message.acc, gyr }, confirmShortFist)) {
-      const age = Math.max(0, arrival - (event.t + ring.offset)) + compensation
+    const events = ring.detector.push({ t, acc: message.acc, gyr, up: ring.gravity.up }, confirmShortFist)
+    if (!capturing && !automatic) previewBeat(ring, t, arrival)
+    for (const event of events) {
+      const detectionDelayMs = Math.round(Math.max(0, t - event.t) * 1000)
+      const transportAgeMs = Math.round(Math.max(0, arrival - (t + ring.offset)) * 1000)
+      const age = Math.max(0, t - event.t) + Math.max(0, arrival - (t + ring.offset)) + compensation
+      event.detectionDelayMs = detectionDelayMs
+      event.transportAgeMs = transportAgeMs
+      const features = classifier && (event.type === "beat" || event.type === "fist")
+        ? causalFeatures(ring.history, event.t, ring.lastFeature) : null
+      const scores = features && classifier.predict(features.values)
+      if (scores) {
+        event.modelScores = scores
+        if (event.type === "beat" && event.tier === "weak" && scores.ordinary >= 0.85) continue
+        if (event.type === "fist" && event.tier && scores.ordinary >= 0.85 && !(scores.fist > 0.4)) continue
+      }
       if (event.hand === "left" && event.type === "palm") {
         if (capturePalmCalibration(event, ring)) continue
         if (palmCalibration.ready) event.dir = event.dir === palmCalibration.upObserved ? "up" : "down"
@@ -492,6 +518,10 @@ export function createRingInput({
         const classified = absolute
           ? classifyAbsoluteStroke(ring.history, event.t)
           : direction.classifyDetailed(feature, ring.address)
+        if (absolute && !classified.direction && scores) {
+          const modelDir = DIRECTIONS.find(dir => scores[dir] >= 0.82)
+          if (modelDir) { classified.direction = modelDir; classified.reason = null }
+        }
         // The camera decides vertical direction when the template classifier is live, because
         // there the ring cannot: up and down sit about 166 degrees apart in its own axes
         // (direction.js:37). That premise is false in the gravity frame — absolute.js reads
@@ -548,7 +578,7 @@ export function createRingInput({
         // An unclassified beat is not recorded as a stroke, but it can still be the return of one.
         // A reversal that lands where a cue is due is a real stroke: up and down are near-opposites,
         // so geometry alone cannot tell a down-beat from the return of an up-beat.
-        const onCue = Boolean(event.dir) && cueDue(arrival - age, event.dir)
+        const onCue = Boolean(event.dir) && cueDue(ring.hand, age, event.dir)
         // The absolute path tests the reversal on the direction itself, which is the whole filter
         // there; the template path needs the feature vector, the ramp and a classified predecessor.
         const suppressed = absolute
@@ -568,8 +598,20 @@ export function createRingInput({
           else directionStats.uncalibrated += 1
         }
       }
+      if (event.onsetT !== undefined) {
+        const preview = event.type === "beat" && ring.beatPreview?.onsetT === event.onsetT ? ring.beatPreview : null
+        event.timing = {
+          onsetToPeakMs: Math.round((event.t - event.onsetT) * 1000),
+          peakToConfirmMs: Math.round((t - event.t) * 1000),
+          previewLeadMs: preview?.sentAt !== undefined ? Math.round((arrival - preview.sentAt) * 1000) : null,
+        }
+        delete event.onsetT
+      }
       eventCounts[event.hand] += 1
-      last = { type: event.type, hand: event.hand, dir: event.dir, directionReason: event.directionReason, at: arrival, count: eventCounts[event.hand], detectionDelay: Math.max(0, t - event.t) }
+      if (features && (ring.lastFeature?.t ?? -Infinity) < event.t) {
+        ring.lastFeature = { t: event.t, direction: features.direction }
+      }
+      last = { type: event.type, hand: event.hand, dir: event.dir, directionReason: event.directionReason, at: arrival, count: eventCounts[event.hand], detectionDelay: Math.max(0, t - event.t), timing: event.timing }
       lastByHand[event.hand] = last
       onEvent({ ...event, age, address: ring.address, name: ring.name })
     }
@@ -640,6 +682,7 @@ export function createRingInput({
   }
 
   return {
+    setCausalModel(model) { classifier = createCausalClassifier(model) },
     connect,
     close() {
       closed = true
@@ -660,6 +703,8 @@ export function createRingInput({
       for (const ring of rings.values()) {
         ring.returnFilter.reset()
         ring.reversalFilter.reset()
+        ring.beatPreview = null
+        ring.lastFeature = null
         if (ring.hand === "right") ring.detector = createLiveDetector("right",
           calibration.ready ? { beatFloor: calibration.beatFloor } : undefined)
       }
@@ -698,7 +743,7 @@ export function createRingInput({
       ring.returnFilter.reset(); ring.reversalFilter.reset()
       ring.calibrationDetector = null
       autoMessage = ""
-      automatic = { address: ring.address, target: null, step, state: "settle", settleAt: now(), stillFrames: [], notice: "", estimateBias: step === 0 && !ring.gyroBias }
+      automatic = { address: ring.address, target: null, step, state: "settle", settleAt: now(), stillFrames: [], notice: "", estimateBias: step === 0 && !ring.bias.ready }
     },
     startDirectionRerecord(handDirection) {
       if (!DIRECTIONS.includes(handDirection)) throw new Error("无效的方向")
@@ -713,7 +758,7 @@ export function createRingInput({
       ring.calibrationDetector = null
       autoMessage = ""
       const noSamples = Object.values(direction.status(now()).counts).every((count) => count === 0)
-      automatic = { address: ring.address, target: handDirection, step, state: "settle", settleAt: now(), stillFrames: [], notice: "", estimateBias: noSamples && !ring.gyroBias }
+      automatic = { address: ring.address, target: handDirection, step, state: "settle", settleAt: now(), stillFrames: [], notice: "", estimateBias: noSamples && !ring.bias.ready }
     },
     startPalmCalibration() {
       const ring = [...rings.values()].find((item) => item.hand === "left" && present(item))
@@ -748,7 +793,7 @@ export function createRingInput({
         if (ring.hand === "right") {
           ring.detector = createLiveDetector("right")
           ring.returnFilter.reset(); ring.reversalFilter.reset()
-          ring.gyroBias = null
+          ring.bias = createGyroBias()
         }
       }
     },
@@ -765,6 +810,8 @@ export function createRingInput({
       for (const ring of rings.values()) {
         ring.returnFilter.reset()
         ring.reversalFilter.reset()
+        ring.beatPreview = null
+        ring.detector?.resetBeatCandidate()
         ring.detector?.resetCircle()
       }
       // Not the fusion state. Whether the ring's calibration matches how this player conducts is a
@@ -809,6 +856,7 @@ export function createRingInput({
             connected: present(ring),
             rate: present(ring) ? ring.rate : 0,
             activity: ring.activity,
+            gyroBias: ring.bias.ready ? [...ring.bias.value] : null,
             gaps: ring.gaps,
           })),
       }

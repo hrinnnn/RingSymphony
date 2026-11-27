@@ -24,6 +24,7 @@ export const DEFAULTS = {
   beatGap: 0.34,
   beatTau: 1.0,
   beatTravel: 0,
+  earlyBeat: false,
   sharpBeatSpeed: 4,
   // The floor tracks how hard this player actually conducts, so a gentle conductor is not
   // judged against an energetic one's bar. `floorRest` sets how far above the resting level
@@ -58,7 +59,7 @@ export function createGravity() {
   let up = null
   return {
     get up() { return up },
-    update(acc, gyr, dt) {
+    update(acc, gyr, dt, sparse = false) {
       const a = norm(acc)
       if (a < 1e-6) return up
       const ad = [acc[0] / a, acc[1] / a, acc[2] / a]
@@ -68,7 +69,7 @@ export function createGravity() {
       }
       const d = cross(gyr, up)
       let next = [up[0] - d[0] * dt, up[1] - d[1] * dt, up[2] - d[2] * dt]
-      const trust = 0.03 * Math.exp(-(((a - G) / 3) ** 2))
+      const trust = (sparse ? 0.06 : 0.03) * Math.exp(-(((a - G) / 3) ** 2))
       next = [next[0] + trust * (ad[0] - next[0]), next[1] + trust * (ad[1] - next[1]), next[2] + trust * (ad[2] - next[2])]
       const n = norm(next)
       up = [next[0] / n, next[1] / n, next[2] / n]
@@ -90,22 +91,42 @@ export function createBeatDetector(options = {}) {
   let settled = 0
   let lastT = null
   let rising = false
+  let onsetT = 0
   let peak = 0
   let peakT = 0
   let travel = 0
   let sparseThrough = -Infinity
+  let lastGap = -Infinity
   let lastBeat = -Infinity
+  let lastPeak = 0
+  let lastTier = null
+  let previousSpeed = 0
+  let falling = 0
   let mutedUntil = -Infinity
   function floor() {
     if (!o.adaptiveFloor || rest === null) return o.beatFloor
     return Math.min(o.floorMax, Math.max(o.floorMin, o.floorRest * rest))
   }
+  function resetCandidate() {
+    rising = false
+    peak = 0
+    falling = 0
+  }
   return {
     get floor() { return floor() },
+    get candidate() {
+      if (!rising || (peakT - lastBeat < o.beatGap && lastTier !== "weak") || (o.adaptiveFloor && settled < o.warmup)) return null
+      return { onsetT, travel, peakSpeed: peak }
+    },
+    resetCandidate,
     push(t, w) {
       // Avoid measuring travel from a window with missing samples.
-      if (sparseThrough === null || (lastT !== null && t - lastT > 0.025)) sparseThrough = t + 0.18
-      const dt = lastT === null ? 0.005 : Math.min(0.05, Math.max(0.001, t - lastT))
+      if (sparseThrough === null || (lastT !== null && t - lastT > 0.025)) {
+        lastGap = t
+        sparseThrough = t + 0.18
+        falling = 0
+      }
+      const dt = lastT === null ? 0.005 : Math.min(0.02, Math.max(0.001, t - lastT))
       lastT = t
       settled += dt
       const k = dt / o.beatTau
@@ -129,20 +150,32 @@ export function createBeatDetector(options = {}) {
       // event says whether it cleared the high one.
       const level = Math.max(floor(), o.weakRise * mean)
       const strongLevel = Math.max(floor(), o.beatRise * mean)
-      if (rising && (w < o.beatDrop * peak || w < level * 0.6)) {
+      falling = rising && w < previousSpeed ? falling + 1 : 0
+      previousSpeed = w
+      const enoughMotion = peak >= o.sharpBeatSpeed || travel >= o.beatTravel || peakT <= sparseThrough
+      // After a gap, require two falling samples and a fresh run of frames.
+      const continuous = t > sparseThrough
+      const earlyDrop = falling >= 2 && t - lastGap > 0.015
+      const early = o.earlyBeat && enoughMotion && (earlyDrop || (continuous && w < 0.92 * peak && t - peakT >= 0.015))
+      if (rising && (early || w < o.beatDrop * peak || w < level * 0.6)) {
         rising = false
-        const enoughMotion = peak >= o.sharpBeatSpeed || travel >= o.beatTravel || peakT <= sparseThrough
-        const accepted = peakT - lastBeat >= o.beatGap && enoughMotion
         const strength = peak / Math.max(mean, 0.3)
         const tier = peak >= strongLevel ? "strong" : "weak"
+        const interval = peakT - lastBeat
+        const afterPrep = o.earlyBeat && continuous && lastTier === "weak" &&
+          tier === "strong" && interval >= 0.10 && interval <= 0.32 && peak >= lastPeak * 1.6
+        const accepted = (interval >= o.beatGap || afterPrep) && enoughMotion
         const p = peakT
         const peakSpeed = peak
         peak = 0
         if (accepted && (!o.adaptiveFloor || settled >= o.warmup)) {
           lastBeat = p
-          return { type: "beat", t: p, strength, peakSpeed, tier }
+          lastPeak = peakSpeed
+          lastTier = tier
+          return { type: "beat", t: p, onsetT, strength, peakSpeed, tier }
         }
       } else if (w > level && t >= mutedUntil) {
+        if (!rising) onsetT = t
         travel = (rising ? travel : 0) + w * dt
         if (!rising || w > peak) { peak = w; peakT = t }
         rising = true
@@ -151,8 +184,7 @@ export function createBeatDetector(options = {}) {
     },
     mute(until) {
       mutedUntil = until
-      rising = false
-      peak = 0
+      resetCandidate()
     },
     gap() {
       // With missing samples, the observed rotation only bounds the true travel from below.
@@ -160,8 +192,7 @@ export function createBeatDetector(options = {}) {
       mean = null
       rest = null
       lastT = null
-      rising = false
-      peak = 0
+      resetCandidate()
     },
     get mean() { return mean ?? 0 },
   }
@@ -172,28 +203,52 @@ export function createFistDetector(options = {}) {
   const hist = []
   let last = -Infinity
   let lastShort = -Infinity
+  let shock = null
+  let sparseThrough = -Infinity
   return {
-    push(t, gyr, confirmShortFist) {
-      hist.push({ t, gyr })
-      if (hist.length > 4) hist.shift()
-      if (hist.length < 4) return null
-      const a = hist[0]
-      const dt = t - a.t
-      if (dt <= 0 || dt > 0.05) return null
-      const jerk = (norm([gyr[0] - a.gyr[0], gyr[1] - a.gyr[1], gyr[2] - a.gyr[2]]) / dt) * (180 / Math.PI)
-      if (jerk > o.fistJerk && t - last > o.fistLockout) {
+    push(t, gyr, confirmShortFist, linearAcc = 0, verticalAcc = 0) {
+      const previous = hist.at(-1)
+      if (previous && t - previous.t > 0.025) sparseThrough = t + 0.12
+      const speed = norm(gyr)
+      const samples = hist.filter(frame => t - frame.t <= 0.080001)
+      hist.push({ t, gyr, speed, linearAcc, verticalAcc })
+      while (hist.length && t - hist[0].t > 0.08) hist.shift()
+      const a = samples.at(-3)
+      const dt = a ? t - a.t : 0
+      const jerk = dt > 0 && dt <= 0.05 ? norm(gyr.map((value, i) => value - a.gyr[i])) / dt * (180 / Math.PI) : 0
+      if (jerk > o.fistJerk && (t > sparseThrough || linearAcc <= 8) && t - last > o.fistLockout) {
         last = t
+        shock = null
         return { type: "fist", t, jerk }
+      }
+      // Sparse streams can miss the impulse outright. Accept a weaker recovery
+      // only at a written cutoff, where a rapid rise, impact and stop must agree.
+      if (shock && (t - shock.t > 0.13 || linearAcc > 10)) shock = null
+      if (shock && speed <= shock.speed * 0.55) {
+        const candidate = shock
+        shock = null
+        if (t - Math.max(last, lastShort) > o.fistLockout && confirmShortFist?.(candidate.t)) {
+          lastShort = t
+          return { type: "fist", t: candidate.t, jerk: candidate.jerk, tier: "sparse" }
+        }
+      }
+      const handImpact = linearAcc >= 0.8 && linearAcc <= 8 && Math.abs(verticalAcc) <= 4.25 &&
+        samples.every(frame => frame.linearAcc <= 10 && (t - frame.t > 0.025 || Math.abs(frame.verticalAcc) <= 4.25))
+      if (confirmShortFist && t <= sparseThrough && speed >= 4 && speed <= 11 && handImpact) {
+        const start = samples.find(frame => t - frame.t >= 0.0049 && speed - frame.speed >= 2.5 && frame.speed <= speed * 0.65)
+        if (start && (!shock || speed > shock.speed)) {
+          shock = { t, speed, jerk: (speed - start.speed) / (t - start.t) * (180 / Math.PI) }
+        }
       }
       // A short impulse can disappear in the longer average. Keep it separate so it
       // can only confirm a written cutoff and cannot mute beats or end free conducting.
-      if (confirmShortFist && t - Math.max(last, lastShort) > o.fistLockout) {
-        const short = hist[1]
-        const span = t - short.t
+      if (confirmShortFist && (t > sparseThrough || linearAcc <= 10) && t - Math.max(last, lastShort) > o.fistLockout) {
+        const short = samples.length >= 3 ? samples.at(-2) : null
+        const span = short ? t - short.t : 0
         if (span > 0 && span <= 0.025) {
           const change = norm(gyr.map((value, i) => value - short.gyr[i]))
           const jerk = change / span * (180 / Math.PI)
-          if (change >= 4 && jerk > o.fistJerk && confirmShortFist()) {
+          if (change >= 4 && jerk > o.fistJerk && confirmShortFist(t)) {
             lastShort = t
             return { type: "fist", t, jerk, tier: "short" }
           }
@@ -222,9 +277,10 @@ export function createLeftDetector(options = {}) {
     get vUp() { return vUp },
     push(frame) {
       const { t, acc, gyr } = frame
-      const dt = lastT === null ? 0.005 : Math.min(0.05, Math.max(0.001, t - lastT))
+      const gap = lastT === null ? 0.005 : t - lastT
+      const dt = Math.min(0.02, Math.max(0.001, gap))
       lastT = t
-      const up = gravity.update(acc, gyr, dt)
+      const up = frame.up ?? gravity.update(acc, gyr, dt, gap > 0.025) ?? [0, 1, 0]
       const lin = [acc[0] - G * up[0], acc[1] - G * up[1], acc[2] - G * up[2]]
       const mag = norm(lin)
       const aUp = dot(lin, up)
@@ -257,11 +313,16 @@ export function createLeftDetector(options = {}) {
         if (!candidate && Math.abs(vUp) > o.palmSpeed) candidate = { start: t, peak: vUp, peakT: t }
         else if (candidate) {
           if (Math.abs(vUp) > Math.abs(candidate.peak)) { candidate.peak = vUp; candidate.peakT = t }
-          // The strongest excursion in the window is the stroke; a small preparatory lift before a drop is outvoted.
-          if (t - candidate.start >= o.palmWindow) {
+          // A pronounced peak that has already backed off in the same direction
+          // can confirm early. Keep the full window for gentler or mixed motions.
+          const peakSpeed = Math.abs(candidate.peak)
+          const settledPeak = t - candidate.start >= 0.28 && t - candidate.peakT >= 0.04 &&
+            peakSpeed >= 1.1 && candidate.peak * vUp > 0 && Math.abs(vUp) <= peakSpeed * 0.8
+          if (settledPeak || t - candidate.start >= o.palmWindow) {
             if (Math.abs(candidate.peak) >= o.palmMin) {
               lastPalm = candidate.peakT
-              out.push({ type: "palm", t: candidate.peakT, dir: candidate.peak > 0 ? "up" : "down", speed: Math.abs(candidate.peak) })
+              out.push({ type: "palm", t: candidate.peakT, onsetT: candidate.start,
+                dir: candidate.peak > 0 ? "up" : "down", speed: peakSpeed })
             }
             candidate = null
           }
@@ -281,6 +342,8 @@ export function createHandDetector(hand, options = {}) {
   function resetCircle() { if (circle) circle = createCircleDetector() }
   return {
     hand,
+    get beatCandidate() { return beat.candidate },
+    resetBeatCandidate: beat.resetCandidate,
     resetCircle,
     gap() {
       fist = createFistDetector(options)
@@ -291,10 +354,12 @@ export function createHandDetector(hand, options = {}) {
     push(frame, confirmShortFist) {
       const out = []
       const w = norm(frame.gyr)
-      const f = fist.push(frame.t, frame.gyr, confirmShortFist)
+      const linear = frame.up ? frame.acc.map((value, i) => value - G * frame.up[i]) : null
+      const linearAcc = linear ? norm(linear) : Math.abs(norm(frame.acc) - G)
+      const f = fist.push(frame.t, frame.gyr, confirmShortFist, linearAcc, linear ? dot(linear, frame.up) : 0)
       if (f) {
         out.push(f)
-        if (f.tier !== "short") beat.mute(frame.t + 0.6)
+        if (!f.tier) beat.mute(frame.t + 0.6)
       }
       const loop = circle?.push(frame)
       if (loop) out.push(loop)

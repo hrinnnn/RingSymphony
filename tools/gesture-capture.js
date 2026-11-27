@@ -1,4 +1,11 @@
+import { createCaptureHealth, MAX_GAP_MS, MIN_RATE_HZ, summarizeCapture } from "./capture-quality.js"
+import { timedTrials, renderMetronome } from "./capture-metronome.js"
+
 const exercises = [
+  { id: "transition-4beat", label: "节拍器 · 四拍连续变向", hand: "both", pattern: ["down", "left", "right", "up"], count: 32, hint: "下、左、右、上循环 8 小节。让每次挥拍落在滴答上，自然衔接下一拍。" },
+  { id: "transition-3beat", label: "节拍器 · 三拍连续变向", hand: "both", pattern: ["down", "right", "up"], count: 24, hint: "下、右、上循环 8 小节。让每次挥拍落在滴答上，自然衔接下一拍。" },
+  { id: "metronome-single-dirs", label: "节拍器 · 随机间隔单方向", hand: "both", pattern: ["down", "left", "right", "up"], count: 40, single: true, hint: "看清下一次方向，只在滴答声响时挥一拍。每个方向 10 次，拍与拍之间有随机休息。" },
+  { id: "hard-negatives", label: "强负样本 · 60 秒", hand: "both", count: 1, action: 60000, hint: "按屏幕提示，每 10 秒换一种日常动作。" },
   { id: "rest", label: "静止对照", hand: "both", count: 1, action: 12000, hint: "双手自然放在桌上，整个提示期间保持静止。" },
   { id: "beat-light", label: "右手轻拍", hand: "right", count: 10, hint: "每次亮起时做一次轻拍，然后自然收回。" },
   { id: "beat-natural", label: "右手自然打拍", hand: "right", count: 10, hint: "用平时玩游戏的力度出一拍，回到原位。" },
@@ -40,6 +47,16 @@ const progress = byId("progress")
 const status = byId("status")
 const result = byId("result")
 const time = byId("time")
+const playerId = byId("player-id")
+const wearNote = byId("wear-note")
+const dominantHand = byId("dominant-hand")
+const forceHealth = byId("force-health")
+const healthMessage = byId("health-message")
+const checkStill = byId("check-still")
+const timedHand = byId("timed-hand")
+const bpm = byId("bpm")
+const beatRing = byId("beat-ring")
+const quality = byId("quality")
 const openGame = byId("open-game")
 const closeGame = byId("close-game")
 const gamePanel = byId("game-panel")
@@ -63,6 +80,8 @@ let closeTimer
 let storageReady = false
 let saving = false
 let audio
+const scheduledTones = new Set()
+let healthPassed = false
 
 for (const [i, item] of exercises.entries()) exercise.add(new Option(item.label, i))
 try {
@@ -73,6 +92,8 @@ try {
 function setInstructions() {
   const item = exercises[Number(exercise.value)]
   byId("instructions").textContent = `${item.hint} 共 ${item.count} 次，按屏幕提示出手。`
+  byId("metronome-controls").hidden = !item.pattern
+  if (scope.value !== "both") timedHand.value = scope.value
 }
 
 function selectedBindings() {
@@ -163,14 +184,34 @@ function renderDevices(now) {
   }
   const bridge = socket?.readyState === WebSocket.OPEN
   status.textContent = bridge ? `${live.size} 枚戒指正在发数据` : "等待本机桥接 · 端口 8787"
+  const bindings = selectedBindings()
+  healthPassed = true
+  let failed = false
   for (const hand of ["left", "right"]) {
     const address = hands[hand]
-    rates[hand].textContent = live.has(address) ? `${devices.get(address).motion.toFixed(2)} rad/s` : address ? "等待指定戒指上线" : ""
+    const device = devices.get(address)
+    const health = live.has(address) ? device.health.status(now) : null
+    const goodStream = health?.ready && health.rate >= MIN_RATE_HZ && health.maxGapMs <= MAX_GAP_MS
+    const healthy = goodStream && health.bias
+    rates[hand].dataset.health = healthy ? "green" : health && (!health.ready || goodStream) ? "yellow" : "red"
+    rates[hand].textContent = health
+      ? `${health.rate.toFixed(0)} Hz · 最大间隔 ${health.maxGapMs.toFixed(0)} ms · ${health.bias ? `静置通过 ${Math.hypot(...health.bias).toFixed(2)} rad/s` : `静置待通过 · 当前 ${device.motion.toFixed(2)} rad/s`}`
+      : address ? "等待指定戒指上线" : "未指定"
+    if (Object.hasOwn(bindings, hand)) {
+      healthPassed &&= Boolean(healthy)
+      failed ||= Boolean(health?.ready && !goodStream)
+    }
   }
   const locked = Boolean(recording || pending.length || frame)
-  for (const control of [left, right, exercise, scope]) control.disabled = locked
+  for (const control of [left, right, exercise, scope, playerId, wearNote, dominantHand, forceHealth, checkStill, bpm]) control.disabled = locked
+  timedHand.disabled = locked || scope.value !== "both"
   swapHands.disabled = locked || !hands.left || !hands.right
-  const ready = !locked && storageReady && Object.values(selectedBindings()).every(address => live.has(address))
+  const ready = !locked && storageReady && playerId.value.trim() && Object.values(bindings).every(address => live.has(address)) &&
+    (healthPassed || forceHealth.checked)
+  healthMessage.dataset.health = healthPassed ? "green" : failed ? "red" : "yellow"
+  healthMessage.textContent = healthPassed ? "已选戒指通过检查"
+    : failed ? "采样率低于 150 Hz 或帧间隔大于 50 ms。请检查电量、缩短蓝牙距离，或重启该戒指。"
+    : "等待已选戒指完成采样和静置检查。"
   start.disabled = !ready || !allowsExercise(exercises[exercise.selectedIndex])
   openGame.disabled = !ready
   if (phase.dataset.action === undefined) phase.textContent = start.disabled ? "等待选定戒指就绪" : "可以开始采集"
@@ -186,9 +227,13 @@ function connect() {
       let frame
       try { frame = JSON.parse(line) } catch { continue }
       if (frame.type !== "imu" || !frame.address || frame.acc?.length !== 3 || frame.gyr?.length !== 3) continue
-      const previous = devices.get(frame.address)?.motion ?? 0
-      const motion = Math.max(Math.hypot(...frame.gyr), previous * 0.992)
-      devices.set(frame.address, { name: frame.name || "Ringo", address: frame.address, seen: now, motion })
+      let device = devices.get(frame.address)
+      if (!device) {
+        device = { address: frame.address, health: createCaptureHealth() }
+        devices.set(frame.address, device)
+      }
+      Object.assign(device, { name: frame.name || "Ringo", seen: now, motion: Math.hypot(...frame.gyr) })
+      device.health.push(frame, now)
       const hand = recording?.hands[frame.address]
       if (hand) {
         const receivedMs = Math.round(now - recording.startAtMs)
@@ -203,17 +248,24 @@ function connect() {
   })
 }
 
-function beep() {
+function beep(delay = 0, accent = false) {
   if (audio?.state !== "running") return
   const tone = audio.createOscillator()
   const volume = audio.createGain()
-  const at = audio.currentTime
-  tone.frequency.value = 720
+  const clock = audio.getOutputTimestamp?.()
+  const computed = clock?.performanceTime > 0
+    ? clock.contextTime + (performance.now() + delay * 1000 - clock.performanceTime) / 1000
+    : audio.currentTime + delay
+  const at = Math.max(audio.currentTime, computed)
+  tone.frequency.value = accent ? 960 : 720
   volume.gain.setValueAtTime(0.1, at)
   volume.gain.exponentialRampToValueAtTime(0.001, at + 0.12)
   tone.connect(volume).connect(audio.destination)
   tone.start(at)
   tone.stop(at + 0.13)
+  scheduledTones.add(tone)
+  tone.onended = () => scheduledTones.delete(tone)
+  return true
 }
 
 function selectedHands() {
@@ -221,7 +273,11 @@ function selectedHands() {
 }
 
 function beginRecording(kind, hands, at = nowMs(), id = crypto.randomUUID()) {
-  recording = { version: 1, kind, id, startedAt: new Date(at).toISOString(), startAtMs: at, hands, frames: [] }
+  const preflight = Object.fromEntries(Object.entries(hands).map(([address, hand]) =>
+    [hand, devices.get(address)?.health.status(nowMs()) ?? null]))
+  recording = { version: 1, kind, id, startedAt: new Date(at).toISOString(), startAtMs: at, hands, frames: [],
+    playerId: playerId.value.trim(), wearNote: wearNote.value.trim(), dominantHand: dominantHand.value || null,
+    preflight, forcedHealth: !healthPassed && forceHealth.checked }
   return recording
 }
 
@@ -230,8 +286,21 @@ function finish(reason, game) {
   const durationMs = Math.round(nowMs() - recording.startAtMs)
   if (recording.openTrial) recording.openTrial.endedAtMs = durationMs
   for (const gap of recording.openGaps?.values() ?? []) gap.endedAtMs = durationMs
-  const { openTrial, openGaps, ...completed } = recording
+  const { openTrial, openGaps, audioQueued, ...completed } = recording
+  if (completed.bpm && reason !== "complete") {
+    completed.trials = completed.trials.filter(trial => trial.beatAtMs <= durationMs)
+      .map(trial => ({ ...trial, endedAtMs: Math.min(trial.endedAtMs, durationMs) }))
+  }
   recording = null
+  for (const tone of scheduledTones) tone.stop()
+  scheduledTones.clear()
+  const stats = summarizeCapture(completed.frames, completed.hands, durationMs)
+  const streamSummary = Object.entries(stats.streams).map(([hand, stream]) =>
+    `${hand === "left" ? "左手" : "右手"} ${stream.rateHz} Hz，最大间隔 ${stream.maxGapMs} ms，丢包 ${stream.missing}，断流 ${stream.gaps}`).join(" · ")
+  const qualitySummary = `${streamSummary} · ${reason !== "complete" || stats.recommendRetry ? "建议重录" : "质量通过"}`
+  quality.dataset.health = reason !== "complete" || stats.recommendRetry ? "yellow" : "green"
+  quality.textContent = qualitySummary
+  beatRing.hidden = true
   if (completed.kind === "group") {
     phase.textContent = reason === "complete" ? "本组完成" : "本组提前结束"
     phase.dataset.action = "false"
@@ -241,7 +310,7 @@ function finish(reason, game) {
     if (game) completed.game = game
     gameStatus.textContent = reason === "complete" ? "本局结束" : "已停止录制"
   }
-  pending.push({ ...completed, durationMs, finishReason: reason })
+  pending.push({ ...completed, durationMs, finishReason: reason, quality: stats })
   void savePending()
 }
 
@@ -270,11 +339,12 @@ async function savePending() {
       pending.shift()
       let detail = `${data.frames.length} 帧`
       if (data.kind === "group") {
-        if (data.finishReason === "complete") {
+        if (data.finishReason === "complete" && !data.quality.recommendRetry) {
           const hands = Object.values(data.hands)
           completedGroups[hands.length === 2 ? "both" : hands[0]].add(data.exercise)
           updateExercises(true)
-        } else if (data.finishReason === "lost-ring") detail += " · 戒指断流，请重录本组"
+        } else if (data.finishReason === "complete") detail += " · 建议重录本组"
+        else if (data.finishReason === "lost-ring") detail += " · 戒指断流，请重录本组"
         else detail += " · 部分记录，请重录本组"
       } else {
         if (data.finishReason !== "complete") detail += " · 部分记录"
@@ -289,10 +359,19 @@ async function savePending() {
   }
 }
 
+function confirmHealth() {
+  return healthPassed || window.confirm("已选戒指尚未通过采样或静置检查。确定保存这次带质量警告的录制？")
+}
+
+checkStill.addEventListener("click", () => {
+  for (const address of Object.values(selectedBindings())) devices.get(address)?.health.resetStill()
+  renderDevices(nowMs())
+})
+
 byId("setup").addEventListener("submit", (event) => {
   event.preventDefault()
   renderDevices(nowMs())
-  if (start.disabled) return
+  if (start.disabled || !confirmHealth()) return
   if (window.AudioContext) {
     audio ??= new AudioContext()
     audio.resume().catch(() => {})
@@ -300,21 +379,30 @@ byId("setup").addEventListener("submit", (event) => {
   const item = exercises[Number(exercise.value)]
   Object.assign(beginRecording("group", selectedHands()), {
     exercise: item.id,
-    performingHand: item.hand,
+    performingHand: item.pattern ? timedHand.value : item.hand,
     direction: item.direction,
     plannedCount: item.count,
     trials: [],
   })
+  if (item.pattern) {
+    recording.bpm = Number(bpm.value)
+    recording.trials = timedTrials(item, recording.bpm)
+    recording.audioQueued = 0
+  }
   renderDevices(nowMs())
   stop.disabled = false
   result.textContent = ""
+  quality.textContent = ""
 })
 
 function tick() {
   const now = nowMs()
-  const live = renderDevices(now)
+  if (now - lastHealthRender > 120) {
+    renderDevices(now)
+    lastHealthRender = now
+  }
   if (!recording) return
-  const offline = Object.keys(recording.hands).filter(address => !live.has(address))
+  const offline = Object.keys(recording.hands).filter(address => now - (devices.get(address)?.seen ?? 0) >= LIVE_MS)
   if (recording.kind === "game") {
     for (const address of offline) {
       if (recording.openGaps.has(address)) continue
@@ -330,9 +418,14 @@ function tick() {
   }
   if (offline.length) return finish("lost-ring")
   const item = exercises[Number(exercise.value)]
+  const elapsed = now - recording.startAtMs
+  if (item.pattern) {
+    const ended = renderMetronome(recording, item, elapsed, { phase, progress, time, beatRing, beep })
+    if (ended) finish("complete")
+    return
+  }
   const action = item.action ?? 1450
   const interval = action + 1500
-  const elapsed = now - recording.startAtMs
   const trial = Math.floor(Math.max(0, elapsed - 3000) / interval)
   const moving = elapsed >= 3000 && trial < item.count && (elapsed - 3000) % interval < action
   progress.value = Math.min(1, elapsed / (3000 + item.count * interval))
@@ -347,7 +440,9 @@ function tick() {
     recording.openTrial = marker
     beep()
   }
-  phase.textContent = moving ? item.label : elapsed < 3000 ? "准备" : "回到原位，等下一次提示"
+  const daily = ["扶眼镜", "摸鼠标", "喝水", "打字", "手臂自然放下和抬起", "说话并比划"]
+  phase.textContent = moving ? (item.id === "hard-negatives" ? daily[Math.min(5, Math.floor((elapsed - 3000) / 10000))] : item.label)
+    : elapsed < 3000 ? "准备" : "回到原位，等下一次提示"
   phase.dataset.action = String(moving)
   time.textContent = elapsed < 3000 ? `${Math.ceil((3000 - elapsed) / 1000)} 秒后开始` : `第 ${trial + 1} / ${item.count} 次`
 }
@@ -358,7 +453,7 @@ retryGame.addEventListener("click", savePending)
 
 openGame.addEventListener("click", () => {
   renderDevices(nowMs())
-  if (openGame.disabled) return
+  if (openGame.disabled || !confirmHealth()) return
   gameHands = selectedHands()
   const params = new URLSearchParams({ capture: "1", ...selectedBindings() })
   frame = document.createElement("iframe")
@@ -441,4 +536,9 @@ window.addEventListener("beforeunload", event => {
 updateExercises()
 checkStorage()
 connect()
-setInterval(tick, 60)
+let lastHealthRender = 0
+function animate() {
+  tick()
+  requestAnimationFrame(animate)
+}
+requestAnimationFrame(animate)

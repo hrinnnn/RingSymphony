@@ -61,7 +61,7 @@ export function startBridge({ studioHost = "127.0.0.1", studioPort = 17888, port
         buffer = buffer.slice(index + 1)
         if (line) pending.push(line)
       }
-      if (!flushTimer) flushTimer = setTimeout(flush, 8)
+      if (pending.length && !flushTimer) flushTimer = setImmediate(flush)
     })
     const lost = () => {
       socket?.destroy()
@@ -86,7 +86,7 @@ export function startBridge({ studioHost = "127.0.0.1", studioPort = 17888, port
     close() {
       stopped = true
       clearTimeout(retry)
-      clearTimeout(flushTimer)
+      clearImmediate(flushTimer)
       socket?.destroy()
       wss.close()
     },

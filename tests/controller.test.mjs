@@ -18,7 +18,7 @@ const makeNode = () => ({
 })
 const node = id => { if (!nodes.has(id)) nodes.set(id, makeNode()); return nodes.get(id) }
 const keys = {}, audio = { now: 0, parts: new Set(), dynamics: 1, tempo: 60, ended: null, freeStarts: 0, freeStops: 0 }
-let nextFrame, pickedPart, aimedPart, ringGesture, ringPreview, cutoffDue, levelDone
+let nextFrame, pickedPart, aimedPart, ringGesture, ringPreview, ringCueDue, cutoffDue, levelDone
 let calibrationReady = true
 let palmCalibrationReady = true
 let palmCalibrationActive = false
@@ -64,7 +64,7 @@ globalThis.__controller = {
   setTempo: (bpm, age) => { audio.tempo = bpm; audio.strokeAge = age },
   partLevels: () => ({}), transportBeats: () => 0,
   transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .4, PERFECT: .15, createWorld: () => world, createLane: () => lane, createSettings: () => settings, startPiece: async chart => { audio.now = 0; return chart }, buildPieceChart, PIECES,
-  startRing: ({ onGesture, onPreview, cutoffDue: confirmCutoff }) => { ringGesture = onGesture; ringPreview = onPreview; cutoffDue = confirmCutoff; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
+  startRing: ({ onGesture, onPreview, cueDue, cutoffDue: confirmCutoff }) => { ringGesture = onGesture; ringPreview = onPreview; ringCueDue = cueDue; cutoffDue = confirmCutoff; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
   createMixerHud: () => ({ update() {} }), lassoParts, pathLength, PART_INFO, PARTS, LOOP_BARS,
   // The camera is optional and the controller must work with it absent, which is what these
   // inert stubs represent: a tracker that never has a verdict is the no-camera path.
@@ -87,7 +87,7 @@ const clickPart = part => {
 const [levelButton, threeButton, , freeButton] = node('#level-list').children
 const studyButtons = node('#level-list').children
 await levelButton.handlers.click()
-assert.equal(ringPreview, undefined, 'the stage only reacts to confirmed gestures')
+assert.equal(typeof ringPreview, 'function', 'the stage can preview without scoring')
 node('.ring-rerecord').open = true
 tick(chart.cues[0].time); key('ArrowDown')
 assert.equal(node('#tally').textContent, '0000', 'keyboard input in the supplemental dialog does not score a beat')
@@ -188,7 +188,18 @@ for (const study of STUDIES) {
 }
 await studyButtons[1].handlers.click()
 const ringStudy = buildChart(STUDIES[1])
-tick(ringStudy.cues[0].time + 0.15); gesture('beat', 'right', { age: 0.15, dir: ringStudy.cues[0].direction })
+const firstRingCue = ringStudy.cues[0]
+tick(firstRingCue.time + 0.22)
+assert.equal(ringCueDue('right', 0.22, firstRingCue.direction), true, 'reversal rescue uses the back-dated song clock')
+assert.equal(ringCueDue('left', 0.22, firstRingCue.direction), false, 'reversal rescue checks the correct hand')
+assert.equal(ringCueDue('right', 0, firstRingCue.direction), false, 'an ordinary Good window does not rescue a return')
+const previousPoseCount = poses.length
+ringPreview({ hand: 'right', dir: 'up', age: 0.22 })
+assert.equal(poses.length, previousPoseCount, 'an unrelated prediction does not move the hand')
+ringPreview({ hand: 'right', dir: firstRingCue.direction, age: 0.22 })
+assert.deepEqual(poses.at(-1), ['right', 'beatPreview', firstRingCue.direction])
+assert.equal(node('#tally').textContent, '0000', 'a preview does not consume the cue or score')
+gesture('beat', 'right', { age: 0.22, dir: firstRingCue.direction })
 assert.equal(node('#tally').textContent, '0100', 'event age back-dates the beat onto the cue')
 assert.ok(Math.abs(ringErrors.at(-1)) < 1e-9)
 tick(ringStudy.cues[1].time); gesture('palm', 'left', { dir: 'up' })

@@ -20,6 +20,7 @@ const emptyMatrix = () => Object.fromEntries(DIRECTIONS.map((want) => [want, Obj
 
 export function createGestureLog() {
   let strokes = []
+  let latencyEvents = []
   let level = null
   let previousWant = null
   // Which classifier produced this session's strokes. Set from the first stroke that reports one,
@@ -31,6 +32,7 @@ export function createGestureLog() {
     begin(study, cues) {
       level = { title: study?.title ?? "?", bpm: study?.bpm ?? null, meter: study?.meter ?? null, startedAt: new Date().toISOString() }
       strokes = []
+      latencyEvents = []
       previousWant = null
       mode = null
       this.cues = cues.filter((cue) => cue.hand === "right" && cue.kind === "beat").map((cue) => ({ time: cue.time, direction: cue.direction }))
@@ -38,9 +40,14 @@ export function createGestureLog() {
 
     cues: [],
 
+    recordLatency({ type, hand, detectionDelayMs, transportAgeMs }, at) {
+      if (!level || !Number.isFinite(detectionDelayMs) || !Number.isFinite(transportAgeMs)) return
+      latencyEvents.push({ type, hand, at: Number(at.toFixed(3)), detectionDelayMs, transportAgeMs })
+    },
+
     // Called for every right-hand beat that reached the game, whether or not it scored. `at` is on
     // the song clock, the same clock the cues use.
-    record({ at, fused, ring, ringReason, camera, cameraReason, displacement, angle, margin, source, tier, yaw, vertical, mode: modeName, peakSpeed }) {
+    record({ at, fused, ring, ringReason, camera, cameraReason, displacement, angle, margin, source, tier, yaw, vertical, mode: modeName, peakSpeed, timing }) {
       if (!level) return
       if (mode === null && modeName) mode = modeName
       // The nearest unused cue, by time alone. Deliberately not by direction: matching on
@@ -79,6 +86,7 @@ export function createGestureLog() {
         yaw: yaw == null ? null : Number(yaw.toFixed(3)),
         vertical: vertical == null ? null : Number(vertical.toFixed(3)),
         peakSpeed: peakSpeed == null ? null : Number(peakSpeed.toFixed(2)),
+        ...(timing && { timing: { ...timing } }),
       })
     },
 
@@ -90,6 +98,17 @@ export function createGestureLog() {
     // one that answers forty times and is right thirty-five.
     summary() {
       const matched = strokes.filter((stroke) => stroke.want)
+      const latencyMedian = values => {
+        const sorted = [...values].sort((a, b) => a - b)
+        return (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.floor(sorted.length / 2)]) / 2
+      }
+      const latency = {}
+      for (const type of new Set(latencyEvents.map(event => event.type))) {
+        const events = latencyEvents.filter(event => event.type === type)
+        latency[type] = { count: events.length,
+          detectionDelayMs: latencyMedian(events.map(event => event.detectionDelayMs)),
+          transportAgeMs: latencyMedian(events.map(event => event.transportAgeMs)) }
+      }
       const score = (key) => {
         const answered = matched.filter((stroke) => stroke[key])
         const right = answered.filter((stroke) => stroke[key] === stroke.want).length
@@ -190,6 +209,7 @@ export function createGestureLog() {
 
       return {
         level,
+        latency,
         // Which classifier produced these numbers. A session's accuracy is uninterpretable without
         // it, since the two paths fail in entirely different ways.
         mode: mode ?? null,
@@ -232,6 +252,7 @@ export function createGestureLog() {
         // failure here, and only the player knows which it was.
         assumption: "每个击拍按谱面要求的方向完成。若演奏时动作本身出错，本记录无法区分是传感器误判还是动作失误。",
         summary: this.summary(),
+        latencyEvents,
         strokes,
       }, null, 2)
     },

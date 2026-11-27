@@ -10,8 +10,8 @@
       h1, h2, p { margin: 0 0 12px; }
       form, section { border: 1px solid #4c463c; padding: clamp(16px, 4vw, 28px); background: #1a202a; margin: 16px 0; }
       label, progress { display: block; width: 100%; }
-      select, button { font: inherit; padding: 6px 12px; border: 1px solid #827052; border-radius: 4px; }
-      select { width: 100%; margin: 4px 0 12px; background: #11151d; }
+      select, button, input[type="text"] { font: inherit; padding: 6px 12px; border: 1px solid #827052; border-radius: 4px; }
+      select, input[type="text"] { box-sizing: border-box; width: 100%; margin: 4px 0 12px; background: #11151d; }
       button { cursor: pointer; background: #edcf93; color: #231b11; font-weight: 650; }
       button:disabled { cursor: default; opacity: .45; }
       #phase { font-size: clamp(26px, 6vw, 42px); line-height: 1.2; }
@@ -25,6 +25,13 @@
       .game-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 16px; border-bottom: 1px solid #4c463c; }
       #game-frame { flex: 1; width: 100%; border: 0; }
       #save-game:empty { display: none; }
+      fieldset { margin: 12px 0; border: 1px solid #4c463c; }
+      [data-health="red"] { color: #ffa599; }
+      [data-health="yellow"] { color: #f6d58b; }
+      [data-health="green"] { color: #9fe6aa; }
+      #beat-ring { width: 64px; height: 64px; margin: 0 0 12px; border-radius: 50%; background: conic-gradient(#ffda8d var(--beat-progress, 0%), #48546a 0); padding: 5px; }
+      #beat-ring::before { content: ""; display: block; height: 100%; background: #1a202a; border-radius: 50%; }
+      #quality { margin-top: 12px; }
     </style>
   </head>
   <body>
@@ -43,13 +50,28 @@
       <label>左手戒指 <span id="left-rate" class="motion"></span><select id="left"></select></label>
       <label>右手戒指 <span id="right-rate" class="motion"></span><select id="right"></select></label>
       <p><button id="swap-hands" type="button" disabled>交换左右</button></p>
+      <fieldset>
+        <legend>采集前检查</legend>
+        <p class="muted">选定戒指后，双手放在桌面静置 3 秒，再等满 5 秒采样检查。</p>
+        <p><button id="check-still" type="button">重新检测静置零偏</button></p>
+        <p id="health-message"></p>
+        <label><input id="force-health" type="checkbox"> 仍要强制录制</label>
+      </fieldset>
+      <label>佩戴者 ID <input id="player-id" type="text" required maxlength="64" placeholder="例如 P01"></label>
+      <label>佩戴姿态 / 备注 <input id="wear-note" type="text" maxlength="240" placeholder="例如食指常规 / 旋转 90 度"></label>
+      <label>惯用手 <select id="dominant-hand"><option value="">未填</option><option value="right">右手</option><option value="left">左手</option><option value="both">双手</option></select></label>
       <label>本组动作 <select id="exercise"></select></label>
+      <div id="metronome-controls" hidden>
+        <label>动作手 <select id="timed-hand"><option value="right">右手</option><option value="left">左手</option></select></label>
+        <label>节拍速度 <select id="bpm"><option>80</option><option selected>100</option><option>120</option></select></label>
+      </div>
       <p id="instructions"></p>
       <p id="group-count" class="muted"></p>
       <button id="start" disabled>开始这一组</button>
     </form>
     <section aria-label="采集进度">
       <h2 id="phase">等待选定戒指就绪</h2>
+      <div id="beat-ring" hidden aria-hidden="true"></div>
       <p id="time" class="muted"></p>
       <progress id="progress" max="1" value="0" aria-label="本组进度"></progress>
       <div class="actions">
@@ -57,6 +79,7 @@
         <button id="retry-save" type="button" hidden>重试保存</button>
       </div>
       <p id="result" role="status"></p>
+      <p id="quality" role="status"></p>
     </section>
     <section aria-labelledby="game-heading">
       <h2 id="game-heading">整局录制</h2>

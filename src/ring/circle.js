@@ -2,12 +2,14 @@
 // while the game supplies which sections are available to select.
 const SAMPLE_STEP = 0.04
 const WINDOWS = [1.15, 1.45, 1.75, 2.05, 2.35, 2.65]
-const MIN_SPEED = 0.65
-const MIN_TRAVEL = 2.7
-const MIN_TURN = 5.55
-const MIN_COHERENCE = 0.73
-const MAX_OPENNESS = 0.62
-const MIN_BALANCE = 0.87
+// After zero-bias correction genuine loops need less total rotation to count.
+// Compensate with tighter closure and two-axis checks to reject half circles.
+const MIN_SPEED = 0.52
+const MIN_TRAVEL = 2.3
+const MIN_TURN = 5.7
+const MIN_COHERENCE = 0.8
+const MAX_OPENNESS = 0.45
+const MIN_BALANCE = 0.91
 
 const norm = v => Math.hypot(...v)
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -73,11 +75,19 @@ export function createCircleDetector() {
   let bucket = [0, 0, 0]
   let count = 0
   let smooth = null
+  let lastFrame = null
   let lastCircle = -Infinity
 
   return {
     push(frame) {
       const { t, gyr } = frame
+      if (lastFrame !== null && t - lastFrame > 0.075) {
+        bucketStart = null
+        bucket = [0, 0, 0]
+        count = 0
+        smooth = null
+      }
+      lastFrame = t
       bucketStart ??= t
       for (let i = 0; i < 3; i++) bucket[i] += gyr[i]
       count++

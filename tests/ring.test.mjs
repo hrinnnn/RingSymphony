@@ -25,9 +25,17 @@ const people = ['lry', 'yyh', 'zzw']
 {
   const detector = createBeatDetector({ beatFloor: 1.6, adaptiveFloor: false })
   const signal = [0, 0, 2, 4, 3.1, 2.5, 1, 0]
-  const events = signal.map((speed, i) => detector.push(i * 0.05, speed))
+  const candidates = []
+  const events = signal.map((speed, i) => {
+    const event = detector.push(i * 0.05, speed)
+    candidates.push(detector.candidate)
+    return event
+  })
   assert.equal(events.findIndex(Boolean), 4, 'peak detection must not wait for speed to drop below the trigger threshold')
   assert.ok(Math.abs(events[4].t - 0.15) < 1e-9)
+  assert.equal(candidates[3].onsetT, 0.1, 'the rising stroke has an onset before it scores')
+  assert.equal(events[4].onsetT, candidates[3].onsetT, 'confirmation belongs to the same stroke')
+  assert.equal(candidates[4], null)
 }
 
 {

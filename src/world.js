@@ -1044,8 +1044,8 @@ export function createWorld(canvas, laneCanvas) {
       const direction = state.direction
       let rz = 0
 
-      if (gesture === "beat") {
-        const stroke = ictus(u)
+      if (gesture === "beat" || gesture === "beatPreview") {
+        const stroke = gesture === "beat" ? ictus(u) : 0.18 * smooth(u / 0.3) * (1 - smooth((u - 0.55) / 0.45))
         if (direction === "down" || direction === "up") {
           rest.y += (direction === "up" ? 1 : -1) * 0.22 * stroke
         } else {
@@ -1201,13 +1201,15 @@ export function createWorld(canvas, laneCanvas) {
       return { part: person.userData.part, x: (p.x + 1) / 2 * rect.width, y: (1 - p.y) / 2 * rect.height }
     })
   }
-  const poseDurations = { beat: 0.30, palm: 1.9, point: 0.9, circle: 0.92, fist: 0.8 }
+  const poseDurations = { beat: 0.30, beatPreview: 0.20, palm: 1.9, point: 0.9, circle: 0.92, fist: 0.8 }
   function pose(which, gesture, detail) {
     const state = handStates[which === "right" ? 1 : 0]
+    const now = performance.now() / 1000
+    if (gesture === "beatPreview" && now < state.until) return
     state.pose = gesture
-    state.from = performance.now() / 1000
+    state.from = now
     state.until = state.from + poseDurations[gesture]
-    state.direction = gesture === "beat" || gesture === "palm" ? detail : undefined
+    state.direction = gesture === "beat" || gesture === "beatPreview" || gesture === "palm" ? detail : undefined
     state.aimX = undefined
     if (gesture === "point" && detail) {
       const pool = chamber.visible ? chamberPlayers : players

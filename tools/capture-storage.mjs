@@ -8,7 +8,7 @@ const MAX_BYTES = 48 * 1024 * 1024
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/
 const LOCAL_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"])
-const GROUP_FILE = /^ring-([a-z-]+)-complete-(?:(left|right)-)?\d{4}-/
+const GROUP_FILE = /^ring-([a-z][a-z0-9-]*?)-complete-(?:(left|right)-)?\d{4}-/
 
 function send(res, status, payload) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" })
@@ -34,10 +34,18 @@ function valid(record) {
     !Number.isFinite(Date.parse(record.startedAt)) || !Number.isFinite(record.durationMs) ||
     typeof record.finishReason !== "string" || !Array.isArray(record.frames)) return false
   const hands = Object.values(record.hands ?? {})
+  if (record.playerId !== undefined && (typeof record.playerId !== "string" ||
+      !record.playerId.trim() || record.playerId.length > 64)) return false
+  if (record.wearNote !== undefined && (typeof record.wearNote !== "string" || record.wearNote.length > 240)) return false
+  if (record.dominantHand != null && !["left", "right", "both"].includes(record.dominantHand)) return false
   if (hands.length < 1 || hands.length > 2 || new Set(hands).size !== hands.length ||
     hands.some(hand => hand !== "left" && hand !== "right")) return false
   if (record.kind === "game") return Boolean(record.game && typeof record.game.level?.title === "string")
-  return record.kind === "group" && /^[a-z-]{1,32}$/.test(record.exercise) && Array.isArray(record.trials) &&
+  if (record.bpm !== undefined && (![80, 100, 120].includes(record.bpm) || !Array.isArray(record.trials) ||
+      record.trials.some((trial, i, trials) => !Number.isFinite(trial.beatAtMs) || !Number.isFinite(trial.cueAtMs) ||
+        trial.cueAtMs >= trial.beatAtMs || (i > 0 && trial.beatAtMs <= trials[i - 1].beatAtMs) ||
+        !["up", "down", "left", "right"].includes(trial.direction)))) return false
+  return record.kind === "group" && /^[a-z][a-z0-9-]{0,31}$/.test(record.exercise) && Array.isArray(record.trials) &&
     (record.performingHand === "both" || hands.includes(record.performingHand))
 }
 
@@ -49,8 +57,9 @@ async function save(directory, record) {
   const folder = record.kind === "group" ? "groups" : "games"
   const hands = Object.values(record.hands)
   const handTag = hands.length === 1 ? `${hands[0]}-` : ""
+  const groupStatus = record.finishReason !== "complete" ? "partial" : record.quality?.recommendRetry ? "check" : "complete"
   const name = record.kind === "group"
-    ? `ring-${record.exercise}-${record.finishReason === "complete" ? "complete" : "partial"}-${handTag}${suffix}.json`
+    ? `ring-${record.exercise}-${groupStatus}-${handTag}${suffix}.json`
     : suffix
   const location = `${folder}/${name}`
   const parent = join(directory, folder)

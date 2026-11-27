@@ -282,7 +282,10 @@ export function createRingPanel({ button, panel, input }) {
       const gesture = gestures[hand]
       if (!gesture) return `${HAND_LABEL[hand]}：—`
       const name = gesture.type === "beat" ? `击拍 · ${DIRECTION_NAMES[gesture.dir] ?? `方向不确定${gesture.directionReason ? `（${gesture.directionReason}）` : ""}`}` : gesture.type === "palm" ? (gesture.dir === "up" ? "抬掌" : "压掌") : GESTURE[gesture.type] ?? gesture.type
-      return `${HAND_LABEL[hand]}：${name} #${gesture.count}（峰后 ${Math.round(gesture.detectionDelay * 1000)} ms）`
+      const timing = gesture.timing
+      const preview = timing?.previewLeadMs > 0 ? ` · 预览早 ${timing.previewLeadMs} ms` : ""
+      const rise = timing ? `起势至峰值 ${timing.onsetToPeakMs} ms · ` : ""
+      return `${HAND_LABEL[hand]}：${name} #${gesture.count}（${rise}峰后 ${Math.round(gesture.detectionDelay * 1000)} ms${preview}）`
     }).join("；")
   }
 
