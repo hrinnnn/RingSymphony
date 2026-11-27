@@ -298,12 +298,23 @@ function playPalm(direction, at = inputNow(), hand = "left", fromRing = false) {
   if (matches) scoreCue(found.cue, gradeDistance(found.distance), found.delta)
 }
 
+function cutoffLead() {
+  return Math.max(GOOD, Math.min(1, chart.beat))
+}
+
+function activeCutoff(at, hand = "left", allowLead = false) {
+  if (mode !== "playing" && mode !== "count-in") return null
+  const early = allowLead ? cutoffLead() : GOOD
+  return cues.find(cue => cue.kind === "cut" && !cue.result && (cue.hand === hand || cue.hand === "both") &&
+    at >= cue.time - early && at <= cue.time + GOOD)
+}
+
 function playCut(at = inputNow(), hand) {
-  if (mode !== "playing" && mode !== "count-in") return
-  const found = nearest(at, hand ?? "left", "cut")
-  if (!found || found.distance > GOOD) return
+  const cue = activeCutoff(at, hand, true)
+  if (!cue) return
   for (const side of hand ? [hand] : ["left", "right"]) world.pose(side, "fist")
-  scoreCue(found.cue, gradeDistance(found.distance), found.delta)
+  const delta = at - cue.time
+  scoreCue(cue, gradeDistance(Math.min(GOOD, Math.abs(delta))), delta)
 }
 
 function playPoint(part, at = inputNow()) {
@@ -404,11 +415,7 @@ function onRing(event) {
 const ring = startRing({
   boundHands,
   onGesture: onRing,
-  cutoffDue: (hand, age) => {
-    if (mode !== "playing" && mode !== "count-in") return false
-    const found = nearest(inputNow() - age, hand, "cut")
-    return Boolean(found && found.distance <= GOOD)
-  },
+  cutoffDue: (hand, age) => (mode === "playing" || mode === "count-in") && Boolean(activeCutoff(inputNow() - age, hand)),
   // The camera answers where the ring is blind: up and down sit about 166 degrees apart in the
   // ring's own axes, so no threshold separates a down-stroke from the return of an up-stroke.
   // Synchronous and cheap — nothing in the beat path waits for a frame.
@@ -861,7 +868,9 @@ function loop() {
     ? now / chart.beat
     : (now - chart.countIn) / beatStep
   beatDots.forEach((dot, i) => dot.classList.toggle("active", Math.floor(conductingBeat) % chart.meter === i))
-  const nextGesture = cues.find((cue) => cue.kind !== "beat" && !cue.result && now <= (cue.until ?? cue.time + GOOD))
+  const inputAt = now - settings.latency
+  const nextGesture = cues.find((cue) => cue.kind !== "beat" && !cue.result &&
+    (cue.kind === "cut" ? inputAt : now) <= (cue.until ?? cue.time + GOOD))
   const leftRing = !manual("left")
   const rightRing = !manual("right")
   let hint
@@ -875,7 +884,10 @@ function loop() {
       const action = leftRing ? "左手画一整圈" : "鼠标画圈"
       const prepare = now - settings.latency < nextGesture.time - 0.15
       hint = `${prepare ? "准备 · " : ""}${action} · ${names(nextGesture.parts)}`
-    } else if (nextGesture.kind === "cut") hint = leftRing || rightRing ? "握拳 · 收束" : "按 G · 收束"
+    } else if (nextGesture.kind === "cut") {
+      const action = leftRing || rightRing ? "握拳 · 收束" : "按 G · 收束"
+      hint = inputAt < nextGesture.time - cutoffLead() ? `准备 · ${action}` : action
+    }
     else if (nextGesture.direction === "up") hint = "抬掌 · 渐强"
     else hint = "压掌 · 渐弱"
   } else if (chart.musicEnd !== undefined && now >= chart.musicEnd) hint = "余音"
