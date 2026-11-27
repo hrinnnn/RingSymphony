@@ -71,7 +71,6 @@ let deltas = []
 // through a different path and must not steer a correction meant for the ring pipeline.
 let ringDeltas = []
 let mode = "home"
-let spawned = new Set()
 let dynamics = 1
 let pointer = null
 let toastTimer = 0
@@ -596,7 +595,6 @@ async function begin(study = lastStudy) {
   settings.close()
   stopLevel()
   world.reset()
-  spawned = new Set()
   lane.reset()
   chart = buildChart(study)
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
@@ -638,7 +636,6 @@ async function beginPiece(piece) {
   settings.close()
   stopLevel()
   world.reset()
-  spawned = new Set()
   lane.reset()
   chart = buildPieceChart(piece)
   cues = chart.cues.map((cue) => ({ ...cue, result: null }))
@@ -901,11 +898,7 @@ function loop() {
   }
   // A positive input delay judges gestures earlier, so a cue must stay open that much longer.
   const delay = Math.max(0, settings.latency)
-  cues.forEach((cue, index) => {
-    if (!spawned.has(index) && cue.time - now < warn + 0.05) {
-      spawned.add(index)
-      if (cue.kind === "cue") world.spawn(cue)
-    }
+  for (const cue of cues) {
     const ringCue = (cue.hand !== "left" && rightRing) || (cue.hand !== "right" && leftRing)
     const grace = (ringCue ? 0.5 : LATE_GRACE) + delay
     const openUntil = (cue.until ?? cue.time + GOOD) + grace
@@ -914,7 +907,7 @@ function loop() {
       if (single) scoreCue(cue, "good", single.delta, single.reason)
       else scoreCue(cue, "miss")
     }
-  })
+  }
   if (now >= chart.duration && cues.every((cue) => cue.result)) return finish()
   const playing = new Set(chart.entries ? chart.entries.on : ["piano", "cello"])
   if (!chart.entries) {
@@ -934,7 +927,15 @@ function loop() {
     return cue.part ? [cue.part] : []
   }
   const pending = new Map()
+  const pointCues = new Map()
   for (const cue of cues) {
+    if (cue.kind === "cue" && !pointCues.has(cue.part)) {
+      const start = Math.max(0, cue.time - warn)
+      const end = cue.result ? cue.time + 0.16 : cue.until ?? cue.time + 0.4
+      if (cue.result !== "miss" && now >= start && now <= end) {
+        pointCues.set(cue.part, Math.min(1, (now - start) / (cue.time - start)))
+      }
+    }
     if (cue.result || cue.kind === "beat") continue
     const early = gestureLead(cue)
     if (now < cue.time - early || now > (cue.until ?? cue.time + 0.4)) continue
@@ -948,7 +949,7 @@ function loop() {
   const hand = handLift()
   const early = soon ? gestureLead(soon) : warn
   const clock = soon && soon.until ? Math.min(1, Math.max(0, (now - soon.time) / Math.max(0.001, soon.until - soon.time))) : 1
-  const shownLift = !soon ? 0 : soon.direction === "down" ? (hand == null ? 1 - clock : 1 - hand) : (hand == null ? clock : hand)
+  const shownLift = hand ?? (soon?.direction === "down" ? 1 - clock : clock)
   const arrive = soon ? Math.min(1, Math.max(0, (now - (soon.time - early)) / early)) : 0
   const prompt = soon && {
     kind: soon.kind === "cue" ? "point" : soon.kind === "dynamics" ? "swell" : soon.kind,
@@ -965,7 +966,7 @@ function loop() {
   if (aimed) selected.add(aimed)
   const beatPhase = conductingBeat % 1
   world.syncBeats?.(now, cues, beatStep)
-  world.update(now, playing, { selected, pending, solo: null, prompt, score: scoreLine, dynamics: currentDynamics(), beatPhase, arrive })
+  world.update(now, playing, { selected, pending, pointCues, prompt, score: scoreLine, dynamics: currentDynamics(), beatPhase, arrive })
 }
 
 // In the levels, a hand that has a streaming ring is driven by the ring only; keyboard and mouse take over otherwise.

@@ -23,21 +23,32 @@ export function laneLayout(width, height) {
   }
 }
 
-// Camera-space flight. Every direction leaves the same point deep in the hall and grows
-// as it comes toward the judgment line; left and right only separate near the line.
+// Camera-space flight. Interpolate projected positions so the two paths stay
+// separate and upcoming arrows are spaced evenly on screen.
 export function beatFlight(hand, remain, lead) {
-  const p = Math.min(1.08, Math.max(0, 1 - remain / lead))
+  const progress = clamp01(1 - remain / lead)
   const farZ = -6.4
   const nearZ = -1.58
-  const z = farZ + (nearZ - farZ) * Math.min(1, p)
-  const closeness = Math.min(1, Math.max(0, (z - farZ) / (nearZ - farZ)))
-  const spread = closeness ** 2.15
+  const z = farZ + (nearZ - farZ) * progress
+  const depth = -z
+  const projectedX = (hand === "left" ? -0.55 : 0.52) / -nearZ
+  const projectedY = -0.32 / -nearZ
   return {
-    x: (hand === "left" ? -0.55 : 0.52) * spread,
-    y: 0.62 * (1 - closeness ** 1.05) - 0.32,
+    x: projectedX * (0.28 + 0.72 * progress) * depth,
+    y: (0.16 + (projectedY - 0.16) * progress) * depth,
     z,
     scale: (0.58 / Math.abs(z)) * 1.15,
   }
+}
+
+export function stageHalfFovTangent(aspect) {
+  return Math.tan(53 * Math.PI / 360) * Math.max(1, 1.4 / aspect)
+}
+
+export function beatLanding(hand, width, height) {
+  const { x, y, z } = beatFlight(hand, 0, 1)
+  const pixelsPerUnit = height / (2 * -z * stageHalfFovTangent(width / height))
+  return { x: width / 2 + x * pixelsPerUnit, y: height / 2 - y * pixelsPerUnit }
 }
 
 export function createLane(canvas) {
@@ -45,7 +56,8 @@ export function createLane(canvas) {
   let width = 0
   let height = 0
   let ratio = 1
-  let layout = null
+  let radius = 0
+  let landings = null
   const fx = []
 
   function resize() {
@@ -56,7 +68,8 @@ export function createLane(canvas) {
     height = rect.height
     canvas.width = Math.round(width * ratio)
     canvas.height = Math.round(height * ratio)
-    layout = laneLayout(width, height)
+    radius = laneLayout(width, height).r * 0.62
+    landings = { left: beatLanding("left", width, height), right: beatLanding("right", width, height) }
   }
 
   function reset() { fx.length = 0 }
@@ -88,31 +101,32 @@ export function createLane(canvas) {
     if (spacing) g.letterSpacing = "0px"
   }
 
-  function effects(chart) {
+  function effects(now) {
     const nowMs = performance.now()
-    const lit = { left: {}, right: {} }
+    const drawn = new Set()
     for (let i = fx.length - 1; i >= 0; i -= 1) {
       const item = fx[i]
+      if (now < item.time) continue
+      item.born ??= nowMs
       const age = (nowMs - item.born) / 1000
-      if (age > 0.8) { fx.splice(i, 1); continue }
-      const lane = layout[item.cue.hand === "both" ? "right" : item.cue.hand] || layout.right
-      const { x, y } = lane.target
+      if (age >= 0.72) { fx.splice(i, 1); continue }
+      if (drawn.has(item.hand)) continue
+      drawn.add(item.hand)
+      const { x, y } = landings[item.hand]
       const grade = GRADE[item.kind]
-      const t = age / 0.8
-      const side = item.cue.hand === "left" ? "left" : "right"
-      if (item.cue.direction && item.kind !== "miss" && age < 0.25) lit[side][item.cue.direction] = 1
-      const radius = layout.r * (1 + t * 1.8)
+      const t = age / 0.72
+      const ringRadius = radius * (0.65 + t * 1.4)
       g.lineWidth = 5 * (1 - t)
       g.strokeStyle = alpha(grade.ink, (1 - t) * 0.5)
       g.beginPath()
-      g.arc(x, y, radius, 0, Math.PI * 2)
+      g.arc(x, y, ringRadius, 0, Math.PI * 2)
       g.stroke()
       g.lineWidth = 3 * (1 - t)
       g.strokeStyle = alpha(grade.color, 1 - t)
       g.beginPath()
-      g.arc(x, y, radius, 0, Math.PI * 2)
+      g.arc(x, y, ringRadius, 0, Math.PI * 2)
       g.stroke()
-      const lift = y - layout.r * 1.7 - t * 20
+      const lift = y - radius - 12 - t * 12
       g.save()
       g.globalAlpha = 1 - Math.max(0, t - 0.55) / 0.45
       // Overshoot to 1.14 in the first 90ms, settle by 260ms, then hold.
@@ -126,25 +140,29 @@ export function createLane(canvas) {
       if (item.timing) text(item.timing.text, x, lift + 21, 12, item.timing.color, 700, 1, "#160f06", 6)
       g.restore()
     }
-    return lit
   }
 
-  function frame(now, chart, cues) {
+  function frame(now, chart) {
     if (!width) resize()
     if (!width) return
     g.setTransform(ratio, 0, 0, ratio, 0, 0)
     g.clearRect(0, 0, width, height)
     if (!chart) return
-    effects(chart)
+    effects(now)
   }
 
   // `delta` is the signed gesture error in seconds, negative = early.
-  function hit(cue, kind, delta) {
+  function hit(cue, kind, delta, reason) {
+    if (cue.kind !== "beat") return
     const sec = Math.abs(delta ?? 0)
-    const timing = kind !== "miss" && sec >= 0.025
+    const timing = reason ? { text: reason, color: "#f2dcae" } : kind !== "miss" && sec >= 0.025
       ? { text: `${delta < 0 ? "偏早" : "偏晚"} ${Math.round(sec * 1000)}ms`, color: delta < 0 ? "#cfe4dc" : "#f2dcae" }
       : null
-    fx.push({ cue, kind, timing, born: performance.now() })
+    const hands = cue.hand === "both" ? ["left", "right"] : [cue.hand]
+    for (const hand of hands) {
+      const handGrade = cue.hits?.[hand]?.kind ?? (cue.hits ? "miss" : kind)
+      fx.push({ hand, kind: handGrade, timing: handGrade === "miss" ? null : timing, time: cue.time })
+    }
   }
 
   return { resize, reset, update: frame, hit }
