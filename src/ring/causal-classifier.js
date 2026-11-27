@@ -165,7 +165,7 @@ export function createCausalClassifier(model) {
   if (!model || !Array.isArray(model.labels)) return null
   const { labels, mean, scale, hidden = null, output } = model
   if (labels.length < 2 || new Set(labels).size !== labels.length ||
-      labels.some(label => !["ordinary", "up", "down", "left", "right", "fist", "beat"].includes(label))) return null
+      labels.some(label => !["ordinary", "return", "up", "down", "left", "right", "fist", "beat"].includes(label))) return null
   const arch = model.arch ?? (hidden ? "mlp" : "linear")
   if (arch === "cnn") return createCnn(model)
   if (model.featureVersion !== FEATURE_VERSION || (arch !== "linear" && arch !== "mlp") ||

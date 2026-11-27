@@ -402,11 +402,14 @@ function sampleFreeAim() {
 }
 
 function onRingMotion(motion) {
-  if (mode !== "free" || freeAim?.source !== "ring" || !matchesLasso(ringLasso, motion) || motion.speed < 0.08) return
-  const step = 0.65 * motion.dt
-  freeAim.x = clampAim(freeAim.x - motion.wYaw * step)
-  freeAim.y = clampAim(freeAim.y - motion.wPitch * step)
+  if (!ringMotionActive(motion.hand, motion.address)) return
+  if (Math.abs(motion.wYaw) >= 0.08) freeAim.x = clampAim(freeAim.x - motion.wYaw * 0.65 * motion.dt)
+  if (Math.abs(motion.vUp) >= 0.025) freeAim.y = clampAim(freeAim.y - motion.vUp * 1.8 * motion.dt)
   recordAim()
+}
+
+function ringMotionActive(hand, address) {
+  return mode === "free" && freeAim?.source === "ring" && ringLasso?.hand === hand && ringLasso.address === address
 }
 
 function freeRingButton(event) {
@@ -541,13 +544,19 @@ function upcomingRingBeat(hand, age, dir) {
   return found && found.cue.direction === dir && !found.cue.hits?.[hand] ? found : null
 }
 
+function ringPreviewDue(hand, age, dir) {
+  const found = upcomingRingBeat(hand, age, dir)
+  return Boolean(found && found.distance <= GOOD)
+}
+
 const ring = startRing({
   boundHands,
   onGesture: onRing,
   onMotion: onRingMotion,
+  motionActive: ringMotionActive,
+  previewDue: ringPreviewDue,
   onPreview: ({ hand, age, dir }) => {
-    const found = upcomingRingBeat(hand, age, dir)
-    if (found && found.distance <= GOOD) world.pose(hand, "beatPreview", dir)
+    if (ringPreviewDue(hand, age, dir)) world.pose(hand, "beatPreview", dir)
   },
   cutoffDue: (hand, age) => (mode === "playing" || mode === "count-in") && Boolean(activeCutoff(inputNow() - age, hand)),
   // The camera answers where the ring is blind: up and down sit about 166 degrees apart in the

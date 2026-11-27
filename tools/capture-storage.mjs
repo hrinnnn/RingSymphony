@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { validRingButton } from "../src/ring/buttons.js"
+import { rememberGroup } from "./capture-groups.js"
 
 const DIRECTORY = fileURLToPath(new URL("../../output/ringsymphony-captures/", import.meta.url))
 const ENDPOINT = "/api/capture"
@@ -55,6 +56,16 @@ function valid(record) {
 
 function json(value) { return JSON.stringify(value, null, 2) + "\n" }
 
+function groupSummary(record, file) {
+  if (!record.playerId?.trim() || record.kind !== "group" || record.finishReason !== "complete" ||
+      record.quality?.recommendRetry !== false ||
+      (record.plannedCount != null && record.trials.length !== record.plannedCount)) return null
+  const { playerId, exercise, bpm, wearNote = "", startedAt } = record
+  const hands = Object.values(record.hands)
+  const performingHand = record.performingHand === "both" && hands.length === 1 ? hands[0] : record.performingHand
+  return { playerId, exercise, performingHand, bpm: bpm ?? null, wearNote, startedAt, file }
+}
+
 async function save(directory, record) {
   const timestamp = new Date(record.startedAt).toISOString().replace(/[:.]/g, "-")
   const suffix = `${timestamp}-${record.id}`
@@ -97,6 +108,7 @@ async function save(directory, record) {
 }
 
 export function captureStorage(directory = DIRECTORY) {
+  const summaries = new Map()
   function configure(server) {
     server.middlewares.use(async (req, res, next) => {
       if (req.url !== ENDPOINT) return next()
@@ -106,20 +118,32 @@ export function captureStorage(directory = DIRECTORY) {
         if (req.method === "GET") {
           await Promise.all(["groups", "games"].map((folder) => mkdir(join(directory, folder), { recursive: true })))
           const groups = await readdir(join(directory, "groups"))
-          const completed = { both: new Set(), left: new Set(), right: new Set() }
+          const completed = new Map()
           for (const name of groups) {
-            const match = GROUP_FILE.exec(name)
-            if (match) completed[match[2] ?? "both"].add(match[1])
+            if (!GROUP_FILE.test(name)) continue
+            const file = `groups/${name}`
+            if (!summaries.has(file)) {
+              try {
+                const record = JSON.parse(await readFile(join(directory, file), "utf8"))
+                summaries.set(file, valid(record) ? groupSummary(record, file) : null)
+              } catch (error) {
+                server.config.logger.error(`无法读取采集组 ${name} ${error.message}`)
+              }
+            }
+            const summary = summaries.get(file)
+            if (summary) rememberGroup(completed, summary)
           }
-          const completedByMode = Object.fromEntries(Object.entries(completed).map(([mode, ids]) => [mode, [...ids]]))
-          return send(res, 200, { directory, completed: completedByMode.both, completedByMode })
+          return send(res, 200, { directory, completedGroups: [...completed.values()] })
         }
         if (req.method !== "POST") return send(res, 405, { error: "无法处理此请求" })
         if (req.headers.origin !== `http://${host}` && req.headers.origin !== `https://${host}`) return send(res, 403, { error: "请从本机采集页保存" })
         if (req.headers["content-type"] !== "application/json") return send(res, 415, { error: "记录格式无效" })
         const record = await readRecording(req)
         if (!valid(record)) return send(res, 400, { error: "记录无效或超出单次保存大小" })
-        return send(res, 201, { saved: await save(directory, record) })
+        const saved = await save(directory, record)
+        const completedGroup = groupSummary(record, saved)
+        if (completedGroup && !summaries.has(saved)) summaries.set(saved, completedGroup)
+        return send(res, 201, { saved, completedGroup: summaries.get(saved) ?? null })
       } catch (error) {
         server.config.logger.error(`保存采集记录失败 ${error.message}`)
         return send(res, 500, { error: "写入本机目录失败" })

@@ -36,15 +36,20 @@ class DecodeTests(unittest.TestCase):
             "imu", 65535, 1010, [(-1, 0, 2048, 164, -164, 0), (-2048, 2048, 0, 0, 1640, -1640)],
         ))
         ring = RingStream("A", "Ringo Left")
-        first, last = ring.messages(RAW)
+        first, last = ring.messages(RAW, 1_790_000_000_012.5)
         self.assertAlmostEqual(first["timestamp"], 1.005)
         self.assertEqual(first["timestamp"], first["local_timestamp"])
         self.assertEqual(first["acc"], [-ACC_SCALE, 0, 9.80665])
         self.assertAlmostEqual(first["gyr"][0], 164 * GYR_SCALE)
         self.assertEqual(last["sequence"], 1)
+        self.assertEqual([frame["packet_seq"] for frame in (first, last)], [65535, 65535])
+        self.assertEqual([frame["packet_count"] for frame in (first, last)], [2, 2])
+        self.assertEqual([frame["sample_index"] for frame in (first, last)], [0, 1])
+        self.assertEqual([frame["host_received_ms"] for frame in (first, last)], [1_790_000_000_012.5] * 2)
         self.assertEqual(list(ring.messages(RAW)), [])
         next_frame = next(ring.messages(header(0x21, 2, 1, 1, 1025) + bytes(12)))
         self.assertEqual(next_frame["sequence"], 4)
+        self.assertEqual(next_frame["packet_seq"], 1)
         reset = next(ring.messages(header(0x21, 2, 0, 1, 5) + bytes(12)))
         self.assertEqual(reset["sequence"], 0)
 
@@ -57,6 +62,10 @@ class DecodeTests(unittest.TestCase):
             first, (-32767, -32767, 119, -242, 984, -1032),
             (32767, 1, 122, -235, 999, -1001),
         ]))
+        messages = list(RingStream("A", "Ringo").messages(packet, 100.5))
+        self.assertEqual([(row["packet_seq"], row["packet_count"], row["sample_index"],
+                           row["host_received_ms"]) for row in messages],
+                         [(42, 3, i, 100.5) for i in range(3)])
         with self.assertRaises(ValueError):
             decode_notification(packet[:-1])
 

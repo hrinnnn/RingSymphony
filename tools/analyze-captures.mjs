@@ -15,15 +15,24 @@ const read = async name => JSON.parse(await readFile(join(directory, name), "utf
 const manifest = await read("manifest.json")
 const strokeLevels = ["beat-light", "beat-natural", "beat-strong"]
 
-function replay(stream, hand, cutoffs = [], factory = createRingInput) {
+function replay(stream, hand, cutoffs = [], factory = createRingInput, previewCues = []) {
   let arrival = 1
   let deviceTime = 0
   const events = []
   const previews = []
+  const previewDue = (_hand, age, dir) => {
+    const atMs = (arrival - age - 1) * 1000
+    return previewCues.some(cue => cue.direction === dir && atMs >= cue.start && atMs <= cue.end)
+  }
   const input = factory({
     now: () => arrival,
     WebSocketImpl: null,
-    onPreview: event => previews.push({ dir: event.dir, receivedMs: (arrival - 1) * 1000 }),
+    previewDue,
+    onPreview: event => {
+      if (!previewCues.length || previewDue(event.hand, event.age, event.dir)) {
+        previews.push({ dir: event.dir, receivedMs: (arrival - 1) * 1000 })
+      }
+    },
     cutoffDue: cutoffs.length ? (_hand, age) => {
       const time = (arrival - age - 1) * 1000
       return cutoffs.some(trial => time >= trial.shownAtMs && time <= trial.endedAtMs)
@@ -55,6 +64,36 @@ function expectedType(group) {
   if (group.exercise.startsWith("palm-")) return "palm"
   if (group.exercise === "point") return "strike"
   return null
+}
+
+function promptedPreviews(factory = createRingInput) {
+  const result = { left: [], right: [] }
+  for (const group of evaluatedGroups) {
+    if (!group.direction && !group.bpm) continue
+    const cues = group.trials.map(trial => ({
+      start: trial.beatAtMs == null ? trial.shownAtMs : trial.beatAtMs - 250,
+      end: trial.beatAtMs == null ? trial.endedAtMs : trial.beatAtMs + 250,
+      direction: trial.direction ?? group.direction,
+    }))
+    for (const [hand, stream] of Object.entries(group.streams)) {
+      if (group.performingHand !== "both" && group.performingHand !== hand) continue
+      const { events, previews } = replay(stream, hand, [], factory, cues)
+      for (const trial of group.trials) {
+        const inTrial = time => time >= trial.shownAtMs && time <= trial.endedAtMs
+        const preview = previews.find(event => inTrial(event.receivedMs))
+        const beat = events.find(event => event.type === "beat" && inTrial(event.atMs))
+        result[hand].push({
+          preview: Boolean(preview),
+          lead: preview && beat ? (beat.atMs + beat.age * 1000) - preview.receivedMs : null,
+        })
+      }
+    }
+  }
+  return Object.fromEntries(Object.entries(result).map(([hand, trials]) => {
+    const leads = trials.map(trial => trial.lead).filter(ms => ms > 0)
+    return [hand, { previewed: trials.filter(trial => trial.preview).length,
+      trials: trials.length, beforeConfirmation: leads.length, medianLeadMs: median(leads.map(Math.round)) }]
+  }))
 }
 
 console.log("Prompted actions (IMU only, no chart-based reversal rescue):")
@@ -148,6 +187,7 @@ for (const [action, measurements] of Object.entries(onlinePalms)) {
     medianPeakToConfirmMs: median(measurements.map(timing => timing?.peakToConfirmMs)) }))
 }
 console.log("Preview events over control recordings", JSON.stringify(previewControls))
+console.log("Visible previews over prompted direction trials", JSON.stringify(promptedPreviews()))
 
 function compare(factory) {
   const totals = { firstDirection: { left: 0, right: 0 }, strokeLevels: {}, ordinary: 0,
@@ -198,6 +238,7 @@ if (baselineRoot) {
   console.log("\nBaseline comparison (same labeled windows):")
   console.log("before", JSON.stringify(compare(baseline.createRingInput)))
   console.log("after ", JSON.stringify(compare(createRingInput)))
+  console.log("Visible previews before", JSON.stringify(promptedPreviews(baseline.createRingInput)))
 }
 
 console.log("\nGameplay (as recorded; chart prompts are not verified attempts):")

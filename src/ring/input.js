@@ -39,7 +39,9 @@ export function createRingInput({
   url = "ws://127.0.0.1:8787",
   onEvent = () => {},
   onMotion,
+  motionActive = () => true,
   onPreview,
+  previewDue = () => false,
   now = () => performance.now() / 1000,
   WebSocketImpl = globalThis.WebSocket,
   storage = globalThis.localStorage,
@@ -262,6 +264,8 @@ export function createRingInput({
     ring.history = []
     ring.beatPreview = null
     ring.lastFeature = null
+    ring.motionHeld = false
+    ring.motionVUp = ring.motionQuiet = 0
     // After the reset, not before: a restored calibration brings its own bias, and clearing it
     // here would leave the panel showing 校准完成 while the live feed carried an offset the
     // templates were never built against.
@@ -317,9 +321,7 @@ export function createRingInput({
     if (!onPreview) return
     const candidate = ring.detector.beatCandidate
     const absolute = ring.hand === "left" || directionMode === "absolute"
-    // Gravity-frame previews have no calibrated axis to agree with, so wait for more
-    // rotation than in template mode. This threshold never removes a confirmed beat.
-    if (!candidate || candidate.peakSpeed < (absolute ? 2.5 : 1.1) || candidate.travel < (absolute ? 0.1 : 0.035)) return
+    if (!candidate || candidate.peakSpeed < (absolute ? 2.0 : 1.1) || candidate.travel < (absolute ? 0.06 : 0.035)) return
     const { onsetT } = candidate
     const previous = ring.beatPreview?.onsetT === onsetT ? ring.beatPreview : null
     if (previous?.sentAt !== undefined) return
@@ -328,10 +330,16 @@ export function createRingInput({
 
     const age = Math.max(0, arrival - (t + ring.offset)) + compensation
     let dir = null
+    let hold = 0.018
     if (absolute) {
       const prediction = classifyAbsolute(gravityFrame(frames, t, 0.1, 0.012))
       const confidence = prediction.direction === "left" || prediction.direction === "right" ? prediction.yaw : prediction.vertical
-      if (Math.abs(confidence) >= 0.68) dir = prediction.direction
+      // A matching chart cue permits an earlier visual response. Elsewhere, retain
+      // the stronger signal required to distinguish a beat from everyday movement.
+      const early = prediction.direction && previewDue(ring.hand, age, prediction.direction)
+      hold = early ? 0.015 : 0.026
+      if (early ? Math.abs(confidence) >= 0.55
+        : candidate.peakSpeed >= 2.5 && candidate.travel >= 0.1 && Math.abs(confidence) >= 0.68) dir = prediction.direction
       if (dir && ring.reversalFilter.isReversal(dir, t) && !cueDue(ring.hand, age, dir)) dir = null
     } else if (direction.status(arrival).ready) {
       const { gyr } = frames.at(-1)
@@ -343,10 +351,9 @@ export function createRingInput({
     }
     if (!dir) {
       ring.beatPreview = null
-      ring.lastFeature = null
-    } else if (previous?.dir !== dir) {
-      ring.beatPreview = { onsetT, dir, since: t }
-    } else if (t - previous.since >= (absolute ? 0.026 : 0.018)) {
+    } else if (previous?.dir !== dir || previous.hold !== hold) {
+      ring.beatPreview = { onsetT, dir, since: t, hold }
+    } else if (t - previous.since >= hold - 1e-9) {
       previous.sentAt = arrival
       onPreview({ hand: ring.hand, dir, age })
     }
@@ -437,13 +444,17 @@ export function createRingInput({
       const up = ring.gravity.update(message.acc, gyr, dt, gap > 0.025)
       ring.history.push({ t, gyr, acc: message.acc, up: up ? [...up] : null })
       while (ring.history.length && ring.history[0].t < t - 0.8) ring.history.shift()
-      if (onMotion && up && gap > 0 && gap <= RESET_GAP) {
+      if (onMotion && ring.motionHeld && up && gap > 0 && gap <= RESET_GAP && motionActive(ring.hand, ring.address)) {
         const wYaw = gyr[0] * up[0] + gyr[1] * up[1] + gyr[2] * up[2]
-        // Use a device axis projected onto the horizontal plane for wrist pitch.
-        // Gravity alone fixes vertical, so switch axes near a vertical alignment.
-        const axis = Math.abs(up[0]) < 0.85 ? 0 : 2
-        const wPitch = (gyr[axis] - wYaw * up[axis]) / Math.sqrt(1 - up[axis] ** 2)
-        onMotion({ hand: ring.hand, address: ring.address, dt, wYaw, wPitch, speed: w })
+        const [ax, ay, az] = message.acc
+        const aUp = ax * up[0] + ay * up[1] + az * up[2] - 9.81
+        const quiet = w < 0.08 && Math.hypot(ax - 9.81 * up[0], ay - 9.81 * up[1], az - 9.81 * up[2]) < 0.16
+        ring.motionQuiet = quiet ? (ring.motionQuiet ?? 0) + dt : 0
+        ring.motionVUp = ring.motionQuiet >= 0.05 ? 0
+          : (ring.motionVUp ?? 0) * Math.exp(-dt / 0.35) + aUp * dt
+        onMotion({ hand: ring.hand, address: ring.address, dt, wYaw, vUp: ring.motionVUp, speed: w })
+      } else if (onMotion) {
+        ring.motionVUp = ring.motionQuiet = 0
       }
     }
     const capturing = ring.hand === "right" && direction.status(arrival).pending
@@ -638,6 +649,10 @@ export function createRingInput({
     else if (message.type === "button" && validRingButton(message)) {
       const ring = rings.get(message.address)
       if (!ring?.hand || ring.offset === null) return
+      if (message.action === "down" || message.action === "up") {
+        ring.motionHeld = message.action === "down"
+        ring.motionVUp = ring.motionQuiet = 0
+      }
       const { hand, address, name } = ring
       const arrival = now()
       const age = Math.max(0, arrival - (message.timestamp + ring.offset)) + compensation

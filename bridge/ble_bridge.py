@@ -11,6 +11,7 @@ import logging
 import math
 import re
 import struct
+import time
 from dataclasses import dataclass
 
 SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -82,7 +83,7 @@ class RingStream:
     def status(self):
         return {"address": self.address, "name": self.name, "connected": self.connected}
 
-    def messages(self, data):
+    def messages(self, data, host_received_ms=None):
         decoded = decode_notification(data)
         if decoded is None:
             return
@@ -96,13 +97,15 @@ class RingStream:
         if self.last_packet == (seq, uptime):
             return
         count = len(content)
+        if host_received_ms is None:
+            host_received_ms = time.time_ns() / 1_000_000
         if self.last_packet is not None:
             last_uptime = self.last_packet[1]
             if uptime < last_uptime:
                 self.frame_sequence = -1
             else:
-                # Packet sequence is 16-bit and counts packets. A frame sequence
-                # should advance by samples, including gaps inferred from uptime.
+                # Compatibility sequence measures sample slots inferred from
+                # uptime. Its gaps do not establish that BLE packets were lost.
                 self.frame_sequence += max(0, (uptime - last_uptime + 2) // 5 - count)
         self.last_packet = (seq, uptime)
         for i, sample in enumerate(content):
@@ -110,6 +113,8 @@ class RingStream:
             t = uptime / 1000 - (count - 1 - i) / 200
             yield {"type": "imu", **identity, "timestamp": t, "local_timestamp": t,
                    "sequence": self.frame_sequence,
+                   "packet_seq": seq, "packet_count": count, "sample_index": i,
+                   "host_received_ms": host_received_ms,
                    "acc": [value * ACC_SCALE for value in sample[:3]],
                    "gyr": [value * GYR_SCALE for value in sample[3:]]}
 
@@ -144,8 +149,9 @@ async def connect_ring(bridge, ring, device):
     disconnected = asyncio.Event()
 
     def on_data(_sender, data):
+        host_received_ms = time.time_ns() / 1_000_000
         try:
-            for message in ring.messages(data):
+            for message in ring.messages(data, host_received_ms):
                 bridge.publish(message)
         except ValueError as error:
             LOG.debug("%s ignored a notification: %s", ring.address, error)

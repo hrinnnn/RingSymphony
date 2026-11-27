@@ -1,7 +1,55 @@
 export const MIN_RATE_HZ = 150
 export const MAX_GAP_MS = 50
 
+export const QUALITY_CONCLUSIONS = {
+  realtime: "适用于训练与实时低延迟评估",
+  offline: "适用于离线训练，不建议用于实时延迟评估",
+  retry: "建议重录",
+}
+
+export function deviceContinuous(stream) {
+  return stream.deviceRateHz >= MIN_RATE_HZ && !stream.deviceGaps && !stream.missing && !stream.clockResets
+}
+
+export function receiveSmooth(stream) {
+  return stream.receiveRateHz >= MIN_RATE_HZ && !stream.receiveGaps
+}
+
 const deviceTime = frame => frame.timestamp ?? frame.local_timestamp
+const overGap = ms => ms > MAX_GAP_MS + 1e-6
+
+function measure(frames, start, end) {
+  let deviceSpan = 0
+  let deviceIntervals = 0
+  const stats = { frames: frames.length, deviceRateHz: 0, deviceMaxGapMs: 0, deviceGaps: 0,
+    missing: 0, clockResets: 0, receiveRateHz: 0, receiveMaxGapMs: 0, receiveGaps: 0 }
+  const addReceiveGap = (gap) => {
+    stats.receiveMaxGapMs = Math.max(stats.receiveMaxGapMs, gap)
+    if (overGap(gap)) stats.receiveGaps++
+  }
+  let previous
+  for (const frame of frames) {
+    addReceiveGap(frame.receivedMs - (previous?.receivedMs ?? start))
+    if (previous) {
+      const dt = (deviceTime(frame) - deviceTime(previous)) * 1000
+      if (dt > 0) {
+        deviceSpan += dt
+        deviceIntervals++
+        stats.deviceMaxGapMs = Math.max(stats.deviceMaxGapMs, dt)
+        if (overGap(dt)) stats.deviceGaps++
+        // For BLE, sequence is an inferred sample index, not the packet counter.
+        stats.missing += Math.max(0, frame.sequence - previous.sequence - 1) || 0
+      } else {
+        stats.clockResets++
+      }
+    }
+    previous = frame
+  }
+  addReceiveGap(end - (previous?.receivedMs ?? start))
+  stats.deviceRateHz = deviceSpan ? deviceIntervals * 1000 / deviceSpan : 0
+  stats.receiveRateHz = end > start ? Math.max(0, frames.length - 1) * 1000 / (end - start) : 0
+  return stats
+}
 
 export function createCaptureHealth() {
   const frames = []
@@ -12,13 +60,10 @@ export function createCaptureHealth() {
       const t = deviceTime(frame)
       if (!Number.isFinite(t)) return
       const previous = frames.at(-1)
-      const gap = previous ? Math.max((t - previous.t) * 1000, receivedMs - previous.receivedMs) : 0
-      if (previous && t <= previous.t) {
-        frames.length = 0
-        bias = null
-      }
-      frames.push({ t, receivedMs, gap })
-      if (Math.abs(Math.hypot(...frame.acc) - 9.81) >= 0.8 || gap > 50 || (previous && t <= previous.t)) still = []
+      const dt = previous ? (t - previous.timestamp) * 1000 : 0
+      if (previous && dt <= 0) bias = null
+      frames.push({ timestamp: t, receivedMs, sequence: frame.sequence })
+      if (Math.abs(Math.hypot(...frame.acc) - 9.81) >= 0.8 || overGap(dt) || (previous && dt <= 0)) still = []
       else {
         while (still.length > 1 && still[1].t <= t - 3) still.shift()
         still.push({ t, gyr: frame.gyr })
@@ -34,40 +79,20 @@ export function createCaptureHealth() {
     status(now) {
       const first = frames[0]
       const last = frames.at(-1)
-      const span = first ? Math.min(now - first.receivedMs, (last.t - first.t) * 1000) : 0
-      const rate = first ? (frames.length - 1) / Math.max((now - first.receivedMs) / 1000, 0.001) : 0
-      const maxGapMs = first ? Math.max(now - last.receivedMs, ...frames.map(frame => frame.gap)) : 0
-      return { rate, maxGapMs, ready: span >= 4500, bias }
+      const span = first ? last.receivedMs - first.receivedMs : 0
+      return { ...measure(frames, first?.receivedMs ?? now, now), ready: span >= 4500, bias }
     },
     resetStill() { still = []; bias = null },
   }
 }
 
 export function summarizeCapture(frames, hands, durationMs) {
-  const streams = Object.fromEntries(Object.values(hands).map(hand => [hand, {
-    frames: 0, missing: 0, gaps: 0, maxGapMs: 0, clockResets: 0,
-  }]))
-  const last = {}
+  const byHand = Object.fromEntries(Object.values(hands).map(hand => [hand, []]))
   for (const frame of frames) {
-    const stream = streams[frame.hand]
-    if (!stream) continue
-    const previous = last[frame.hand]
-    const dt = previous ? (deviceTime(frame) - deviceTime(previous)) * 1000 : 0
-    const gap = Math.max(dt || 0, frame.receivedMs - (previous?.receivedMs ?? 0))
-    if (previous && dt <= 0) stream.clockResets++
-    if (gap > MAX_GAP_MS) stream.gaps++
-    stream.maxGapMs = Math.max(stream.maxGapMs, gap)
-    stream.missing += Math.max(0, (frame.sequence - previous?.sequence) - 1) || 0
-    stream.frames++
-    last[frame.hand] = frame
+    if (Number.isFinite(deviceTime(frame))) byHand[frame.hand]?.push(frame)
   }
-  for (const [hand, stream] of Object.entries(streams)) {
-    const trailing = Math.max(0, durationMs - (last[hand]?.receivedMs ?? 0))
-    if (trailing > MAX_GAP_MS) stream.gaps++
-    stream.maxGapMs = Math.round(Math.max(stream.maxGapMs, trailing))
-    stream.rateHz = Math.round(stream.frames / Math.max(durationMs / 1000, 0.001))
-  }
-  const recommendRetry = Object.values(streams).some(stream =>
-    stream.rateHz < MIN_RATE_HZ || stream.gaps || stream.missing || stream.clockResets)
-  return { streams, recommendRetry }
+  const streams = Object.fromEntries(Object.entries(byHand).map(([hand, rows]) => [hand, measure(rows, 0, durationMs)]))
+  const active = Object.values(streams)
+  const tier = !active.every(deviceContinuous) ? "retry" : !active.every(receiveSmooth) ? "offline" : "realtime"
+  return { streams, tier, recommendRetry: tier === "retry" }
 }

@@ -81,8 +81,17 @@ def session_for(record, frames, aliases):
             result[key] = record[key]
     result["streams"] = streams
     if "buttons" in record:
-        result["buttons"] = [{**{key: value for key, value in button.items() if key != "address"},
-                              "device": aliases[button["address"]]} for button in record["buttons"]]
+        result["buttons"] = []
+        for button in record["buttons"]:
+            address = button["address"]
+            cleaned = {key: value for key, value in button.items() if key != "address"}
+            cleaned["device"] = aliases[address]
+            if address in origins:
+                cleaned["timestamp"] = round(button["timestamp"] - origins[address][0], 6)
+            else:
+                # An offline ring can report a button without any IMU reference.
+                cleaned["timestampBasis"] = "device_uptime"
+            result["buttons"].append(cleaned)
     if record["kind"] == "group":
         for key in ("exercise", "performingHand", "direction", "plannedCount", "trials", "bpm"):
             if key in record:

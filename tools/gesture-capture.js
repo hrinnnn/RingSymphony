@@ -1,4 +1,5 @@
-import { createCaptureHealth, MAX_GAP_MS, MIN_RATE_HZ, summarizeCapture } from "./capture-quality.js"
+import { createCaptureHealth, deviceContinuous, receiveSmooth, QUALITY_CONCLUSIONS, summarizeCapture } from "./capture-quality.js"
+import { captureGroupKey, rememberGroup } from "./capture-groups.js"
 import { timedTrials, renderMetronome } from "./capture-metronome.js"
 import { validRingButton } from "../src/ring/buttons.js"
 
@@ -43,6 +44,7 @@ const exercise = byId("exercise")
 const start = byId("start")
 const stop = byId("stop")
 const retry = byId("retry-save")
+const rerecord = byId("rerecord-group")
 const phase = byId("phase")
 const progress = byId("progress")
 const status = byId("status")
@@ -71,12 +73,13 @@ const HANDS_KEY = "ringsymphony.capture.hands.v1"
 const SCOPE_KEY = "ringsymphony.capture.scope.v1"
 const nowMs = () => performance.timeOrigin + performance.now()
 const devices = new Map()
-const completedGroups = { both: new Set(), left: new Set(), right: new Set() }
+const completedGroups = new Map()
 const pending = []
 const hands = loadHands()
 let lastDeviceList = ""
 let socket
 let recording
+let lastGroup
 let frame
 let gameHands
 let closeTimer
@@ -89,7 +92,7 @@ let healthPassed = false
 for (const [i, item] of exercises.entries()) exercise.add(new Option(item.label, i))
 try {
   const savedScope = localStorage.getItem(SCOPE_KEY)
-  if (Object.hasOwn(completedGroups, savedScope)) scope.value = savedScope
+  if (["both", "left", "right"].includes(savedScope)) scope.value = savedScope
 } catch { /* Session-only preference. */ }
 
 function setInstructions() {
@@ -107,8 +110,15 @@ function allowsExercise(item) {
   return Boolean(item && (scope.value === "both" || item.hand === "both" || item.hand === scope.value))
 }
 
+function groupSettings(item) {
+  const performingHand = item.pattern ? (scope.value === "both" ? timedHand.value : scope.value)
+    : item.hand === "both" ? scope.value : item.hand
+  return { playerId: playerId.value.trim(), wearNote: wearNote.value.trim(), exercise: item.id,
+    performingHand, ...(item.pattern && { bpm: Number(bpm.value) }) }
+}
+
 function groupDone(item) {
-  return completedGroups.both.has(item.id) || completedGroups[scope.value].has(item.id)
+  return completedGroups.has(captureGroupKey(groupSettings(item)))
 }
 
 function updateExercises(advance = false) {
@@ -138,11 +148,10 @@ async function checkStorage() {
   try {
     const response = await fetch("/api/capture")
     if (!response.ok) throw new Error()
-    const { directory, completed, completedByMode = { both: completed, left: [], right: [] } } = await response.json()
+    const { directory, completedGroups: savedGroups } = await response.json()
     byId("directory").textContent = `保存目录  ${directory}`
-    for (const mode of Object.keys(completedGroups)) {
-      for (const id of completedByMode[mode]) completedGroups[mode].add(id)
-    }
+    completedGroups.clear()
+    for (const group of savedGroups) rememberGroup(completedGroups, group)
     updateExercises(true)
     storageReady = true
     retry.hidden = true
@@ -163,6 +172,10 @@ function loadHands() {
 function saveHands() {
   try { localStorage.setItem(HANDS_KEY, JSON.stringify(hands)) } catch { /* Session-only bindings. */ }
   renderDevices(nowMs())
+}
+
+function streamSummary(stream) {
+  return `设备 ${stream.deviceRateHz.toFixed(0)} Hz / 最大间隔 ${stream.deviceMaxGapMs.toFixed(0)} ms / 超 50 ms ${stream.deviceGaps} 次 / 缺帧 ${stream.missing} / 时钟重置 ${stream.clockResets}；接收 ${stream.receiveRateHz.toFixed(0)} Hz / 最大间隔 ${stream.receiveMaxGapMs.toFixed(0)} ms / 超 50 ms ${stream.receiveGaps} 次`
 }
 
 function renderDevices(now) {
@@ -190,30 +203,34 @@ function renderDevices(now) {
   const bindings = selectedBindings()
   healthPassed = true
   let failed = false
+  let jitter = false
   for (const hand of ["left", "right"]) {
     const address = hands[hand]
     const device = devices.get(address)
     const health = live.has(address) ? device.health.status(now) : null
-    const goodStream = health?.ready && health.rate >= MIN_RATE_HZ && health.maxGapMs <= MAX_GAP_MS
+    const goodStream = health?.ready && deviceContinuous(health)
     const healthy = goodStream && health.bias
-    rates[hand].dataset.health = healthy ? "green" : health && (!health.ready || goodStream) ? "yellow" : "red"
+    const smooth = health && receiveSmooth(health)
+    rates[hand].dataset.health = healthy && smooth ? "green" : health?.ready && !goodStream ? "red" : "yellow"
     rates[hand].textContent = health
-      ? `${health.rate.toFixed(0)} Hz · 最大间隔 ${health.maxGapMs.toFixed(0)} ms · ${health.bias ? `静置通过 ${Math.hypot(...health.bias).toFixed(2)} rad/s` : `静置待通过 · 当前 ${device.motion.toFixed(2)} rad/s`}`
+      ? `${streamSummary(health)} · ${health.bias ? `静置通过 ${Math.hypot(...health.bias).toFixed(2)} rad/s` : `静置待通过 · 当前 ${device.motion.toFixed(2)} rad/s`}`
       : address ? "等待指定戒指上线" : "未指定"
     if (Object.hasOwn(bindings, hand)) {
       healthPassed &&= Boolean(healthy)
       failed ||= Boolean(health?.ready && !goodStream)
+      jitter ||= Boolean(goodStream && !smooth)
     }
   }
   const locked = Boolean(recording || pending.length || frame)
   for (const control of [left, right, exercise, scope, playerId, wearNote, dominantHand, forceHealth, checkStill, bpm]) control.disabled = locked
   timedHand.disabled = locked || scope.value !== "both"
+  rerecord.disabled = locked || !storageReady || !lastGroup
   swapHands.disabled = locked || !hands.left || !hands.right
   const ready = !locked && storageReady && playerId.value.trim() && Object.values(bindings).every(address => live.has(address)) &&
     (healthPassed || forceHealth.checked)
-  healthMessage.dataset.health = healthPassed ? "green" : failed ? "red" : "yellow"
-  healthMessage.textContent = healthPassed ? "已选戒指通过检查"
-    : failed ? "采样率低于 150 Hz 或帧间隔大于 50 ms。请检查电量、缩短蓝牙距离，或重启该戒指。"
+  healthMessage.dataset.health = healthPassed && !jitter ? "green" : failed ? "red" : "yellow"
+  healthMessage.textContent = healthPassed ? (jitter ? QUALITY_CONCLUSIONS.offline : "已选戒指通过检查")
+    : failed ? "设备采样有缺帧、长间隔、低帧率或时钟重置。"
     : "等待已选戒指完成采样和静置检查。"
   start.disabled = !ready || !allowsExercise(exercises[exercise.selectedIndex])
   openGame.disabled = !ready
@@ -312,10 +329,11 @@ function finish(reason, game) {
   for (const tone of scheduledTones) tone.stop()
   scheduledTones.clear()
   const stats = summarizeCapture(completed.frames, completed.hands, durationMs)
-  const streamSummary = Object.entries(stats.streams).map(([hand, stream]) =>
-    `${hand === "left" ? "左手" : "右手"} ${stream.rateHz} Hz，最大间隔 ${stream.maxGapMs} ms，丢包 ${stream.missing}，断流 ${stream.gaps}`).join(" · ")
-  const qualitySummary = `${streamSummary} · ${reason !== "complete" || stats.recommendRetry ? "建议重录" : "质量通过"}`
-  quality.dataset.health = reason !== "complete" || stats.recommendRetry ? "yellow" : "green"
+  const streams = Object.entries(stats.streams).map(([hand, stream]) =>
+    `${hand === "left" ? "左手" : "右手"} ${streamSummary(stream)}`).join(" · ")
+  const tier = reason === "complete" ? stats.tier : "retry"
+  const qualitySummary = `${QUALITY_CONCLUSIONS[tier]} · ${streams}`
+  quality.dataset.health = tier === "realtime" ? "green" : tier === "offline" ? "yellow" : "red"
   quality.textContent = qualitySummary
   beatRing.hidden = true
   if (completed.kind === "group") {
@@ -325,7 +343,7 @@ function finish(reason, game) {
     stop.disabled = true
   } else {
     if (game) completed.game = game
-    gameStatus.textContent = reason === "complete" ? "本局结束" : "已停止录制"
+    gameStatus.textContent = qualitySummary
   }
   pending.push({ ...completed, durationMs, finishReason: reason, quality: stats })
   void savePending()
@@ -352,13 +370,17 @@ async function savePending() {
         const { error } = await response.json()
         throw new Error(error)
       }
-      const { saved } = await response.json()
+      const { saved, completedGroup } = await response.json()
       pending.shift()
       let detail = `${data.frames.length} 帧`
       if (data.kind === "group") {
-        if (data.finishReason === "complete" && !data.quality.recommendRetry) {
-          const hands = Object.values(data.hands)
-          completedGroups[hands.length === 2 ? "both" : hands[0]].add(data.exercise)
+        const captureHands = Object.values(data.hands)
+        lastGroup = { playerId: data.playerId, wearNote: data.wearNote, dominantHand: data.dominantHand, exercise: data.exercise,
+          performingHand: data.performingHand, bpm: data.bpm, scope: captureHands.length === 2 ? "both" : captureHands[0] }
+        rerecord.hidden = false
+        rerecord.title = `${data.playerId} · ${exercises.find(item => item.id === data.exercise).label}`
+        if (completedGroup) {
+          rememberGroup(completedGroups, completedGroup)
           updateExercises(true)
         } else if (data.finishReason === "complete") detail += " · 建议重录本组"
         else if (data.finishReason === "lost-ring") detail += " · 戒指断流，请重录本组"
@@ -385,8 +407,7 @@ checkStill.addEventListener("click", () => {
   renderDevices(nowMs())
 })
 
-byId("setup").addEventListener("submit", (event) => {
-  event.preventDefault()
+function recordGroup() {
   renderDevices(nowMs())
   if (start.disabled || !confirmHealth()) return
   if (window.AudioContext) {
@@ -395,14 +416,12 @@ byId("setup").addEventListener("submit", (event) => {
   }
   const item = exercises[Number(exercise.value)]
   Object.assign(beginRecording("group", selectedHands()), {
-    exercise: item.id,
-    performingHand: item.pattern ? timedHand.value : item.hand,
+    ...groupSettings(item),
     direction: item.direction,
     plannedCount: item.count,
     trials: [],
   })
   if (item.pattern) {
-    recording.bpm = Number(bpm.value)
     recording.trials = timedTrials(item, recording.bpm)
     recording.audioQueued = 0
   }
@@ -410,6 +429,26 @@ byId("setup").addEventListener("submit", (event) => {
   stop.disabled = false
   result.textContent = ""
   quality.textContent = ""
+}
+
+byId("setup").addEventListener("submit", event => {
+  event.preventDefault()
+  recordGroup()
+})
+
+rerecord.addEventListener("click", () => {
+  if (!lastGroup || rerecord.disabled) return
+  playerId.value = lastGroup.playerId
+  wearNote.value = lastGroup.wearNote
+  dominantHand.value = lastGroup.dominantHand ?? ""
+  scope.value = lastGroup.scope
+  if (lastGroup.bpm) {
+    timedHand.value = lastGroup.performingHand
+    bpm.value = lastGroup.bpm
+  }
+  exercise.selectedIndex = exercises.findIndex(item => item.id === lastGroup.exercise)
+  updateExercises()
+  recordGroup()
 })
 
 function tick() {
@@ -537,6 +576,8 @@ swapHands.addEventListener("click", () => {
   saveHands()
 })
 exercise.addEventListener("change", setInstructions)
+for (const control of [playerId, wearNote]) control.addEventListener("input", () => updateExercises(true))
+for (const control of [timedHand, bpm]) control.addEventListener("change", () => updateExercises(true))
 scope.addEventListener("change", () => {
   try { localStorage.setItem(SCOPE_KEY, scope.value) } catch { /* Session-only preference. */ }
   updateExercises(true)

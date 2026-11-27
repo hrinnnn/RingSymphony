@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
+import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -18,28 +19,84 @@ const up = [0, 0, 1]
 const rest = [0, 0, 9.81]
 const bias = [0.4, -0.6, 0.3]
 const button = { type: "button", address: "L", seq: 9, timestamp: 2.02, event: 2, action: "click", label: "单击" }
-{
+function motionReplay(rotate) {
   let now = 10
+  let held = false
   const motions = []
   const input = createRingInput({ now: () => now, WebSocketImpl: null, boundHands: { left: "L" },
+    motionActive: () => held,
+    onEvent: event => { if (event.type === "button") held = event.action === "down" },
     onMotion: motion => motions.push(motion) })
   input.feed({ type: "status", rings: [{ address: "L", connected: true }] })
-  const feed = (timestamp, gyr, sequence) => {
+  const feed = (timestamp, extraGyro, sequence, vertical = 0) => {
     now = 10 + timestamp
-    input.feed({ type: "imu", address: "L", timestamp, sequence, acc: rest, gyr })
+    input.feed({ type: "imu", address: "L", timestamp, sequence,
+      acc: rotate([0, 0, 9.81 + vertical]), gyr: rotate(bias.map((value, i) => value + extraGyro[i])) })
   }
-  for (let i = 0; i <= 200; i++) feed(i * 0.005, bias, i)
+  const zero = [0, 0, 0]
+  const press = down => input.feed({ ...button, timestamp: now - 10, event: Number(!down),
+    action: down ? "down" : "up", label: down ? "按下" : "松开" })
+  for (let i = 0; i <= 200; i++) feed(i * 0.005, zero, i)
+  assert.equal(motions.length, 0)
+  press(true)
+  feed(1.005, zero, 201)
   assert.ok(motions.at(-1).speed < 1e-9, "motion samples use bias-corrected gyro")
-  feed(1.005, bias.map((b, i) => b + [1, 0, 2][i]), 201)
-  const { hand, address, dt, wYaw, wPitch } = motions.at(-1)
+  for (let i = 202; i <= 220; i++) feed(i * 0.005, [0, 0, 2], i, 2)
+  const upward = motions.at(-1)
+  const { hand, address, dt, wYaw, vUp } = upward
   assert.equal(hand, "left")
   assert.equal(address, "L")
-  assert.ok(Math.abs(dt - 0.005) < 1e-9 && Math.abs(wYaw - 2) < 0.01 && Math.abs(wPitch - 1) < 0.01)
-  feed(1.105, bias, 202)
+  assert.ok(Math.abs(dt - 0.005) < 1e-9 && Math.abs(wYaw - 2) < 0.01 && vUp > 0.15)
+  for (let i = 221; i <= 232; i++) feed(i * 0.005, zero, i)
+  assert.equal(motions.at(-1).vUp, 0, "stationary motion clears vertical drift")
+  feed(1.165, zero, 233, 2)
+  press(false)
+  press(true)
+  feed(1.17, zero, 234)
+  assert.ok(Math.abs(motions.at(-1).vUp) < 1e-6,
+    `release and repress clears velocity even without an intervening IMU frame: ${JSON.stringify(motions.at(-1))}`)
+  for (let i = 235; i <= 250; i++) feed(i * 0.005, zero, i, -2)
+  assert.ok(motions.at(-1).vUp < -0.13, "vertical motion does not require rotation")
+  feed(1.35, zero, 251)
   assert.equal(motions.at(-1).dt, 0.02, "short gaps cannot multiply a returning gyro sample")
   const beforeReset = motions.length
-  feed(1.505, bias, 203)
+  feed(1.75, zero, 252)
   assert.equal(motions.length, beforeReset, "long gaps do not move the cursor")
+  return upward
+}
+const referenceMotion = motionReplay(vector => vector)
+for (const rotate of [([x, y, z]) => [z, x, y], ([x, y, z]) => [x, -y, -z], ([x, y, z]) => {
+  const c = Math.SQRT1_2
+  return [x, c * (y - z), c * (y + z)]
+}]) {
+  const mounted = motionReplay(rotate)
+  assert.ok(Math.abs(mounted.wYaw - referenceMotion.wYaw) < 1e-9)
+  assert.ok(Math.abs(mounted.vUp - referenceMotion.vUp) < 1e-9)
+}
+{
+  function previewStroke(cueDirection) {
+    let now = 10
+    const previews = []
+    const events = []
+    const input = createRingInput({ now: () => now, WebSocketImpl: null, boundHands: { left: "L" },
+      previewDue: (_hand, _age, direction) => cueDirection === direction,
+      onPreview: event => previews.push({ ...event, at: now }),
+      onEvent: ({ timing: _timing, ...event }) => events.push(event) })
+    input.feed({ type: "status", rings: [{ address: "L", connected: true }] })
+    for (let i = 0; i < 200; i++) {
+      const timestamp = i * 0.005
+      now = 10 + timestamp
+      const speed = i >= 100 && i <= 136 ? Math.sin((i - 100) * Math.PI / 36) * 4 : 0
+      input.feed({ type: "imu", address: "L", timestamp, sequence: i, acc: rest, gyr: [0, 0, speed] })
+    }
+    return { previews, events }
+  }
+  const uncued = previewStroke("right")
+  const cued = previewStroke("left")
+  assert.equal(cued.previews[0].dir, "left")
+  assert.ok(cued.previews[0].at < uncued.previews[0].at)
+  assert.ok(uncued.events.some(event => event.type === "beat"))
+  assert.deepEqual(cued.events, uncued.events, "preview eligibility never changes scored events")
 }
 {
   let now = 10
@@ -197,6 +254,7 @@ assert.equal(createCausalClassifier({ ...training, featureVersion: -1 }), null)
   assert.equal(cnn.predict([axis(0)]), null)
   assert.equal(createCausalClassifier({ ...model, sequenceVersion: -1 }), null)
   assert.ok(createCausalClassifier({ ...training, arch: "linear" }))
+  assert.ok(createCausalClassifier({ ...model, labels: ["ordinary", "return"] }))
 }
 
 const health = createCaptureHealth()
@@ -204,10 +262,36 @@ const frames = Array.from({ length: 1001 }, (_, i) =>
   ({ timestamp: i * 0.005, receivedMs: i * 5, sequence: i, hand: "left", acc: rest, gyr: bias }))
 for (const frame of frames) health.push(frame, frame.receivedMs)
 assert.ok(health.status(5000).bias)
-assert.equal(health.status(5000).rate, 200)
-assert.ok(health.status(5060).maxGapMs > 50)
-assert.equal(summarizeCapture(frames, { left: "left" }, 5000).recommendRetry, false)
-assert.equal(summarizeCapture(frames.filter(frame => frame.sequence !== 100), { left: "left" }, 5000).streams.left.missing, 1)
+assert.ok(Math.abs(health.status(5000).deviceRateHz - 200) < 1e-9)
+assert.equal(health.status(5000).receiveRateHz, 200)
+assert.equal(health.status(5060).receiveMaxGapMs, 60)
+assert.equal(health.status(5060).deviceGaps, 0)
+const summarize = rows => summarizeCapture(rows, { left: "left" }, 5000)
+assert.equal(summarize(frames).tier, "realtime")
+const jittered = frames.map(frame => frame.receivedMs >= 500 && frame.receivedMs < 590
+  ? { ...frame, receivedMs: 590 } : frame)
+const liveJitter = createCaptureHealth()
+for (const frame of jittered) liveJitter.push(frame, frame.receivedMs)
+const live = liveJitter.status(5000)
+assert.ok(live.bias, "transport jitter does not reset stationary device sampling")
+assert.equal(live.deviceGaps, 0)
+assert.equal(live.receiveMaxGapMs, 95)
+const offline = summarize(jittered)
+assert.equal(offline.tier, "offline")
+assert.equal(offline.recommendRetry, false)
+assert.equal(offline.streams.left.receiveGaps, 1)
+assert.equal(offline.streams.left.missing, 0)
+const missing = summarize(frames.filter(frame => frame.sequence !== 100))
+assert.equal(missing.tier, "retry")
+assert.equal(missing.streams.left.missing, 1)
+const deviceGap = summarize(frames.map(frame => frame.sequence >= 100 ? { ...frame, timestamp: frame.timestamp + 0.1 } : frame))
+assert.equal(deviceGap.tier, "retry")
+assert.equal(deviceGap.streams.left.deviceGaps, 1)
+assert.equal(deviceGap.streams.left.receiveGaps, 0)
+const reset = summarize(frames.map(frame => frame.sequence >= 100 ? { ...frame, timestamp: frame.timestamp - 0.5 } : frame))
+assert.equal(reset.tier, "retry")
+assert.equal(reset.streams.left.clockResets, 1)
+assert.equal(summarize(frames.map(frame => ({ ...frame, timestamp: frame.timestamp * 2 }))).tier, "retry")
 health.resetStill()
 assert.equal(health.status(5000).bias, null)
 
@@ -221,10 +305,34 @@ assert.equal(aniso.filter(trial => trial.direction === "right").length, 10)
 
 const directory = await mkdtemp(join(tmpdir(), "ringsymphony-capture-test-"))
 let middleware
-captureStorage(directory).configureServer({ middlewares: { use(fn) { middleware = fn } }, config: { logger: console } })
+const configure = () => captureStorage(directory).configureServer({
+  middlewares: { use(fn) { middleware = fn } }, config: { logger: console },
+})
+configure()
 const server = createServer((req, res) => middleware(req, res, () => res.writeHead(404).end()))
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve))
 try {
+  const fixture = async (exercise, pulses, trials) => {
+    const path = join(directory, `${exercise}.json`)
+    const frames = Array.from({ length: 501 }, (_, sequence) => {
+      const receivedMs = sequence * 5
+      const speed = pulses.reduce((sum, [center, amplitude]) =>
+        sum + amplitude * Math.max(0, 1 - Math.abs(receivedMs - center) / 25), 0)
+      return { address: "test", timestamp: receivedMs / 1000, receivedMs, acc: rest, gyr: [0, 0, speed] }
+    })
+    await writeFile(path, JSON.stringify({ kind: "group", finishReason: "complete", playerId: "P01",
+      exercise, performingHand: "right", hands: { test: "right" }, frames, trials }))
+    return JSON.parse(execFileSync(process.execPath, ["tools/causal-samples.mjs", path, "--sequence"], { encoding: "utf8" })).data
+  }
+  const single = await fixture("beat-natural", [[500, 5], [680, -6], [810, -3], [1600, 5], [1900, 4]],
+    [{ shownAtMs: 420, endedAtMs: 640 }, { shownAtMs: 1490, endedAtMs: 1750 }])
+  assert.deepEqual(single.map(row => row.label), ["return"], "only a clear reversal 220–500 ms after a beat is a return")
+  assert.equal(single[0].sequence.length, SEQUENCE_STEPS)
+  assert.ok(single[0].sequence.at(-1)[2] < 0, "return features end at the reverse peak")
+  const tempo = await fixture("transition-4beat", [[500, 5], [790, -3], [1000, -6], [1500, 6]],
+    [{ beatAtMs: 500, direction: "left" }, { beatAtMs: 1000, direction: "right" }, { beatAtMs: 1500, direction: "left" }])
+  assert.deepEqual(tempo.map(row => row.label), ["left", "return", "right", "left"], "the next target beat cannot be used as a return")
+
   const origin = `http://127.0.0.1:${server.address().port}`
   const url = `${origin}/api/capture`
   const post = record => fetch(url, { method: "POST", headers: { origin, "content-type": "application/json" },
@@ -237,7 +345,8 @@ try {
   const savedButton = { ...wire, hand: "left", address: "test", receivedMs: 25 }
   let response = await post(record)
   assert.equal(response.status, 201)
-  const file = JSON.parse(await readFile(join(directory, (await response.json()).saved), "utf8"))
+  const firstSave = await response.json()
+  const file = JSON.parse(await readFile(join(directory, firstSave.saved), "utf8"))
   assert.equal(file.playerId, "test")
   assert.equal(file.trials[0].beatAtMs, schedule[0].beatAtMs)
   response = await post({ ...record, id: randomUUID(), exercise: "transition-3beat",
@@ -253,7 +362,36 @@ try {
   assert.deepEqual(JSON.parse(await readFile(join(directory, gamePath, "game.json"), "utf8")).buttons, [savedButton])
   response = await post({ ...record, id: randomUUID(), buttons: [{ ...savedButton, hand: "right" }] })
   assert.equal(response.status, 400)
-  assert.deepEqual((await (await fetch(url)).json()).completedByMode.left, ["transition-4beat"])
+  const retake = (overrides = {}) => post({ ...record, id: randomUUID(),
+    startedAt: new Date(Date.parse(record.startedAt) + 1000).toISOString(), ...overrides })
+    .then(async response => {
+      assert.equal(response.status, 201)
+      return response.json()
+    })
+  await retake({ playerId: "P02" })
+  await retake({ bpm: 80, trials: timedTrials({ count: 32, pattern: ["down", "left", "right", "up"] }, 80) })
+  await retake({ performingHand: "right", hands: { test: "right" } })
+  await retake({ wearNote: "旋转 90 度" })
+  const latest = await retake({ quality: { tier: "offline", recommendRetry: false } })
+  assert.equal((await retake({ finishReason: "stopped" })).completedGroup, null)
+  assert.equal((await retake({ quality: { tier: "retry", recommendRetry: true } })).completedGroup, null)
+  assert.equal((await retake({ quality: undefined })).completedGroup, null)
+  assert.equal((await retake({ plannedCount: schedule.length + 1 })).completedGroup, null)
+  configure()
+  const { completedGroups } = await (await fetch(url)).json()
+  assert.deepEqual(new Set(completedGroups.map(group => JSON.stringify([
+    group.playerId, group.exercise, group.performingHand, group.bpm, group.wearNote,
+  ]))), new Set([
+    ["test", "transition-4beat", "left", 120, ""],
+    ["P02", "transition-4beat", "left", 120, ""],
+    ["test", "transition-4beat", "left", 80, ""],
+    ["test", "transition-4beat", "right", 120, ""],
+    ["test", "transition-4beat", "left", 120, "旋转 90 度"],
+  ].map(item => JSON.stringify(item))))
+  assert.equal(completedGroups.length, 5)
+  assert.ok(completedGroups.some(group => group.file === latest.saved))
+  assert.ok(!completedGroups.some(group => group.file === firstSave.saved))
+  assert.deepEqual(JSON.parse(await readFile(join(directory, firstSave.saved), "utf8")), file)
 } finally {
   await new Promise(resolve => server.close(resolve))
   await rm(directory, { recursive: true })

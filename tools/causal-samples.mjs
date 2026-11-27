@@ -8,9 +8,24 @@ import { createClockOffset, createGyroBias } from "../src/ring/signal.js"
 
 const seen = new Set()
 const ordinary = new Set(["ordinary", "rest", "hard-negatives", "走路及日常"])
+const singleBeat = new Set(["beat-light", "beat-natural", "beat-strong"])
 const data = []
 const args = process.argv.slice(2)
 const includeSequence = args.includes("--sequence")
+
+const cueStart = trial => trial.beatAtMs == null ? trial.shownAtMs : trial.beatAtMs - 140
+
+function returnPeak(frames, peak, nextCue) {
+  let reverse = null
+  for (const frame of frames) {
+    const elapsed = frame.t - peak.t
+    if (elapsed < 0.22 || elapsed > 0.50 || frame.ms >= nextCue ||
+        frame.speed < Math.max(1.2, peak.speed * 0.42) || frame.speed <= (reverse?.speed ?? 0)) continue
+    const dot = frame.gyr.reduce((sum, value, i) => sum + value * peak.gyr[i], 0)
+    if (dot <= -0.65 * frame.speed * peak.speed) reverse = frame
+  }
+  return reverse
+}
 
 function examples(raw, hand, exercise, direction, trials, player, group) {
   const gravity = createGravity()
@@ -50,16 +65,23 @@ function examples(raw, hand, exercise, direction, trials, player, group) {
     }
     for (const ev of events) if (ev.type === "beat" || ev.type === "fist") targets.push({ t: ev.t, label: "ordinary" })
   } else if (trials?.length) {
-    for (const trial of trials) {
-      const from = trial.beatAtMs == null ? trial.shownAtMs : trial.beatAtMs - 140
+    for (const [i, trial] of trials.entries()) {
+      const from = cueStart(trial)
       const to = trial.beatAtMs == null ? trial.endedAtMs : trial.beatAtMs + 140
       const expected = trial.direction ?? label
-      if (!expected) continue
+      const isBeat = singleBeat.has(exercise) || (expected && expected !== "fist")
+      if (!expected && !isBeat) continue
       let peak = null
       for (const frame of frames) {
         if (frame.ms >= from && frame.ms <= to && (!peak || frame.speed > peak.speed)) peak = frame
       }
-      if (peak && peak.speed >= 0.65) targets.push({ t: peak.t, label: expected })
+      if (!peak || peak.speed < 0.65) continue
+      if (expected) targets.push({ t: peak.t, label: expected })
+      if (isBeat) {
+        const nextCue = trials[i + 1] ? cueStart(trials[i + 1]) : Infinity
+        const reverse = returnPeak(frames, peak, nextCue)
+        if (reverse) targets.push({ t: reverse.t, label: "return" })
+      }
     }
   } else if (label) {
     for (const event of events) if (event.type === (label === "fist" ? "fist" : "beat")) targets.push({ t: event.t, label })
