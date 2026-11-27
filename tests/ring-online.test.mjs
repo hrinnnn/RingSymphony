@@ -20,6 +20,29 @@ const bias = [0.4, -0.6, 0.3]
 const button = { type: "button", address: "L", seq: 9, timestamp: 2.02, event: 2, action: "click", label: "单击" }
 {
   let now = 10
+  const motions = []
+  const input = createRingInput({ now: () => now, WebSocketImpl: null, boundHands: { left: "L" },
+    onMotion: motion => motions.push(motion) })
+  input.feed({ type: "status", rings: [{ address: "L", connected: true }] })
+  const feed = (timestamp, gyr, sequence) => {
+    now = 10 + timestamp
+    input.feed({ type: "imu", address: "L", timestamp, sequence, acc: rest, gyr })
+  }
+  for (let i = 0; i <= 200; i++) feed(i * 0.005, bias, i)
+  assert.ok(motions.at(-1).speed < 1e-9, "motion samples use bias-corrected gyro")
+  feed(1.005, bias.map((b, i) => b + [1, 0, 2][i]), 201)
+  const { hand, address, dt, wYaw, wPitch } = motions.at(-1)
+  assert.equal(hand, "left")
+  assert.equal(address, "L")
+  assert.ok(Math.abs(dt - 0.005) < 1e-9 && Math.abs(wYaw - 2) < 0.01 && Math.abs(wPitch - 1) < 0.01)
+  feed(1.105, bias, 202)
+  assert.equal(motions.at(-1).dt, 0.02, "short gaps cannot multiply a returning gyro sample")
+  const beforeReset = motions.length
+  feed(1.505, bias, 203)
+  assert.equal(motions.length, beforeReset, "long gaps do not move the cursor")
+}
+{
+  let now = 10
   const events = []
   const input = createRingInput({ now: () => now, WebSocketImpl: null, boundHands: { left: "L" },
     onEvent: event => events.push(event) })

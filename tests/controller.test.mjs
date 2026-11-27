@@ -12,22 +12,23 @@ import { LOOP_BARS } from '../src/score.js'
 const nodes = new Map()
 const makeNode = () => ({
   hidden: false, textContent: '', innerHTML: '', style: {}, dataset: {}, classList: { toggle() {} }, children: [],
-  handlers: {}, addEventListener(name, fn) { this.handlers[name] = fn },
-  append(...items) { this.children.push(...items) }, setPointerCapture() {}, setAttribute() {}, clientWidth: 1200,
+  handlers: {}, attrs: {}, addEventListener(name, fn) { this.handlers[name] = fn },
+  append(...items) { this.children.push(...items) }, setPointerCapture() {}, setAttribute(name, value) { this.attrs[name] = value }, clientWidth: 1200, clientHeight: 800,
   getBoundingClientRect: () => ({ left: 0, top: 0, width: 1200, height: 800 }),
 })
 const node = id => { if (!nodes.has(id)) nodes.set(id, makeNode()); return nodes.get(id) }
 const keys = {}, audio = { now: 0, parts: new Set(), dynamics: 1, tempo: 60, ended: null, freeStarts: 0, freeStops: 0 }
-let nextFrame, pickedPart, aimedPart, ringGesture, ringPreview, ringCueDue, cutoffDue, levelDone
+let nextFrame, pickedPart, aimedPart, ringGesture, ringMotion, ringPreview, ringCueDue, cutoffDue, levelDone
 let calibrationReady = true
 let palmCalibrationReady = true
 let palmCalibrationActive = false
 let panelOpened = false
 const ringLive = new Set()
+const trackedHands = {}
 const ringErrors = []
 const poses = []
 let screenPositions = []
-const world = { resize() {}, update() {}, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, sectionAt() { return aimedPart }, screenPositions: () => screenPositions }
+const world = { resize() {}, update(_time, _playing, visual) { this.visual = visual }, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, sectionAt() { return aimedPart }, screenPositions: () => screenPositions }
 const pageHits = []
 const lane = { resize() {}, update() {}, reset() {}, hit: (...args) => pageHits.push(args) }
 const settings = { latency: 0, close() {}, suggest(bias) { settings.bias = bias } }
@@ -64,11 +65,11 @@ globalThis.__controller = {
   setTempo: (bpm, age) => { audio.tempo = bpm; audio.strokeAge = age },
   partLevels: () => ({}), transportBeats: () => 0,
   transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .4, PERFECT: .15, createWorld: () => world, createLane: () => lane, createSettings: () => settings, startPiece: async chart => { audio.now = 0; return chart }, buildPieceChart, PIECES,
-  startRing: ({ onGesture, onPreview, cueDue, cutoffDue: confirmCutoff }) => { ringGesture = onGesture; ringPreview = onPreview; ringCueDue = cueDue; cutoffDue = confirmCutoff; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
+  startRing: ({ onGesture, onMotion, onPreview, cueDue, cutoffDue: confirmCutoff }) => { ringGesture = onGesture; ringMotion = onMotion; ringPreview = onPreview; ringCueDue = cueDue; cutoffDue = confirmCutoff; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
   createMixerHud: () => ({ update() {} }), lassoParts, pathLength, PART_INFO, PARTS, LOOP_BARS,
   // The camera is optional and the controller must work with it absent, which is what these
   // inert stubs represent: a tracker that never has a verdict is the no-camera path.
-  createCameraTracker: () => ({ verdict: () => null, framesFor: () => [], status: () => ({ state: 'off', fps: 0, hands: { left: false, right: false }, mismatch: false }), onStatus() {}, enable: async () => false, disable() {}, video: null }),
+  createCameraTracker: () => ({ verdict: () => null, hand: (hand) => trackedHands[hand] ?? null, framesFor: () => [], status: () => ({ state: 'off', fps: 0, hands: { left: false, right: false }, mismatch: false }), onStatus() {}, enable: async () => false, disable() {}, video: null }),
   createCameraLog: () => ({ record() {}, entries: () => [], clear() {}, toJSON: () => '{}' }),
   createCameraPanel: () => ({ render() {}, offerIfUnasked() {}, resume: async () => {} }),
   createGestureLog,
@@ -457,6 +458,8 @@ const starts = audio.freeStarts
 ringButton('click', 'right')
 assert.equal(audio.freeStarts, starts, 'right click leaves free conducting alone')
 ringButton('click', 'left')
+assert.equal(audio.freeStarts, starts, 'the firmware click cannot start or retoggle after an up')
+gesture('strike', 'left')
 assert.equal(audio.freeStarts, starts + 1)
 assert.deepEqual([...audio.freeRun.open], ['flute'])
 audio.soloCommand = undefined
@@ -470,6 +473,132 @@ assert.equal(audio.soloCommand, 'flute')
 const stops = audio.freeStops
 ringButton('long', 'right')
 assert.equal(audio.freeStops, stops + 1)
+
+node('#exit').handlers.click()
+await freeButton.handlers.click()
+const cursor = node('#hand-cursor')
+const lasso = node('#lasso path')
+ringLive.add('left')
+trackedHands.right = { x: 0.8, y: 0.5 }
+screenPositions = [{ part: 'flute', x: 240, y: 400 }]
+tick(0)
+assert.equal(cursor.hidden, false)
+assert.ok(Math.abs(parseFloat(cursor.style.left) - 240) < 1e-9, 'camera falls back to the right, mirrored')
+assert.ok(world.visual.selected.has('flute'), 'hover highlights the nearby section')
+assert.doesNotMatch(node('#cue-hint').textContent, /已选/, 'hover alone does not select a section')
+trackedHands.left = { x: 0.5, y: 0.75 }
+tick(0)
+assert.ok(Math.abs(parseFloat(cursor.style.left) - 366) < 1e-9)
+assert.ok(Math.abs(parseFloat(cursor.style.top) - 470) < 1e-9)
+
+const cameraTo = (x, y) => {
+  trackedHands.left = { x: 1 - x / 1200, y: y / 800 }
+  for (let i = 0; i < 12; i++) tick(0)
+}
+screenPositions = [{ part: 'violin', x: 420, y: 305 }, { part: 'flute', x: 575, y: 345 },
+  { part: 'cello', x: 850, y: 500 }]
+cameraTo(300, 180)
+ringButton('down', 'left')
+assert.equal(cursor.dataset.drawing, 'true')
+const atDown = cursor.style.left
+ringMotion({ hand: 'left', dt: 0.02, wYaw: 30, wPitch: 0, speed: 30 })
+tick(0)
+assert.ok(Math.abs(parseFloat(cursor.style.left) - parseFloat(atDown)) < 0.5, 'camera takes precedence over a held ring')
+gesture('strike', 'left')
+assert.equal(audio.freeStarts, starts + 1, 'the clutch hand cannot start the orchestra mid-lasso')
+key('f')
+assert.equal(audio.freeStarts, starts + 2, 'keyboard controls are still available while drawing')
+cameraTo(720, 180)
+ringButton('long', 'left')
+cameraTo(720, 525)
+cameraTo(300, 525)
+cameraTo(300, 180)
+assert.match(lasso.attrs.d, /^M.* L/)
+ringButton('up', 'left')
+assert.equal(lasso.attrs.d, '')
+assert.equal(cursor.dataset.drawing, undefined)
+assert.deepEqual(poses.at(-1), ['left', 'circle'])
+ringButton('click', 'left')
+tick(0)
+assert.match(node('#cue-hint').textContent, /已选.*小提琴.*长笛|已选.*长笛.*小提琴/)
+assert.equal(audio.freeStops, stops + 1, 'holding a drawing past the long event did not stop the orchestra')
+
+cameraTo(850, 500)
+ringButton('down', 'left')
+ringButton('up', 'left')
+ringButton('click', 'left')
+tick(0)
+assert.match(node('#cue-hint').textContent, /大提琴/)
+ringButton('down', 'left')
+ringButton('up', 'left')
+ringButton('click', 'left')
+tick(0)
+assert.doesNotMatch(node('#cue-hint').textContent, /大提琴/)
+ringButton('down', 'left', 0.8)
+ringButton('up', 'left')
+ringButton('long', 'left')
+assert.deepEqual(new Set(audio.sectionCommand.list), new Set(['flute', 'violin']),
+  'a long event after releasing still stops the original selection')
+assert.equal(audio.sectionCommand.open, false)
+
+node('#exit').handlers.click()
+assert.equal(cursor.hidden, true)
+assert.equal(lasso.attrs.d, '')
+delete trackedHands.left
+delete trackedHands.right
+screenPositions = []
+await freeButton.handlers.click()
+tick(0)
+assert.equal(cursor.hidden, true, 'no camera and no clutch leave the cursor hidden')
+ringButton('down', 'left')
+tick(0)
+assert.equal(cursor.style.left, '600px')
+assert.equal(cursor.style.top, '400px')
+const moveRing = (wYaw, wPitch = 0, hand = 'left') =>
+  ringMotion({ hand, dt: 0.02, wYaw, wPitch, speed: Math.hypot(wYaw, wPitch) })
+moveRing(0.07)
+moveRing(12, 12, 'right')
+tick(0)
+assert.equal(cursor.style.left, '600px')
+moveRing(10, 5)
+tick(0)
+assert.ok(Math.abs(parseFloat(cursor.style.left) - 444) < 1e-9)
+assert.ok(Math.abs(parseFloat(cursor.style.top) - 348) < 1e-9)
+for (let i = 0; i < 8; i++) moveRing(20, -20)
+tick(0)
+assert.equal(cursor.style.left, '0px')
+assert.equal(cursor.style.top, '800px')
+ringButton('up', 'left')
+moveRing(-20, 20)
+tick(0)
+assert.equal(cursor.style.left, '0px', 'the cursor stops moving on button up')
+assert.equal(lasso.attrs.d, '')
+ringButton('down', 'left')
+moveRing(-20, 20)
+tick(0)
+assert.match(lasso.attrs.d, /^M/)
+ringLive.clear()
+tick(0)
+assert.equal(cursor.hidden, true, 'a disconnected ring drops its cursor')
+assert.equal(lasso.attrs.d, '', 'a lost button release cannot leave a trail')
+ringLive.add('right')
+ringLive.add('left')
+ringButton('down', 'right')
+ringButton('down', 'left')
+ringButton('up', 'right')
+assert.equal(cursor.dataset.drawing, 'true', 'the left button can take over a right-hand drag')
+ringButton('up', 'left')
+assert.equal(cursor.dataset.drawing, undefined)
+ringLive.clear()
+screenPositions = [{ part: 'flute', x: 70, y: 50 }, { part: 'violin', x: 40, y: 50 }]
+node('#view').handlers.pointerdown({ clientX: 0, clientY: 0, offsetX: 0, pointerId: 7 })
+for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100], [0, 0]]) {
+  node('#view').handlers.pointermove({ clientX, clientY, pointerId: 7 })
+}
+node('#view').handlers.pointerup({ clientX: 0, clientY: 0, pointerId: 7 })
+tick(0)
+assert.match(node('#cue-hint').textContent, /已选.*长笛.*小提琴|已选.*小提琴.*长笛/)
+console.log('Free hand cursor: camera EMA and hover, multi-section lasso, tap, and clamped gyro clutch pass')
 
 node('#exit').handlers.click()
 await canonButton.handlers.click()
@@ -491,19 +620,20 @@ tick(circle.time + 0.12)
 ringButton('click', 'right', 0.12)
 assert.equal(pageHits.at(-1)[0].kind, 'circle', 'either hand may answer a circle using the back-dated time')
 assert.equal(pageHits.at(-1)[1], 'perfect')
-tick(cut.time - canon.beat)
+const earlyCut = Math.min(1, canon.beat)
+tick(cut.time - earlyCut - 0.03)
 const cutHits = pageHits.filter(([cue, grade]) => cue.kind === 'cut' && grade !== 'miss').length
 ringButton('long', 'left')
 ringButton('double', 'right')
 assert.equal(pageHits.filter(([cue, grade]) => cue.kind === 'cut' && grade !== 'miss').length, cutHits)
-tick(cut.time)
+tick(cut.time - earlyCut + 0.02)
 ringButton('double', 'right')
 assert.equal(pageHits.at(-1)[0].kind, 'cut')
-assert.equal(pageHits.at(-1)[1], 'perfect')
+assert.equal(pageHits.at(-1)[1], 'good', 'double click can close one beat early')
 tick(canon.duration)
 await node('#retry').handlers.click()
-tick(cut.time)
+tick(cut.time - earlyCut + 0.02)
 ringButton('long', 'left')
 assert.equal(pageHits.at(-1)[0].kind, 'cut')
-assert.equal(pageHits.at(-1)[1], 'perfect')
+assert.equal(pageHits.at(-1)[1], 'good', 'long press can close one beat early')
 console.log('Ring buttons: level entrances, circles, cutoff timing and free conducting pass')

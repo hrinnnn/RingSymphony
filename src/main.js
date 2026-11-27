@@ -31,6 +31,7 @@ const toolsEl = document.querySelector("#tools")
 const toastEl = document.querySelector("#toast")
 const exitEl = document.querySelector("#exit")
 const lassoPath = document.querySelector("#lasso path")
+const handCursor = document.querySelector("#hand-cursor")
 const sessionTitle = document.querySelector("#session-title")
 const sessionSub = document.querySelector("#session-sub")
 const tallyLabel = document.querySelector("#tally-label")
@@ -83,6 +84,9 @@ let ending = false
 let freeReady = false
 let freePlaying = false
 const freeSelection = new Set()
+let freeAim = null
+let ringLasso = null
+let releasedLasso = null
 let swingEar = null
 let lastStudy = STUDIES[0]
 // A ring gesture reaches the page a little after it happened; keep a cue open that long past its Good window.
@@ -107,6 +111,12 @@ if (!captureHost) levelButton("♫", "var(--mint)", "自由指挥 · 萨蒂", "�
 PIECES.forEach((piece) => levelButton("♪", "var(--gold, #e6c98a)", piece.title, piece.sub, piece.tag, () => beginPiece(piece)))
 
 function setMode(next) {
+  if (mode === "free" && next !== "free") {
+    pointer = null
+    clearRingLasso()
+    freeAim = releasedLasso = null
+    handCursor.hidden = true
+  }
   mode = next
   homeEl.hidden = next !== "home"
   playEl.hidden = next === "home"
@@ -342,7 +352,7 @@ function pickCard(part) {
 
 function playRingButton({ action, hand }, at) {
   if (action === "long" || action === "double") {
-    if (activeCutoff(at, hand)) playCut(at, hand)
+    playCut(at, hand)
     return
   }
   if (action !== "click") return
@@ -360,17 +370,101 @@ function playRingButton({ action, hand }, at) {
   scoreCue(cue, cue.until === undefined ? gradeDistance(distance) : "perfect", delta)
 }
 
+const clampAim = (value) => Math.min(1, Math.max(0, value))
+const aimPixels = () => ({ x: freeAim.x * view.clientWidth, y: freeAim.y * view.clientHeight })
+const matchesLasso = (lasso, event) => lasso && lasso.hand === event.hand && lasso.address === event.address
+const ringEventAt = (event) => performance.now() / 1000 - event.age
+
+function clearRingLasso() {
+  ringLasso = null
+  delete handCursor.dataset.drawing
+  lassoPath.setAttribute("d", "")
+}
+
+function recordAim() {
+  const next = aimPixels()
+  const lastPoint = ringLasso.trail.at(-1)
+  if (Math.hypot(next.x - lastPoint.x, next.y - lastPoint.y) >= 2) ringLasso.trail.push(next)
+}
+
+function sampleFreeAim() {
+  for (const hand of ["left", "right"]) {
+    const seen = camera.hand?.(hand)
+    if (!Number.isFinite(seen?.x) || !Number.isFinite(seen?.y)) continue
+    const x = clampAim(1 - seen.x)
+    const y = clampAim(seen.y)
+    freeAim = { x: freeAim ? freeAim.x + (x - freeAim.x) * 0.35 : x,
+      y: freeAim ? freeAim.y + (y - freeAim.y) * 0.35 : y, source: "camera" }
+    return
+  }
+  if (ringLasso) freeAim = { ...freeAim, source: "ring", hand: ringLasso.hand }
+  else if (freeAim?.source === "camera" || (freeAim && !ring.input.live(freeAim.hand))) freeAim = null
+}
+
+function onRingMotion(motion) {
+  if (mode !== "free" || freeAim?.source !== "ring" || !matchesLasso(ringLasso, motion) || motion.speed < 0.08) return
+  const step = 0.65 * motion.dt
+  freeAim.x = clampAim(freeAim.x - motion.wYaw * step)
+  freeAim.y = clampAim(freeAim.y - motion.wPitch * step)
+  recordAim()
+}
+
+function freeRingButton(event) {
+  const { hand, address, action } = event
+  const at = ringEventAt(event)
+  if (action === "down") {
+    if (pointer || (ringLasso && !(hand === "left" && ringLasso.hand === "right"))) return
+    if (ringLasso) clearRingLasso()
+    sampleFreeAim()
+    freeAim ??= { x: 0.5, y: 0.5, source: "ring", hand }
+    if (freeAim.source === "ring") freeAim.hand = hand
+    ringLasso = { hand, address, from: at, trail: [aimPixels()] }
+    handCursor.dataset.drawing = "true"
+    return
+  }
+  if (matchesLasso(ringLasso, event)) {
+    if (action === "long" || action === "double") {
+      if (action === "long" || hand === "left") ringLasso.command = action
+      return
+    }
+    if (action !== "up") return
+    const { trail, from, command } = ringLasso
+    const length = pathLength(trail)
+    releasedLasso = { hand, address, from, until: at, moved: length >= 36 }
+    clearRingLasso()
+    if (length >= 120) {
+      const parts = lassoParts(trail, world.screenPositions())
+      parts.forEach(part => freeSelection.add(part))
+      world.pose(hand, "circle")
+    } else if (length < 36) {
+      if (command === "long") freeStop(hand)
+      else if (command === "double") {
+        if (freeSelection.size === 1) freeSolo()
+      } else if (at - from < 0.45) {
+        // A long action may arrive after up. A held release must
+        // keep the selection intact until that action can use it.
+        const part = aimedSection()
+        if (part) playPoint(part)
+      }
+    }
+    return
+  }
+  if (matchesLasso(releasedLasso, event) && releasedLasso.moved && at - releasedLasso.until < 0.35) return
+  if (action === "long") freeStop(hand)
+  if (action === "double" && hand === "left" && freeSelection.size === 1) freeSolo()
+}
+
 function onRing(event) {
   if (mode === "free") {
     if (!freeReady || ending) return
     const snapshot = ring.input.snapshot()
     const calibration = snapshot.palmCalibration
     if (calibration.active) return
-    if (event.type === "button") {
-      if (event.action === "long") freeStop(event.hand)
-      if (event.hand === "left" && event.action === "click") freeStart()
-      if (event.hand === "left" && event.action === "double" && freeSelection.size === 1) freeSolo()
-      return
+    if (event.type === "button") return freeRingButton(event)
+    if (matchesLasso(ringLasso, event)) return
+    if (matchesLasso(releasedLasso, event)) {
+      const at = ringEventAt(event)
+      if (at >= releasedLasso.from && at <= releasedLasso.until) return
     }
     if (event.type === "circle" && event.hand === "left") {
       const part = aimedSection()
@@ -390,7 +484,7 @@ function onRing(event) {
     }
     if (event.type === "fist") return freeStop(event.hand)
     if (event.type === "strike" && event.hand === "left") {
-      if (!freeSelection.size && camera.hand?.("left")) {
+      if (!freeSelection.size && (freeAim || camera.hand?.("left"))) {
         const target = aimedSection()
         if (target) freeSelection.add(target)
       }
@@ -450,6 +544,7 @@ function upcomingRingBeat(hand, age, dir) {
 const ring = startRing({
   boundHands,
   onGesture: onRing,
+  onMotion: onRingMotion,
   onPreview: ({ hand, age, dir }) => {
     const found = upcomingRingBeat(hand, age, dir)
     if (found && found.distance <= GOOD) world.pose(hand, "beatPreview", dir)
@@ -863,6 +958,21 @@ const emptyParts = new Map()
 const waitingParts = new Set()
 
 function freeLoop() {
+  if (ringLasso && (ending || !ring.input.live(ringLasso.hand))) clearRingLasso()
+  sampleFreeAim()
+  handCursor.hidden = !freeAim
+  if (freeAim) {
+    const { x, y } = aimPixels()
+    handCursor.style.left = `${x}px`
+    handCursor.style.top = `${y}px`
+  }
+  if (ringLasso) {
+    if (freeAim.source === "camera") recordAim()
+    if (ringLasso.drawn !== ringLasso.trail.length) {
+      showLasso(ringLasso.trail)
+      ringLasso.drawn = ringLasso.trail.length
+    }
+  }
   const run = freeMix()
   const beats = freePlaying ? Math.max(0, transportBeats()) : 0
   const bar = Math.min(FREE_BARS, Math.floor(beats / FREE_METER) + 1)
@@ -886,8 +996,9 @@ function freeLoop() {
       solo, ducked: Boolean(run?.solo && open.has(part) && !solo), level: levels[part] }]
   }))
   hud.update(view)
+  const hover = freeAim && aimedSection()
   world.update(beats * 60 / FREE_BPM, open, {
-    selected: freeSelection, pending, solo: run?.solo ? new Set([run.solo]) : null, dynamics: currentDynamics(),
+    selected: hover ? new Set([...freeSelection, hover]) : freeSelection, pending, solo: run?.solo ? new Set([run.solo]) : null, dynamics: currentDynamics(),
     beatPhase: beats % 1, beatHz: FREE_BPM / 60,
   })
 }
@@ -1019,6 +1130,16 @@ const manual = (hand) => mode === "free" || !ring?.input?.live?.(hand)
 
 let mouseX = null
 function aimedSection() {
+  if (mode === "free" && freeAim) {
+    const point = aimPixels()
+    let nearest = null
+    let distance = Math.max(44, Math.min(100, view.clientHeight * 0.12))
+    for (const { part, x, y } of world.screenPositions()) {
+      const gap = Math.hypot(x - point.x, y - point.y)
+      if (gap < distance) { nearest = part; distance = gap }
+    }
+    return nearest
+  }
   const seen = camera.hand?.("left")
   const x = seen ? (1 - seen.x) * view.clientWidth : mouseX
   if (x == null) return null
@@ -1099,7 +1220,14 @@ function local(event) {
   return { x: event.clientX - rect.left, y: event.clientY - rect.top }
 }
 
+function showLasso(trail) {
+  if (pathLength(trail) > 36) {
+    lassoPath.setAttribute("d", "M" + trail.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" L") + " Z")
+  }
+}
+
 view.addEventListener("pointerdown", (event) => {
+  if (ringLasso) return
   view.setPointerCapture(event.pointerId)
   const circle = chart?.entries && (mode === "playing" || mode === "count-in") && nearest(inputNow(), "left", "circle")
   pointer = { x: event.clientX, y: event.clientY, left: event.offsetX < view.clientWidth / 2, trail: mode === "free" || circle ? [local(event)] : null }
@@ -1127,9 +1255,7 @@ view.addEventListener("pointermove", (event) => {
   if (!pointer) return
   if (pointer.trail) {
     pointer.trail.push(local(event))
-    if (pathLength(pointer.trail) > 36) {
-      lassoPath.setAttribute("d", "M" + pointer.trail.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" L") + " Z")
-    }
+    showLasso(pointer.trail)
     return
   }
   // A beat lands as soon as the stroke is clearly a swipe, not when the finger lifts.
@@ -1142,6 +1268,7 @@ view.addEventListener("pointermove", (event) => {
 })
 
 view.addEventListener("pointercancel", () => {
+  if (ringLasso) return
   pointer = null
   lassoPath?.setAttribute("d", "")
 })

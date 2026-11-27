@@ -18,6 +18,7 @@ RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 NORMAL_NOTIFICATIONS = bytes.fromhex("2c 00 00")
 IMU_START = b"\x21\x00" + struct.pack("<HHHBB", 200, 200, 2000, 16, 10) + b"\x00\x00"
+IMU_STOP = bytes.fromhex("21 01")
 HEADER = struct.Struct("<BBHBI")
 SIX_AXES = struct.Struct("<6h")
 ACC_SCALE = 9.80665 / 2048
@@ -26,7 +27,7 @@ BUTTONS = (
     ("down", "按下"), ("up", "松开"), ("click", "单击"),
     ("long", "长按"), ("double", "双击"),
 )
-LOCAL_ORIGIN = re.compile(r"https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?")
+LOCAL_ORIGIN = re.compile(r"^https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$")
 LOG = logging.getLogger("ring-ble")
 
 
@@ -155,11 +156,17 @@ async def connect_ring(bridge, ring, device):
                 raise ValueError("Ringo NUS service unavailable")
             await client.start_notify(TX, on_data)
             await client.write_gatt_char(RX, NORMAL_NOTIFICATIONS, response=False)
-            await client.write_gatt_char(RX, IMU_START, response=False)
-            ring.connected = True
-            bridge.publish(bridge.status())
-            LOG.info("%s connected (%s)", ring.name, ring.address)
-            await disconnected.wait()
+            try:
+                await client.write_gatt_char(RX, IMU_START, response=False)
+                ring.connected = True
+                bridge.publish(bridge.status())
+                LOG.info("%s connected (%s)", ring.name, ring.address)
+                await disconnected.wait()
+            finally:
+                try:
+                    await asyncio.wait_for(client.write_gatt_char(RX, IMU_STOP, response=False), timeout=1)
+                except Exception as error:
+                    LOG.debug("%s could not stop IMU: %s", ring.address, error)
     except Exception as error:
         LOG.warning("%s: %s", ring.address, error)
     finally:

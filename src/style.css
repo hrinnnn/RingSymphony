@@ -140,6 +140,10 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: 
 #lane { position: absolute; inset: 0; visibility: hidden; pointer-events: none; cursor: default; }
 #lasso { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; overflow: visible; }
 #lasso path { fill: #e6c98a1c; stroke: #e6c98a; stroke-width: 1.5; stroke-dasharray: 5 6; stroke-linecap: round; stroke-linejoin: round; }
+#hand-cursor { position: absolute; z-index: 4; pointer-events: none; width: 20px; height: 20px; translate: -50% -50%; border: 1px solid #a4ece1; border-radius: 50%; box-shadow: 0 0 10px #6ee6cf80, inset 0 0 5px #6ee6cf50; }
+#hand-cursor::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: #cefff5; }
+#hand-cursor[data-drawing="true"] { scale: 1.35; border-color: #ffe3a4; box-shadow: 0 0 14px #ffce729e, inset 0 0 7px #ffce725a; }
+#hand-cursor[data-drawing="true"]::after { background: #fff0c4; }
 .session { position: absolute; z-index: 2; top: 88px; left: 30px; padding: 10px 16px; pointer-events: none; border-left: 3px solid var(--gold-dim); }
 .session h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: .12em; font-weight: 400; }
 .session p { margin: 0; color: #b0a89a; font: 10px var(--mono); letter-spacing: .16em; }

@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from bridge.ble_bridge import (
-    ACC_SCALE, BUTTONS, GYR_SCALE, IMU_START, LOCAL_ORIGIN, NORMAL_NOTIFICATIONS,
+    ACC_SCALE, BUTTONS, GYR_SCALE, IMU_START, IMU_STOP, LOCAL_ORIGIN, NORMAL_NOTIFICATIONS,
     RX, SERVICE, TX, Bridge, RingStream, connect_ring, decode_notification, run,
 )
 
@@ -72,6 +72,13 @@ class DecodeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 decode_notification(packet)
         self.assertIsNone(decode_notification(b"\x27\x03"))
+
+    def test_local_origin_matches_the_whole_header(self):
+        for origin in ("http://localhost", "https://127.0.0.1:5173", "http://[::1]:8787"):
+            self.assertIsNotNone(LOCAL_ORIGIN.match(origin))
+        for origin in ("http://localhost.evil.com", "https://127.0.0.1.example",
+                       "http://localhost:5173/path", "https://other.example"):
+            self.assertIsNone(LOCAL_ORIGIN.match(origin))
 
 
 @unittest.skipIf(serve is None, "websockets 14+ is required for loopback tests")
@@ -161,6 +168,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 if value == IMU_START:
                     self.receive(None, RAW)
                     asyncio.get_running_loop().call_soon(self.callback, self)
+                elif value == IMU_STOP and seen.count("disconnect") == 0:
+                    raise OSError("the device has already disconnected")
 
         bridge = Bridge()
         bridge.rings["a"] = ring
@@ -170,8 +179,8 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             await connect_ring(bridge, ring, device)
         self.assertFalse(ring.connected)
         setup = [TX, (RX, NORMAL_NOTIFICATIONS, False), (RX, IMU_START, False)]
-        self.assertEqual(seen, setup + ["imu", "imu", "status", "disconnect", "status"] +
-                         setup + ["status", "disconnect", "status"])
+        teardown = [(RX, IMU_STOP, False), "disconnect", "status"]
+        self.assertEqual(seen, setup + ["imu", "imu", "status"] + teardown + setup + ["status"] + teardown)
 
 
 if __name__ == "__main__":

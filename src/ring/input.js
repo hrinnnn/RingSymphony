@@ -38,6 +38,7 @@ function readJson(storage, key, fallback) {
 export function createRingInput({
   url = "ws://127.0.0.1:8787",
   onEvent = () => {},
+  onMotion,
   onPreview,
   now = () => performance.now() / 1000,
   WebSocketImpl = globalThis.WebSocket,
@@ -436,6 +437,14 @@ export function createRingInput({
       const up = ring.gravity.update(message.acc, gyr, dt, gap > 0.025)
       ring.history.push({ t, gyr, acc: message.acc, up: up ? [...up] : null })
       while (ring.history.length && ring.history[0].t < t - 0.8) ring.history.shift()
+      if (onMotion && up && gap > 0 && gap <= RESET_GAP) {
+        const wYaw = gyr[0] * up[0] + gyr[1] * up[1] + gyr[2] * up[2]
+        // Use a device axis projected onto the horizontal plane for wrist pitch.
+        // Gravity alone fixes vertical, so switch axes near a vertical alignment.
+        const axis = Math.abs(up[0]) < 0.85 ? 0 : 2
+        const wPitch = (gyr[axis] - wYaw * up[axis]) / Math.sqrt(1 - up[axis] ** 2)
+        onMotion({ hand: ring.hand, address: ring.address, dt, wYaw, wPitch, speed: w })
+      }
     }
     const capturing = ring.hand === "right" && direction.status(arrival).pending
     if (capturing && ring.calibrationDetector) {
