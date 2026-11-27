@@ -340,12 +340,38 @@ function pickCard(part) {
 
 // ---------- Rings ----------
 
+function playRingButton({ action, hand }, at) {
+  if (action === "long" || action === "double") {
+    if (activeCutoff(at, hand)) playCut(at, hand)
+    return
+  }
+  if (action !== "click") return
+  let target = null
+  for (const cue of cues) {
+    if (cue.result || (cue.kind !== "cue" && cue.kind !== "circle")) continue
+    const delta = at - cue.time
+    const distance = Math.abs(delta)
+    if (cue.until === undefined ? distance > GOOD : !heldCueOpen(cue, at)) continue
+    if (!target || distance < target.distance) target = { cue, delta, distance }
+  }
+  if (!target) return
+  const { cue, delta, distance } = target
+  if (cue.kind === "cue") world.pose(hand, "point", cue.part)
+  scoreCue(cue, cue.until === undefined ? gradeDistance(distance) : "perfect", delta)
+}
+
 function onRing(event) {
   if (mode === "free") {
     if (!freeReady || ending) return
     const snapshot = ring.input.snapshot()
     const calibration = snapshot.palmCalibration
     if (calibration.active) return
+    if (event.type === "button") {
+      if (event.action === "long") freeStop(event.hand)
+      if (event.hand === "left" && event.action === "click") freeStart()
+      if (event.hand === "left" && event.action === "double" && freeSelection.size === 1) freeSolo()
+      return
+    }
     if (event.type === "circle" && event.hand === "left") {
       const part = aimedSection()
       if (part) {
@@ -381,6 +407,7 @@ function onRing(event) {
   if (mode !== "playing" && mode !== "count-in") return
   const at = inputNow() - event.age
   capturedRun?.events.push({ ...event, at, receivedAtMs: performance.timeOrigin + performance.now() })
+  if (event.type === "button") return playRingButton(event, at)
   gestureLog.recordLatency(event, at)
   // A fist only scores at a written cutoff. It never interrupts the backing track.
   if (event.type === "fist") return playCut(at, event.hand)

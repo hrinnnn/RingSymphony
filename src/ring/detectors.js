@@ -131,7 +131,10 @@ export function createBeatDetector(options = {}) {
       settled += dt
       const k = dt / o.beatTau
       mean = mean === null ? w : mean + k * (w - mean)
-      const restK = dt / o.restTau
+      // A burst of frames after missing samples is weak evidence about the
+      // resting level. Give it less weight so one forceful stroke cannot
+      // push the adaptive floor above the next light stroke.
+      const restK = dt / o.restTau * (t <= sparseThrough ? 0.4 : 1)
       // Track the quiet level of the signal. It falls faster than it rises so that a conductor
       // who settles into gentle strokes is quickly judged on their own scale, while a hand that
       // is genuinely in sustained motion keeps a higher bar.
@@ -156,14 +159,16 @@ export function createBeatDetector(options = {}) {
       // After a gap, require two falling samples and a fresh run of frames.
       const continuous = t > sparseThrough
       const earlyDrop = falling >= 2 && t - lastGap > 0.015
-      const early = o.earlyBeat && enoughMotion && (earlyDrop || (continuous && w < 0.92 * peak && t - peakT >= 0.015))
+      const maturePeak = t - onsetT >= 0.025 || peak >= strongLevel * 1.5
+      const early = o.earlyBeat && enoughMotion && maturePeak && w < 0.90 * peak &&
+        (earlyDrop || (continuous && t - peakT >= 0.015))
       if (rising && (early || w < o.beatDrop * peak || w < level * 0.6)) {
         rising = false
         const strength = peak / Math.max(mean, 0.3)
         const tier = peak >= strongLevel ? "strong" : "weak"
         const interval = peakT - lastBeat
-        const afterPrep = o.earlyBeat && continuous && lastTier === "weak" &&
-          tier === "strong" && interval >= 0.10 && interval <= 0.32 && peak >= lastPeak * 1.6
+        const afterPrep = o.earlyBeat && lastTier === "weak" && tier === "strong" &&
+          interval >= 0.08 && interval <= 0.34 && peak >= lastPeak * 1.5
         const accepted = (interval >= o.beatGap || afterPrep) && enoughMotion
         const p = peakT
         const peakSpeed = peak
@@ -172,7 +177,7 @@ export function createBeatDetector(options = {}) {
           lastBeat = p
           lastPeak = peakSpeed
           lastTier = tier
-          return { type: "beat", t: p, onsetT, strength, peakSpeed, tier }
+          return { type: "beat", t: p, onsetT, strength, peakSpeed, tier, sparse: !continuous }
         }
       } else if (w > level && t >= mutedUntil) {
         if (!rising) onsetT = t
@@ -203,6 +208,7 @@ export function createFistDetector(options = {}) {
   const hist = []
   let last = -Infinity
   let lastShort = -Infinity
+  let shortShock = null
   let shock = null
   let sparseThrough = -Infinity
   return {
@@ -210,15 +216,16 @@ export function createFistDetector(options = {}) {
       const previous = hist.at(-1)
       if (previous && t - previous.t > 0.025) sparseThrough = t + 0.12
       const speed = norm(gyr)
+      while (hist.length && t - hist[0].t > 0.15) hist.shift()
       const samples = hist.filter(frame => t - frame.t <= 0.080001)
       hist.push({ t, gyr, speed, linearAcc, verticalAcc })
-      while (hist.length && t - hist[0].t > 0.08) hist.shift()
       const a = samples.at(-3)
       const dt = a ? t - a.t : 0
       const jerk = dt > 0 && dt <= 0.05 ? norm(gyr.map((value, i) => value - a.gyr[i])) / dt * (180 / Math.PI) : 0
       if (jerk > o.fistJerk && (t > sparseThrough || linearAcc <= 8) && t - last > o.fistLockout) {
         last = t
         shock = null
+        shortShock = null
         return { type: "fist", t, jerk }
       }
       // Sparse streams can miss the impulse outright. Accept a weaker recovery
@@ -229,28 +236,48 @@ export function createFistDetector(options = {}) {
         shock = null
         if (t - Math.max(last, lastShort) > o.fistLockout && confirmShortFist?.(candidate.t)) {
           lastShort = t
+          shortShock = null
           return { type: "fist", t: candidate.t, jerk: candidate.jerk, tier: "sparse" }
         }
       }
       const handImpact = linearAcc >= 0.8 && linearAcc <= 8 && Math.abs(verticalAcc) <= 4.25 &&
         samples.every(frame => frame.linearAcc <= 10 && (t - frame.t > 0.025 || Math.abs(frame.verticalAcc) <= 4.25))
       if (confirmShortFist && t <= sparseThrough && speed >= 4 && speed <= 11 && handImpact) {
+        // A fist produces an isolated rise. Repeated wrist motion and a moving
+        // arm can both produce a large difference across a missing packet.
+        const leadIn = hist.filter(frame => t - frame.t >= 0.025)
+        const quietLeadIn = leadIn.length >= 2 &&
+          leadIn.every(frame => frame.speed <= speed * 0.55) &&
+          leadIn.reduce((sum, frame) => sum + frame.linearAcc, 0) <= 1.9 * leadIn.length
         const start = samples.find(frame => t - frame.t >= 0.0049 && speed - frame.speed >= 2.5 && frame.speed <= speed * 0.65)
-        if (start && (!shock || speed > shock.speed)) {
+        if (quietLeadIn && start && (!shock || speed > shock.speed)) {
           shock = { t, speed, jerk: (speed - start.speed) / (t - start.t) * (180 / Math.PI) }
         }
       }
       // A short impulse can disappear in the longer average. Keep it separate so it
       // can only confirm a written cutoff and cannot mute beats or end free conducting.
+      if (shortShock && t - shortShock.t > 0.075) shortShock = null
       if (confirmShortFist && (t > sparseThrough || linearAcc <= 10) && t - Math.max(last, lastShort) > o.fistLockout) {
         const short = samples.length >= 3 ? samples.at(-2) : null
         const span = short ? t - short.t : 0
         if (span > 0 && span <= 0.025) {
           const change = norm(gyr.map((value, i) => value - short.gyr[i]))
           const jerk = change / span * (180 / Math.PI)
-          if (change >= 4 && jerk > o.fistJerk && confirmShortFist(t)) {
+          if (change >= 4 && jerk > o.fistJerk && !shortShock && confirmShortFist(t)) {
+            const peak = Math.max(speed, ...samples.filter(frame => t - frame.t <= 0.055).map(frame => frame.speed))
+            shortShock = { t, peak, jerk }
+          }
+        }
+      }
+      if (shortShock) {
+        shortShock.peak = Math.max(speed, shortShock.peak)
+        if (speed <= Math.min(1.8, shortShock.peak * 0.4) && shortShock.peak - speed >= 4) {
+          const candidate = shortShock
+          shortShock = null
+          if (t - Math.max(last, lastShort) > o.fistLockout && confirmShortFist?.(candidate.t)) {
             lastShort = t
-            return { type: "fist", t, jerk, tier: "short" }
+            shock = null
+            return { type: "fist", t: candidate.t, jerk: candidate.jerk, tier: "short" }
           }
         }
       }

@@ -92,6 +92,7 @@ const DRIVE_MIN_FRAMES = 3
 // p90. 0.46 keeps the 95% that land inside it while staying under one beat at any tempo the game
 // charts (0.5s at 120bpm), so a genuine next-beat stroke is never mistaken for a return.
 export const REVERSAL_WINDOW = 0.46
+const SPARSE_REVERSAL_WINDOW = 0.34
 
 const OPPOSITE = { down: "up", up: "down", left: "right", right: "left" }
 
@@ -224,18 +225,21 @@ export function createReversalFilter() {
   return {
     reset() { previous = null },
     // Read-only, for previews and for callers that have not decided to accept yet.
-    isReversal(direction, time) {
+    isReversal(direction, time, sparse = false) {
       if (!direction || !previous) return false
-      return time > previous.time && time - previous.time < REVERSAL_WINDOW &&
+      // A gap can hide a new drive between opposite peaks. In that case only
+      // suppress reversals inside the ordinary beat lockout.
+      const window = sparse || previous.sparse ? SPARSE_REVERSAL_WINDOW : REVERSAL_WINDOW
+      return time > previous.time && time - previous.time < window &&
         direction === OPPOSITE[previous.direction]
     },
     // `onCue` is the chart saying it asked for this direction now. A player conducting
     // left→right→left genuinely reverses on the beat, and that is a stroke, not a return.
     // It still becomes the reference for what follows, so its own return is caught in turn.
-    accept(direction, time, onCue = false) {
+    accept(direction, time, onCue = false, sparse = false) {
       if (!direction) return true
-      if (!onCue && this.isReversal(direction, time)) return false
-      previous = { direction, time }
+      if (!onCue && this.isReversal(direction, time, sparse)) return false
+      previous = { direction, time, sparse }
       return true
     },
   }

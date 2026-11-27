@@ -5,7 +5,8 @@ import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION, createDirectionCali
 import { classifyAbsolute, classifyAbsoluteStroke, createReversalFilter, gravityFrame } from "./absolute.js"
 import { createFusion, fuseDirection } from "../camera/fuse.js"
 import { createClockOffset, createGyroBias } from "./signal.js"
-import { causalFeatures, createCausalClassifier } from "./causal-classifier.js"
+import { causalFeatures, causalSequence, createCausalClassifier } from "./causal-classifier.js"
+import { validRingButton } from "./buttons.js"
 
 const ROLE_KEY = "ringsymphony.roles.v2"
 const COMP_KEY = "ringsymphony.compensation"
@@ -69,6 +70,7 @@ export function createRingInput({
   let statusSeen = false
   let last = null
   const lastByHand = { left: null, right: null }
+  const lastButtonByHand = { left: null, right: null }
   const eventCounts = { left: 0, right: 0 }
   const directionStats = { accepted: 0, data: 0, weak: 0, mismatch: 0, mismatchGap: 0, ambiguous: 0, uncalibrated: 0, suppressed: 0 }
   // How often the camera contributed. `fills` is the common case — the ring had no answer and the
@@ -247,8 +249,10 @@ export function createRingInput({
     const palmHandChanged = ring.hand === "left" || hand === "left"
     if (palmHandChanged) clearPalmCalibration(palmAutomatic ? "左手指环改变，校准已停止" : undefined)
     if (ring.hand === "right" || hand === "right") { direction.reset(); fusion.reset() }
-    if (ring.hand) lastByHand[ring.hand] = null
-    if (hand) lastByHand[hand] = null
+    for (const side of [ring.hand, hand]) {
+      if (!side) continue
+      lastByHand[side] = lastButtonByHand[side] = null
+    }
     ring.hand = hand
     ring.detector = hand ? createLiveDetector(hand) : null
     ring.calibrationDetector = null
@@ -477,9 +481,12 @@ export function createRingInput({
       const age = Math.max(0, t - event.t) + Math.max(0, arrival - (t + ring.offset)) + compensation
       event.detectionDelayMs = detectionDelayMs
       event.transportAgeMs = transportAgeMs
-      const features = classifier && (event.type === "beat" || event.type === "fist")
+      const classify = classifier && (event.type === "beat" || event.type === "fist")
+      const features = classify && classifier.arch !== "cnn"
         ? causalFeatures(ring.history, event.t, ring.lastFeature) : null
-      const scores = features && classifier.predict(features.values)
+      const modelInput = classify && classifier.arch === "cnn"
+        ? causalSequence(ring.history, event.t) : features?.values
+      const scores = modelInput && classifier.predict(modelInput)
       if (scores) {
         event.modelScores = scores
         if (event.type === "beat" && event.tier === "weak" && scores.ordinary >= 0.85) continue
@@ -582,7 +589,7 @@ export function createRingInput({
         // The absolute path tests the reversal on the direction itself, which is the whole filter
         // there; the template path needs the feature vector, the ramp and a classified predecessor.
         const suppressed = absolute
-          ? (event.dir ? !ring.reversalFilter.accept(event.dir, event.t, onCue) : false)
+          ? (event.dir ? !ring.reversalFilter.accept(event.dir, event.t, onCue, event.sparse) : false)
           : (event.dir ? !ring.returnFilter.accept(feature, event.t, onCue, rise) : ring.returnFilter.isReturn(feature, event.t, -0.8, rise))
         if (suppressed) {
           if (ring.hand === "right") directionStats.suppressed += 1
@@ -619,6 +626,19 @@ export function createRingInput({
 
   function feed(message) {
     if (message.type === "imu") frame(message)
+    else if (message.type === "button" && validRingButton(message)) {
+      const ring = rings.get(message.address)
+      if (!ring?.hand || ring.offset === null) return
+      const { hand, address, name } = ring
+      const arrival = now()
+      const age = Math.max(0, arrival - (message.timestamp + ring.offset)) + compensation
+      const payload = { type: "button", hand, event: message.event, action: message.action, label: message.label,
+        age, address, name }
+      eventCounts[hand] += 1
+      last = { ...payload, at: arrival, count: eventCounts[hand] }
+      lastByHand[hand] = lastButtonByHand[hand] = last
+      onEvent(payload)
+    }
     else if (message.type === "status") {
       statusSeen = true
       const seen = new Set()
@@ -628,7 +648,11 @@ export function createRingInput({
       }
       for (const ring of rings.values()) if (!seen.has(ring.address)) ring.connected = false
       allocate()
-    } else if (message.type === "bridge") link.studio = Boolean(message.tcp)
+    } else if (message.type === "bridge") {
+      link.studio = Boolean(message.tcp)
+      if (message.source === "ble") link.source = "ble"
+      else delete link.source
+    }
   }
 
   function connect() {
@@ -655,6 +679,7 @@ export function createRingInput({
     socket.onclose = () => {
       link.open = false
       link.studio = false
+      delete link.source
       for (const ring of rings.values()) {
         ring.connected = false
         assign(ring, null)
@@ -843,6 +868,9 @@ export function createRingInput({
         last: last && t - last.at < 2 ? { ...last } : null,
         lastByHand: Object.fromEntries(["left", "right"].map((hand) => [hand,
           lastByHand[hand] && t - lastByHand[hand].at < 2 ? { ...lastByHand[hand] } : null,
+        ])),
+        lastButtonByHand: Object.fromEntries(["left", "right"].map((hand) => [hand,
+          lastButtonByHand[hand] && t - lastButtonByHand[hand].at < 2 ? { ...lastButtonByHand[hand] } : null,
         ])),
         rings: [...rings.values()]
           .filter((ring) => ring.connected || ring.lastSeen > 0)

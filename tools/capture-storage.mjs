@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { validRingButton } from "../src/ring/buttons.js"
 
 const DIRECTORY = fileURLToPath(new URL("../../output/ringsymphony-captures/", import.meta.url))
 const ENDPOINT = "/api/capture"
@@ -40,6 +41,9 @@ function valid(record) {
   if (record.dominantHand != null && !["left", "right", "both"].includes(record.dominantHand)) return false
   if (hands.length < 1 || hands.length > 2 || new Set(hands).size !== hands.length ||
     hands.some(hand => hand !== "left" && hand !== "right")) return false
+  if (record.buttons !== undefined && (!Array.isArray(record.buttons) || !record.buttons.every(button =>
+    validRingButton(button) && Object.hasOwn(record.hands, button.address) &&
+    record.hands[button.address] === button.hand && Number.isInteger(button.receivedMs) && button.receivedMs >= 0))) return false
   if (record.kind === "game") return Boolean(record.game && typeof record.game.level?.title === "string")
   if (record.bpm !== undefined && (![80, 100, 120].includes(record.bpm) || !Array.isArray(record.trials) ||
       record.trials.some((trial, i, trials) => !Number.isFinite(trial.beatAtMs) || !Number.isFinite(trial.cueAtMs) ||

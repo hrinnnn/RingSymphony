@@ -37,6 +37,7 @@
   <body>
     <h1>戒指动作采集</h1>
     <p id="status" role="status">正在连接本机戒指桥接…</p>
+    <p id="button-status" class="muted" role="status" hidden></p>
     <p id="directory" class="muted">正在检查本机保存目录…</p>
     <form id="setup">
       <label>录制范围
@@ -90,6 +91,7 @@
       <div class="game-bar">
         <button id="close-game" type="button">返回采集</button>
         <span id="game-status" role="status"></span>
+        <span id="game-button-status" role="status" hidden></span>
         <span id="save-game" role="status"></span>
         <button id="retry-game-save" type="button" hidden>重试保存</button>
       </div>

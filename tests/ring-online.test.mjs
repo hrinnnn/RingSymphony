@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
+import { randomUUID } from "node:crypto"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { classifyAbsolute, classifyAbsoluteStroke } from "../src/ring/absolute.js"
-import { causalFeatures, createCausalClassifier, FEATURE_COUNT, FEATURE_VERSION } from "../src/ring/causal-classifier.js"
+import { classifyAbsolute, classifyAbsoluteStroke, createReversalFilter } from "../src/ring/absolute.js"
+import { causalFeatures, causalSequence, createCausalClassifier, FEATURE_COUNT, FEATURE_VERSION,
+  SEQUENCE_CHANNELS, SEQUENCE_STEPS, SEQUENCE_VERSION } from "../src/ring/causal-classifier.js"
 import { createBeatDetector, createFistDetector } from "../src/ring/detectors.js"
 import { createRingInput } from "../src/ring/input.js"
 import { createClockOffset, createGyroBias } from "../src/ring/signal.js"
@@ -15,6 +17,34 @@ import { captureStorage } from "../tools/capture-storage.mjs"
 const up = [0, 0, 1]
 const rest = [0, 0, 9.81]
 const bias = [0.4, -0.6, 0.3]
+const button = { type: "button", address: "L", seq: 9, timestamp: 2.02, event: 2, action: "click", label: "单击" }
+{
+  let now = 10
+  const events = []
+  const input = createRingInput({ now: () => now, WebSocketImpl: null, boundHands: { left: "L" },
+    onEvent: event => events.push(event) })
+  input.feed({ type: "bridge", tcp: true, source: "ble" })
+  input.feed(button)
+  assert.equal(events.length, 0, "a button cannot allocate a hand")
+  input.feed({ type: "status", rings: [{ address: "L", name: "Ringo L", connected: true }] })
+  input.feed({ type: "imu", address: "L", name: "Ringo L", timestamp: 2, sequence: 0, acc: rest, gyr: [0, 0, 0] })
+  input.compensation = 0.01
+  now = 10.08
+  input.feed({ ...button, address: "unassigned" })
+  input.feed({ ...button, action: "double" })
+  input.feed(button)
+  assert.equal(events.length, 1)
+  assert.ok(Math.abs(events[0].age - 0.07) < 1e-9)
+  assert.deepEqual({ ...events[0], age: 0 }, { type: "button", hand: "left", event: 2,
+    action: "click", label: "单击", age: 0, address: "L", name: "Ringo L" })
+  assert.equal(input.snapshot().last.action, "click")
+  assert.equal(input.snapshot().lastByHand.left.label, "单击")
+  assert.equal(input.snapshot().lastButtonByHand.left.count, 1)
+  assert.equal(input.snapshot().link.source, "ble")
+  input.feed({ type: "bridge", tcp: true })
+  assert.deepEqual(input.snapshot().link, { open: false, studio: true })
+}
+
 const gyro = createGyroBias()
 const otherRing = createGyroBias()
 for (let i = 0; i <= 62; i++) gyro.update(i * 0.005, rest, bias, 0.005)
@@ -58,15 +88,20 @@ assert.equal(classifyAbsoluteStroke([
   { t: 1, acc: rest, gyr: [5, 0, 0.4], up },
 ], 1).direction, "up")
 
+const reversal = createReversalFilter()
+assert.ok(reversal.accept("up", 1, false, true))
+assert.equal(reversal.accept("down", 1.20, false, true), false, "a quick reversal remains suppressed")
+assert.ok(reversal.accept("down", 1.35, false, true), "missing frames can hide the next stroke's drive")
+
 const beat = createBeatDetector({ beatFloor: 0.65, weakRise: 1.1, beatRise: 2.5,
   adaptiveFloor: false, earlyBeat: true, beatTau: 20 })
-const speeds = [2, 2, 3, 2.8, 2.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 3, 4, 5, 7, 6.8, 6.3]
+const speeds = [2, 2, 3, 2.8, 2.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 3, 4, 5, 7, 6.8, 6.25]
 const strokes = speeds.map((speed, i) => beat.push(i / 100, speed)).filter(Boolean)
 assert.deepEqual(strokes.map(event => [event.t, event.tier]), [[0.02, "weak"], [0.21, "strong"]])
 
 function sparseFist(impact, stop, allowed) {
   const detector = createFistDetector()
-  return [[1, 0.1, 0], [1.05, 5.5, impact], [1.11, stop, 0]]
+  return [[0.99, 0.1, 0], [1, 0.1, 0], [1.05, 5.5, impact], [1.11, stop, 0]]
     .map(([t, speed, acc]) => detector.push(t, [speed, 0, 0], () => allowed, acc)).filter(Boolean)
 }
 assert.equal(sparseFist(3, 0.5, true)[0]?.tier, "sparse")
@@ -80,7 +115,29 @@ const features = causalFeatures(history, 0.195)
 assert.equal(features.values.length, FEATURE_COUNT)
 assert.ok(features.values.every(Number.isFinite))
 assert.deepEqual(causalFeatures([...history, { ...history[0], t: 0.2 }], 0.195), features)
-assert.deepEqual(causalFeatures(history, 0.195, { t: 0.205, direction: [0, 0, 1] }), features)
+assert.deepEqual(causalFeatures(history, 0.195, { t: 0.205, direction: [1, 0] }), features)
+const angled = history.map((frame, i) => ({
+  ...frame, up: [1 / Math.sqrt(2), 0, 1 / Math.sqrt(2)],
+  acc: [4 + i / 8, Math.sin(i / 4), 6], gyr: [1 + i / 14, Math.sin(i / 7), 2 - i / 36],
+}))
+const rotated = angled.map((frame, i) => {
+  const rotate = (v) => {
+    const [x, y, z] = frame.up
+    const cos = Math.cos(i / 3)
+    const sin = Math.sin(i / 3)
+    const cross = [y * v[2] - z * v[1], z * v[0] - x * v[2], x * v[1] - y * v[0]]
+    const along = v.reduce((sum, component, axis) => sum + component * frame.up[axis], 0)
+    return v.map((component, axis) => cos * component + sin * cross[axis] + (1 - cos) * along * frame.up[axis])
+  }
+  return { ...frame, acc: rotate(frame.acc), gyr: rotate(frame.gyr) }
+})
+const previousAngle = causalFeatures(angled, 0.16).direction
+const rotatedPrevious = causalFeatures(rotated, 0.16).direction
+const originalFeatures = causalFeatures(angled, 0.195, { t: 0.16, direction: previousAngle })
+const rotatedFeatures = causalFeatures(rotated, 0.195, { t: 0.16, direction: rotatedPrevious })
+for (const [i, value] of originalFeatures.values.entries()) {
+  assert.ok(Math.abs(value - rotatedFeatures.values[i]) < 1e-8, `feature ${i} depends on yaw mounting angle`)
+}
 assert.equal(causalFeatures(history.slice(0, 2), 0.005), null)
 const zeros = Array(FEATURE_COUNT).fill(0)
 const training = { featureVersion: FEATURE_VERSION, labels: ["ordinary", "up"],
@@ -89,6 +146,35 @@ assert.ok(createCausalClassifier(training).predict(features.values).up > 0.7)
 assert.ok(createCausalClassifier({ ...training, hidden: { weights: [zeros], bias: [0] },
   output: { weights: [[0], [0]], bias: [0, 2] } }).predict(features.values).up > 0.8)
 assert.equal(createCausalClassifier({ ...training, featureVersion: -1 }), null)
+
+{
+  const samples = [0, 0.03, 0.06, 0.09, 0.12, 0.15, 0.18, 0.20]
+    .map(t => ({ t, up, acc: [0, 0, 9.81 + 10 * t], gyr: [0, 0, 0] }))
+  const sequence = causalSequence(samples, 0.2)
+  assert.equal(sequence.length, SEQUENCE_STEPS)
+  assert.ok(sequence.every(row => row.length === SEQUENCE_CHANNELS))
+  assert.ok(Math.abs(sequence[0][0] - 0.2) < 1e-9)
+  assert.ok(Math.abs(sequence[1][0] - 0.4) < 1e-9, "resampling interpolates the 20 ms grid")
+  assert.ok(Math.abs(sequence.at(-1)[0] - 2) < 1e-9)
+  const future = { t: 0.21, up, acc: [0, 0, 1000], gyr: [999, 999, 999] }
+  assert.deepEqual(causalSequence([...samples, future], 0.2), sequence)
+  assert.deepEqual(causalSequence(samples.filter(f => f.t < 0.04 || f.t >= 0.15), 0.2)[4], Array(6).fill(0))
+  assert.equal(causalSequence([future], 0.2), null)
+  const axis = value => [value, 0, 0, 0, 0, 0]
+  const model = { arch: "cnn", labels: ["ordinary", "up"], sequenceVersion: SEQUENCE_VERSION,
+    mean: axis(0), scale: Array(6).fill(1),
+    convolutions: [{ weights: [[...axis(1), ...axis(2), ...axis(0)]], bias: [0] },
+      { weights: [[1, 2, 0]], bias: [0] }],
+    output: { weights: [[0, 0], [0.02, 0.01]], bias: [0, 0] } }
+  const cnn = createCausalClassifier(model)
+  const output = cnn.predict(Array.from({ length: 10 }, (_, i) => axis(i + 1)))
+  const expected = 1 / (1 + Math.exp(-(0.02 * 32.9 + 0.01 * 72)))
+  assert.ok(Math.abs(output.up - expected) < 1e-9, "causal padding, dilation, average and last-step pooling agree")
+  assert.equal(cnn.predict(Array.from({ length: 10 }, () => axis(-2))).up, 0.5, "negative activations are rectified")
+  assert.equal(cnn.predict([axis(0)]), null)
+  assert.equal(createCausalClassifier({ ...model, sequenceVersion: -1 }), null)
+  assert.ok(createCausalClassifier({ ...training, arch: "linear" }))
+}
 
 const health = createCaptureHealth()
 const frames = Array.from({ length: 1001 }, (_, i) =>
@@ -120,19 +206,30 @@ try {
   const url = `${origin}/api/capture`
   const post = record => fetch(url, { method: "POST", headers: { origin, "content-type": "application/json" },
     body: JSON.stringify(record) })
-  const record = { version: 1, kind: "group", id: crypto.randomUUID(), startedAt: new Date().toISOString(),
+  const record = { version: 1, kind: "group", id: randomUUID(), startedAt: new Date().toISOString(),
     durationMs: schedule.at(-1).endedAtMs, finishReason: "complete", frames: [], hands: { test: "left" },
     performingHand: "left", exercise: "transition-4beat", bpm: 120, playerId: "test", trials: schedule,
     quality: { recommendRetry: false } }
+  const { type: _type, ...wire } = button
+  const savedButton = { ...wire, hand: "left", address: "test", receivedMs: 25 }
   let response = await post(record)
   assert.equal(response.status, 201)
   const file = JSON.parse(await readFile(join(directory, (await response.json()).saved), "utf8"))
   assert.equal(file.playerId, "test")
   assert.equal(file.trials[0].beatAtMs, schedule[0].beatAtMs)
-  response = await post({ ...record, id: crypto.randomUUID(), exercise: "transition-3beat",
-    quality: { recommendRetry: true } })
+  response = await post({ ...record, id: randomUUID(), exercise: "transition-3beat",
+    quality: { recommendRetry: true }, buttons: [savedButton] })
   assert.equal(response.status, 201)
-  assert.match((await response.json()).saved, /-check-left-/)
+  const groupPath = (await response.json()).saved
+  assert.match(groupPath, /-check-left-/)
+  assert.deepEqual(JSON.parse(await readFile(join(directory, groupPath), "utf8")).buttons, [savedButton])
+  response = await post({ ...record, id: randomUUID(), kind: "game", game: { level: { title: "Test" } },
+    buttons: [savedButton] })
+  assert.equal(response.status, 201)
+  const gamePath = (await response.json()).saved
+  assert.deepEqual(JSON.parse(await readFile(join(directory, gamePath, "game.json"), "utf8")).buttons, [savedButton])
+  response = await post({ ...record, id: randomUUID(), buttons: [{ ...savedButton, hand: "right" }] })
+  assert.equal(response.status, 400)
   assert.deepEqual((await (await fetch(url)).json()).completedByMode.left, ["transition-4beat"])
 } finally {
   await new Promise(resolve => server.close(resolve))

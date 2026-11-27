@@ -63,7 +63,8 @@ def gameplay_for(record, origins, aliases):
         address = event["address"]
         cleaned = {key: value for key, value in event.items() if key not in ("address", "name", "receivedAtMs", "t")}
         cleaned["device"] = aliases[address]
-        cleaned["t"] = round(event["t"] - origins[address][0], 6)
+        if "t" in event and address in origins:
+            cleaned["t"] = round(event["t"] - origins[address][0], 6)
         cleaned["receivedMs"] = round(event["receivedAtMs"] - record["startAtMs"], 3)
         result["events"].append(cleaned)
     if report := game.get("report"):
@@ -79,6 +80,9 @@ def session_for(record, frames, aliases):
         if key in record:
             result[key] = record[key]
     result["streams"] = streams
+    if "buttons" in record:
+        result["buttons"] = [{**{key: value for key, value in button.items() if key != "address"},
+                              "device": aliases[button["address"]]} for button in record["buttons"]]
     if record["kind"] == "group":
         for key in ("exercise", "performingHand", "direction", "plannedCount", "trials", "bpm"):
             if key in record:

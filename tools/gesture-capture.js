@@ -1,5 +1,6 @@
 import { createCaptureHealth, MAX_GAP_MS, MIN_RATE_HZ, summarizeCapture } from "./capture-quality.js"
 import { timedTrials, renderMetronome } from "./capture-metronome.js"
+import { validRingButton } from "../src/ring/buttons.js"
 
 const exercises = [
   { id: "transition-4beat", label: "节拍器 · 四拍连续变向", hand: "both", pattern: ["down", "left", "right", "up"], count: 32, hint: "下、左、右、上循环 8 小节。让每次挥拍落在滴答上，自然衔接下一拍。" },
@@ -45,6 +46,8 @@ const retry = byId("retry-save")
 const phase = byId("phase")
 const progress = byId("progress")
 const status = byId("status")
+const buttonStatus = byId("button-status")
+const gameButtonStatus = byId("game-button-status")
 const result = byId("result")
 const time = byId("time")
 const playerId = byId("player-id")
@@ -226,6 +229,20 @@ function connect() {
     for (const line of data.split("\n")) {
       let frame
       try { frame = JSON.parse(line) } catch { continue }
+      if (frame.type === "button") {
+        if (!validRingButton(frame)) continue
+        const bound = Object.keys(hands).find(hand => hands[hand] === frame.address)
+        const side = bound === "left" ? "左手" : bound === "right" ? "右手" : (frame.name || frame.address)
+        buttonStatus.textContent = gameButtonStatus.textContent = `${side}按钮：${frame.label}`
+        buttonStatus.hidden = gameButtonStatus.hidden = false
+        const hand = recording?.hands[frame.address]
+        if (hand) {
+          const { address, timestamp, seq, event, action, label } = frame
+          recording.buttons.push({ hand, address, timestamp, receivedMs: Math.round(now - recording.startAtMs),
+            seq, event, action, label })
+        }
+        continue
+      }
       if (frame.type !== "imu" || !frame.address || frame.acc?.length !== 3 || frame.gyr?.length !== 3) continue
       let device = devices.get(frame.address)
       if (!device) {
@@ -275,7 +292,7 @@ function selectedHands() {
 function beginRecording(kind, hands, at = nowMs(), id = crypto.randomUUID()) {
   const preflight = Object.fromEntries(Object.entries(hands).map(([address, hand]) =>
     [hand, devices.get(address)?.health.status(nowMs()) ?? null]))
-  recording = { version: 1, kind, id, startedAt: new Date(at).toISOString(), startAtMs: at, hands, frames: [],
+  recording = { version: 1, kind, id, startedAt: new Date(at).toISOString(), startAtMs: at, hands, frames: [], buttons: [],
     playerId: playerId.value.trim(), wearNote: wearNote.value.trim(), dominantHand: dominantHand.value || null,
     preflight, forcedHealth: !healthPassed && forceHealth.checked }
   return recording

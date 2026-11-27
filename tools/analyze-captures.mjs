@@ -13,6 +13,7 @@ const directory = capturePath
   : fileURLToPath(new URL("../recordings/captures-2026-11-27/", import.meta.url))
 const read = async name => JSON.parse(await readFile(join(directory, name), "utf8"))
 const manifest = await read("manifest.json")
+const strokeLevels = ["beat-light", "beat-natural", "beat-strong"]
 
 function replay(stream, hand, cutoffs = [], factory = createRingInput) {
   let arrival = 1
@@ -48,7 +49,7 @@ function replay(stream, hand, cutoffs = [], factory = createRingInput) {
 }
 
 function expectedType(group) {
-  if (group.direction || group.bpm || ["beat-light", "beat-natural", "beat-strong"].includes(group.exercise)) return "beat"
+  if (group.direction || group.bpm || strokeLevels.includes(group.exercise)) return "beat"
   if (group.exercise.startsWith("fist-")) return "fist"
   if (group.exercise.startsWith("circle-")) return "circle"
   if (group.exercise.startsWith("palm-")) return "palm"
@@ -107,7 +108,7 @@ for (const entry of manifest.groups) {
       output[hand].withCutoff = group.trials.filter(trial => atCutoff.some(event =>
         event.type === "fist" && event.atMs >= trial.shownAtMs && event.atMs <= trial.endedAtMs)).length
     }
-    if (["beat-light", "beat-natural", "beat-strong", "ordinary", "hard-negatives"].includes(group.exercise)) {
+    if (strokeLevels.includes(group.exercise) || ["ordinary", "hard-negatives"].includes(group.exercise)) {
       const { events: atCutoff } = replay(stream, hand, group.trials)
       output[hand].fistsInSimulatedCutoff = atCutoff.filter(event => event.type === "fist" &&
         group.trials.some(trial => event.atMs >= trial.shownAtMs && event.atMs <= trial.endedAtMs)).length
@@ -149,7 +150,8 @@ for (const [action, measurements] of Object.entries(onlinePalms)) {
 console.log("Preview events over control recordings", JSON.stringify(previewControls))
 
 function compare(factory) {
-  const totals = { firstDirection: { left: 0, right: 0 }, ordinary: 0, controls: {}, delay: {} }
+  const totals = { firstDirection: { left: 0, right: 0 }, strokeLevels: {}, ordinary: 0,
+    ordinaryFistsInCutoff: 0, controls: {}, delay: {} }
   const delays = {}
   for (const group of evaluatedGroups) {
     const type = expectedType(group)
@@ -161,7 +163,13 @@ function compare(factory) {
       const first = windows.map(window => window.find(event => event.type === type))
       if (group.direction || group.bpm) totals.firstDirection[hand] += first.filter((event, i) =>
         event && event.dir === (group.trials[i].direction ?? group.direction)).length
-      if (group.exercise === "ordinary") totals.ordinary += windows.flat().filter(event => event.type === "beat").length
+      if (strokeLevels.includes(group.exercise)) totals.strokeLevels[group.exercise] = first.filter(Boolean).length
+      if (group.exercise === "ordinary") {
+        totals.ordinary += windows.flat().filter(event => event.type === "beat").length
+        const cutoff = replay(stream, hand, group.trials, factory).events
+        totals.ordinaryFistsInCutoff += cutoff.filter(event => event.type === "fist" && group.trials.some(trial =>
+          event.atMs >= trial.shownAtMs && event.atMs <= trial.endedAtMs)).length
+      }
       if (type === "circle" || type === "fist") totals.controls[group.exercise] = first.filter(Boolean).length
       if (type === "fist") {
         const cutoff = replay(stream, hand, group.trials, factory).events

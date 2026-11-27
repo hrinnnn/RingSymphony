@@ -1,13 +1,16 @@
 // Use the exact browser feature implementation for offline training.
 import { readFile, readdir, stat } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
-import { causalFeatures, FEATURE_VERSION } from "../src/ring/causal-classifier.js"
+import { causalFeatures, causalSequence, FEATURE_COUNT, FEATURE_VERSION,
+  SEQUENCE_CHANNELS, SEQUENCE_STEPS, SEQUENCE_VERSION } from "../src/ring/causal-classifier.js"
 import { createGravity, createHandDetector } from "../src/ring/detectors.js"
 import { createClockOffset, createGyroBias } from "../src/ring/signal.js"
 
 const seen = new Set()
 const ordinary = new Set(["ordinary", "rest", "hard-negatives", "走路及日常"])
 const data = []
+const args = process.argv.slice(2)
+const includeSequence = args.includes("--sequence")
 
 function examples(raw, hand, exercise, direction, trials, player, group) {
   const gravity = createGravity()
@@ -68,13 +71,21 @@ function examples(raw, hand, exercise, direction, trials, player, group) {
   const triggerTimes = new Set(triggers)
   let previous = null
   let start = 0
+  let sequenceStart = 0
   let end = 0
   for (const t of combined) {
     while (start < frames.length && frames[start].t < t - 0.18) start++
     while (end < frames.length && frames[end].t <= t) end++
     const features = causalFeatures(frames.slice(start, end), t, previous)
     if (!features) continue
-    if (labels.has(t)) data.push({ group, player, label: labels.get(t), x: features.values })
+    if (labels.has(t)) {
+      const row = { group, player, label: labels.get(t), x: features.values }
+      if (includeSequence) {
+        while (sequenceStart < start && frames[sequenceStart].t < t - 0.24) sequenceStart++
+        row.sequence = causalSequence(frames.slice(sequenceStart, end), t)
+      }
+      data.push(row)
+    }
     if (triggerTimes.has(t)) previous = { t, direction: features.direction }
   }
 }
@@ -114,5 +125,7 @@ async function visit(path) {
     "right", folder, direction, null, player, path)
 }
 
-for (const path of process.argv.slice(2)) await visit(resolve(path))
-process.stdout.write(JSON.stringify({ featureVersion: FEATURE_VERSION, data }))
+for (const path of args.filter(value => value !== "--sequence")) await visit(resolve(path))
+process.stdout.write(JSON.stringify({ featureVersion: FEATURE_VERSION, featureCount: FEATURE_COUNT,
+  ...(includeSequence && { sequenceVersion: SEQUENCE_VERSION, sequenceSteps: SEQUENCE_STEPS,
+    sequenceChannels: SEQUENCE_CHANNELS }), data }))

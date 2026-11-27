@@ -100,10 +100,14 @@ console.log('Fist: found in the fist recordings, never in beats, palms, circles 
 
 {
   const detector = createFistDetector()
-  const pulse = (start, confirm) => [1, 1, 4, 8].map((w, i) =>
+  const pulse = (start, confirm) => [1, 1, 4, 8, 3, 1].map((w, i) =>
     detector.push(start + i * 0.005, [w, 0, 0], () => confirm)).filter(Boolean)
   assert.equal(pulse(1, false).length, 0, 'a short impulse outside a cutoff cannot become a fist')
   assert.equal(pulse(1.2, true).at(-1)?.tier, 'short', 'a short impulse can answer the indicated cutoff')
+  const continued = createFistDetector()
+  const swing = [1, 1, 4, 8, ...Array(20).fill(6)].map((w, i) =>
+    continued.push(1 + i * 0.005, [w, 0, 0], () => true)).filter(Boolean)
+  assert.equal(swing.length, 0, 'a short impulse followed by continued rotation does not confirm a fist')
 }
 
 {

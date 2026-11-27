@@ -203,6 +203,7 @@ export function createRingPanel({ button, panel, input }) {
     button.textContent = !snap.link.open ? "指环 · 桥接未连接" : live.length ? `指环 · ${live.length} 枚在线` : "指环 · 等待数据"
     linkEl.textContent = !snap.link.open
       ? "未连接到桥接服务：请运行 npm run ring"
+      : snap.link.source === "ble" ? "BLE 桥接已启动 · 支持戒指按钮"
       : snap.link.studio ? "桥接已连接 Ring Studio" : "桥接已启动，等待 Ring Studio (127.0.0.1:17888)"
     listEl.replaceChildren(...snap.rings.map((ring) => {
       const li = document.createElement("li")
@@ -277,15 +278,17 @@ export function createRingPanel({ button, panel, input }) {
   }
 
   function renderGestures() {
-    const gestures = input.snapshot().lastByHand
+    const { lastByHand: gestures, lastButtonByHand } = input.snapshot()
     lastEl.textContent = ["right", "left"].map((hand) => {
       const gesture = gestures[hand]
       if (!gesture) return `${HAND_LABEL[hand]}：—`
+      const button = lastButtonByHand[hand]
+      if (gesture.type === "button") return `${HAND_LABEL[hand]}按钮：${gesture.label} #${gesture.count}`
       const name = gesture.type === "beat" ? `击拍 · ${DIRECTION_NAMES[gesture.dir] ?? `方向不确定${gesture.directionReason ? `（${gesture.directionReason}）` : ""}`}` : gesture.type === "palm" ? (gesture.dir === "up" ? "抬掌" : "压掌") : GESTURE[gesture.type] ?? gesture.type
       const timing = gesture.timing
       const preview = timing?.previewLeadMs > 0 ? ` · 预览早 ${timing.previewLeadMs} ms` : ""
       const rise = timing ? `起势至峰值 ${timing.onsetToPeakMs} ms · ` : ""
-      return `${HAND_LABEL[hand]}：${name} #${gesture.count}（${rise}峰后 ${Math.round(gesture.detectionDelay * 1000)} ms${preview}）`
+      return `${HAND_LABEL[hand]}：${name} #${gesture.count}（${rise}峰后 ${Math.round(gesture.detectionDelay * 1000)} ms${preview}）${button ? ` · 按钮 ${button.label}` : ""}`
     }).join("；")
   }
 
