@@ -18,7 +18,7 @@ const makeNode = () => ({
 })
 const node = id => { if (!nodes.has(id)) nodes.set(id, makeNode()); return nodes.get(id) }
 const keys = {}, audio = { now: 0, parts: new Set(), dynamics: 1, tempo: 60, ended: null, freeStarts: 0, freeStops: 0 }
-let nextFrame, pickedPart, ringGesture, ringPreview, levelDone
+let nextFrame, pickedPart, aimedPart, ringGesture, ringPreview, cutoffDue, levelDone
 let calibrationReady = true
 let palmCalibrationReady = true
 let palmCalibrationActive = false
@@ -27,7 +27,7 @@ const ringLive = new Set()
 const ringErrors = []
 const poses = []
 let screenPositions = []
-const world = { resize() {}, update() {}, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, screenPositions: () => screenPositions }
+const world = { resize() {}, update() {}, spawn() {}, emit() {}, reset() {}, setLevelHands() {}, pose(...args) { poses.push(args) }, pick() { return pickedPart }, sectionAt() { return aimedPart }, screenPositions: () => screenPositions }
 const pageHits = []
 const lane = { resize() {}, update() {}, reset() {}, hit: (...args) => pageHits.push(args) }
 const settings = { latency: 0, close() {}, suggest(bias) { settings.bias = bias } }
@@ -64,7 +64,7 @@ globalThis.__controller = {
   setTempo: (bpm, age) => { audio.tempo = bpm; audio.strokeAge = age },
   partLevels: () => ({}), transportBeats: () => 0,
   transportSeconds: () => audio.now, songSeconds: () => audio.now, buildChart, STUDIES, GOOD: .4, PERFECT: .15, createWorld: () => world, createLane: () => lane, createSettings: () => settings, startPiece: async chart => { audio.now = 0; return chart }, buildPieceChart, PIECES,
-  startRing: ({ onGesture, onPreview }) => { ringGesture = onGesture; ringPreview = onPreview; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
+  startRing: ({ onGesture, onPreview, cutoffDue: confirmCutoff }) => { ringGesture = onGesture; ringPreview = onPreview; cutoffDue = confirmCutoff; return { reportError: error => ringErrors.push(error), clearTiming() {}, openPanel() { panelOpened = true }, input: { live: hand => ringLive.has(hand), snapshot: () => ({ direction: { ready: calibrationReady }, palmCalibration: { ready: palmCalibrationReady, active: palmCalibrationActive } }) } } },
   createMixerHud: () => ({ update() {} }), lassoParts, pathLength, PART_INFO, PARTS, LOOP_BARS,
   // The camera is optional and the controller must work with it absent, which is what these
   // inert stubs represent: a tracker that never has a verdict is the no-camera path.
@@ -373,7 +373,7 @@ assert.equal(pageHits.at(-1)[1], 'perfect', 'two hands complete the same accent'
 const circle = canon.cues.find(cue => cue.kind === 'circle')
 screenPositions = [{ part: 'violin', x: 25, y: 25 }, { part: 'flute', x: 75, y: 75 }]
 tick(circle.time)
-assert.match(node('#cue-hint').textContent, /^圈住.*小提琴.*长笛/)
+assert.match(node('#cue-hint').textContent, /^鼠标画圈.*小提琴.*长笛/)
 node('#view').handlers.pointerdown({ clientX: 0, clientY: 0, offsetX: 0, pointerId: 5 })
 for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {
   node('#view').handlers.pointermove({ clientX, clientY, pointerId: 5 })
@@ -381,7 +381,7 @@ for (const [clientX, clientY] of [[100, 0], [100, 100], [0, 100]]) {
 node('#view').handlers.pointerup({ clientX: 0, clientY: 0, pointerId: 5 })
 assert.deepEqual(poses.at(-1), ['left', 'circle'], 'a level lasso animates circle selection')
 tick(circle.time + 0.02)
-assert.doesNotMatch(node('#cue-hint').textContent, /^圈住/, 'the prompt clears when the lasso scores')
+assert.doesNotMatch(node('#cue-hint').textContent, /画圈/, 'the prompt clears when the lasso scores')
 const swell = canon.cues.find(cue => cue.kind === 'dynamics')
 const previousRightBeat = canon.cues.findLast(cue =>
   cue.kind === 'beat' && cue.hand !== 'left' && cue.time < swell.time)
@@ -394,10 +394,36 @@ gesture('palm', 'right', { dir: swell.direction })
 assert.deepEqual(poses.at(-1), ['right', 'palm', 'up'], 'the right ring can answer a swell while the left hand conducts')
 assert.ok(Math.abs(audio.dynamicsDuration - (swell.until - swell.time)) < 1e-9, 'a written swell follows the full phrase')
 const cut = canon.cues.find(cue => cue.kind === 'cut')
-tick(cut.time); gesture('fist', 'right')
+tick(cut.time - canon.beat)
+assert.equal(cutoffDue('right', 0), false)
+tick(cut.time)
+assert.equal(cutoffDue('right', 0), true)
+gesture('fist', 'right')
 assert.deepEqual(poses.at(-1), ['right', 'fist'], 'the hand that closes plays the cutoff')
 assert.equal(pageHits.at(-1)[0].kind, 'cut')
+assert.equal(cutoffDue('right', 0), false)
 tick(canon.duration)
 await node('#retry').handlers.click()
 assert.equal(node('#session-title').textContent, PIECES[0].title, 'retry reopens the same classical excerpt')
+ringLive.add('left')
+tick(circle.time - canon.beat)
+const circleCount = pageHits.filter(([cue]) => cue.kind === 'circle' && cue.result === 'perfect').length
+gesture('circle', 'left')
+tick(circle.time)
+assert.match(node('#cue-hint').textContent, /左手画一整圈/)
+gesture('circle', 'right')
+assert.equal(pageHits.filter(([cue]) => cue.kind === 'circle' && cue.result === 'perfect').length, circleCount)
+gesture('circle', 'left')
+assert.equal(pageHits.at(-1)[0].kind, 'circle')
+assert.equal(pageHits.at(-1)[1], 'perfect', 'the left ring selects the parts written in the circle cue')
+ringLive.clear()
 console.log('Classical modes: double accent, circle, right palm, cutoff and retry pass')
+
+node('#exit').handlers.click()
+await freeButton.handlers.click()
+aimedPart = 'flute'
+node('#view').handlers.pointermove({ offsetX: 400 })
+gesture('circle', 'left')
+assert.deepEqual(poses.at(-1), ['left', 'circle'])
+tick(0)
+assert.match(node('#cue-hint').textContent, /已选.*长笛/)

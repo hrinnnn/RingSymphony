@@ -62,7 +62,7 @@ export function createRingPanel({ button, panel, input }) {
       <p class="ring-direction-stats"></p>
       <button type="button" data-act="clear-direction-stats">清零统计</button>
     </details>
-    <p class="ring-note">右手击拍，左手抬/压掌，握拳停止。</p>`
+    <p class="ring-note">右手击拍，左手抬/压掌和画圈，任一只手握拳收束。</p>`
   const linkEl = panel.querySelector(".ring-link")
   const listEl = panel.querySelector(".ring-list")
   const swapEl = panel.querySelector('[data-act="swap"]')
@@ -92,7 +92,7 @@ export function createRingPanel({ button, panel, input }) {
   const palmNoteEl = panel.querySelector(".ring-palm-note")
   let calibrationError = ""
   let palmCalibrationError = ""
-  const GESTURE = { beat: "击拍", fist: "握拳", strike: "向前一指", palm: "掌" }
+  const GESTURE = { beat: "击拍", fist: "握拳", strike: "向前一指", palm: "掌", circle: "画圈" }
 
   const meanError = () => (errors.length ? errors.reduce((s, x) => s + x, 0) / errors.length : null)
 

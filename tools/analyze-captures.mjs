@@ -11,12 +11,16 @@ const directory = process.argv[2]
 const read = async name => JSON.parse(await readFile(join(directory, name), "utf8"))
 const manifest = await read("manifest.json")
 
-function replay(stream, hand) {
+function replay(stream, hand, cutoffs = []) {
   let arrival = 1
   const events = []
   const input = createRingInput({
     now: () => arrival,
     WebSocketImpl: null,
+    cutoffDue: cutoffs.length ? (_hand, age) => {
+      const time = (arrival - age - 1) * 1000
+      return cutoffs.some(trial => time >= trial.shownAtMs && time <= trial.endedAtMs)
+    } : undefined,
     storage: {
       getItem: key => key === "ringsymphony.roles.v2" ? JSON.stringify({ [stream.device]: hand }) : null,
       setItem() {},
@@ -35,6 +39,7 @@ function replay(stream, hand) {
 function expectedType(group) {
   if (group.direction || ["beat-light", "beat-natural", "beat-strong"].includes(group.exercise)) return "beat"
   if (group.exercise.startsWith("fist-")) return "fist"
+  if (group.exercise.startsWith("circle-")) return "circle"
   if (group.exercise.startsWith("palm-")) return "palm"
   if (group.exercise === "point") return "strike"
   return null
@@ -70,6 +75,11 @@ for (const entry of manifest.groups) {
       }),
       otherEvents: Object.fromEntries(Object.entries(labels).filter(([key]) => key !== type)),
     } : labels
+    if (type === "fist") {
+      const atCutoff = replay(stream, hand, group.trials)
+      output[hand].withCutoff = group.trials.filter(trial => atCutoff.some(event =>
+        event.type === "fist" && event.atMs >= trial.shownAtMs && event.atMs <= trial.endedAtMs)).length
+    }
   }
   console.log(group.exercise, JSON.stringify(output))
 }

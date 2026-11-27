@@ -2,6 +2,8 @@
 // Pure functions, no DOM: the same code runs in the browser and in the Node replay tests.
 // Frame: { t: seconds (device clock), acc: [x,y,z], gyr: [x,y,z] }
 
+import { createCircleDetector } from "./circle.js"
+
 const G = 9.81
 
 const norm = (v) => Math.hypot(v[0], v[1], v[2])
@@ -169,8 +171,9 @@ export function createFistDetector(options = {}) {
   const o = { ...DEFAULTS, ...options }
   const hist = []
   let last = -Infinity
+  let lastShort = -Infinity
   return {
-    push(t, gyr) {
+    push(t, gyr, confirmShortFist) {
       hist.push({ t, gyr })
       if (hist.length > 4) hist.shift()
       if (hist.length < 4) return null
@@ -181,6 +184,20 @@ export function createFistDetector(options = {}) {
       if (jerk > o.fistJerk && t - last > o.fistLockout) {
         last = t
         return { type: "fist", t, jerk }
+      }
+      // A short impulse can disappear in the longer average. Keep it separate so it
+      // can only confirm a written cutoff and cannot mute beats or end free conducting.
+      if (confirmShortFist && t - Math.max(last, lastShort) > o.fistLockout) {
+        const short = hist[1]
+        const span = t - short.t
+        if (span > 0 && span <= 0.025) {
+          const change = norm(gyr.map((value, i) => value - short.gyr[i]))
+          const jerk = change / span * (180 / Math.PI)
+          if (change >= 4 && jerk > o.fistJerk && confirmShortFist()) {
+            lastShort = t
+            return { type: "fist", t, jerk, tier: "short" }
+          }
+        }
       }
       return null
     },
@@ -255,26 +272,32 @@ export function createLeftDetector(options = {}) {
   }
 }
 
-// Both hands detect beats, palms and fists. The left hand also reports pointing strikes.
+// Both hands detect beats, palms and fists. The left hand also reports strikes and loops.
 export function createHandDetector(hand, options = {}) {
   let fist = createFistDetector(options)
   const beat = createBeatDetector(options)
   let motion = createLeftDetector(options)
+  let circle = hand === "left" ? createCircleDetector() : null
+  function resetCircle() { if (circle) circle = createCircleDetector() }
   return {
     hand,
+    resetCircle,
     gap() {
       fist = createFistDetector(options)
       beat.gap()
       motion = createLeftDetector(options)
+      resetCircle()
     },
-    push(frame) {
+    push(frame, confirmShortFist) {
       const out = []
       const w = norm(frame.gyr)
-      const f = fist.push(frame.t, frame.gyr)
+      const f = fist.push(frame.t, frame.gyr, confirmShortFist)
       if (f) {
         out.push(f)
-        beat.mute(frame.t + 0.6)
+        if (f.tier !== "short") beat.mute(frame.t + 0.6)
       }
+      const loop = circle?.push(frame)
+      if (loop) out.push(loop)
       const b = beat.push(frame.t, w)
       if (b) out.push(b)
       out.push(...motion.push(frame).filter((event) => hand === "left" || event.type === "palm"))

@@ -43,6 +43,7 @@ export function createRingInput({
   // Asked whether a right-hand cue is due near a gesture time, so a reversal the music called for
   // is not mistaken for a return stroke. Kept as a callback to leave this module chart-agnostic.
   cueDue = () => false,
+  cutoffDue,
   // Asked what the camera saw for a hand at a page-clock time, returning a verdict or null.
   // A callback for the same reason as cueDue: this module stays free of the DOM and of MediaPipe,
   // so it still runs under Node for the replay tests.
@@ -453,7 +454,10 @@ export function createRingInput({
         }
       }
     }
-    for (const event of ring.detector.push({ t, acc: message.acc, gyr })) {
+    const confirmShortFist = cutoffDue
+      ? () => cutoffDue(ring.hand, Math.max(0, arrival - (t + ring.offset)) + compensation)
+      : undefined
+    for (const event of ring.detector.push({ t, acc: message.acc, gyr }, confirmShortFist)) {
       const age = Math.max(0, arrival - (event.t + ring.offset)) + compensation
       if (event.hand === "left" && event.type === "palm") {
         if (capturePalmCalibration(event, ring)) continue
@@ -758,7 +762,11 @@ export function createRingInput({
     // whole count-in — so the first beat would be judged against the highest bar instead of the
     // player's own.
     resetGestureState() {
-      for (const ring of rings.values()) { ring.returnFilter.reset(); ring.reversalFilter.reset() }
+      for (const ring of rings.values()) {
+        ring.returnFilter.reset()
+        ring.reversalFilter.reset()
+        ring.detector?.resetCircle()
+      }
       // Not the fusion state. Whether the ring's calibration matches how this player conducts is a
       // property of the calibration, not of the level, so it carries across — clearing it would
       // make every level start by re-learning the same thing over its first ten strokes.

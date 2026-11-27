@@ -335,6 +335,14 @@ function onRing(event) {
     const snapshot = ring.input.snapshot()
     const calibration = snapshot.palmCalibration
     if (calibration.active) return
+    if (event.type === "circle" && event.hand === "left") {
+      const part = aimedSection()
+      if (part) {
+        freeSelection.add(part)
+        world.pose("left", "circle")
+      }
+      return
+    }
     if (event.type === "beat") {
       const strokeAt = performance.now() / 1000 - event.age
       const heard = swingEar.hear(strokeAt, event.peakSpeed)
@@ -364,6 +372,11 @@ function onRing(event) {
   capturedRun?.events.push({ ...event, at, receivedAtMs: performance.timeOrigin + performance.now() })
   // A fist only scores at a written cutoff. It never interrupts the backing track.
   if (event.type === "fist") return playCut(at, event.hand)
+  if (event.type === "circle" && event.hand === "left") {
+    const found = nearest(at, "left", "circle")
+    if (found) scoreCue(found.cue, "perfect", 0)
+    return
+  }
   if (event.type === "beat") {
     gestureLog.record({
       at, fused: event.dir, ring: event.ringDir, ringReason: event.ringReason, camera: event.cameraDir,
@@ -391,6 +404,11 @@ function onRing(event) {
 const ring = startRing({
   boundHands,
   onGesture: onRing,
+  cutoffDue: (hand, age) => {
+    if (mode !== "playing" && mode !== "count-in") return false
+    const found = nearest(inputNow() - age, hand, "cut")
+    return Boolean(found && found.distance <= GOOD)
+  },
   // The camera answers where the ring is blind: up and down sit about 166 degrees apart in the
   // ring's own axes, so no threshold separates a down-stroke from the return of an up-stroke.
   // Synchronous and cheap — nothing in the beat path waits for a frame.
@@ -629,7 +647,7 @@ async function beginPiece(piece) {
   progressEl.style.width = "0%"
   setMode("count-in")
   statusEl.textContent = "预备"
-  hintEl.innerHTML = "<span>方向键打拍 · I/J/K/L 左手</span><span>E/D 左手抬压 · R/V 右手抬压</span><span>拖画闭合圈选声部 · G 或握拳收束</span>"
+  hintEl.innerHTML = "<span>方向键打拍 · I/J/K/L 左手</span><span>E/D 左手抬压 · R/V 右手抬压</span><span>左手戒指或鼠标画圈 · 任一手握拳或 G 收束</span>"
   world.setLevelHands(true)
   world.resize()
   lane.resize()
@@ -650,6 +668,7 @@ async function beginPiece(piece) {
 async function beginFree() {
   stopLevel()
   resetHandInput()
+  mouseX = null
   world.reset()
   conductor.reset()
   chart = null
@@ -668,7 +687,7 @@ async function beginFree() {
   setMode("free")
   beatDots.forEach((dot, i) => { dot.hidden = i >= FREE_METER })
   statusEl.textContent = "加载乐器音色"
-  hintEl.innerHTML = '<span>戒指或方向键挥拍 · 速度</span><span>点选或圈选乐手 · <kbd>F</kbd> 起奏 · <kbd>G</kbd> 停止</span><span><kbd>S</kbd> 领奏 · <kbd>E</kbd>/<kbd>D</kbd> 渐强 / 渐弱</span>'
+  hintEl.innerHTML = '<span>戒指或方向键挥拍 · 速度</span><span>点选乐手或对准后左手画圈 · <kbd>F</kbd> 起奏 · 握拳或 <kbd>G</kbd> 收束</span><span><kbd>S</kbd> 领奏 · <kbd>E</kbd>/<kbd>D</kbd> 渐强 / 渐弱</span>'
   world.setLevelHands(false)
   world.showChamber?.(true)
   world.resize()
@@ -850,10 +869,13 @@ function loop() {
   const gestureLead = (cue) => cue.kind === "cut" ? chart.beat * 2 : cue.kind === "dynamics" ? chart.beat * 1.25 : warn
   if (now < chart.countIn) hint = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
   else if (nextGesture && nextGesture.time - now < gestureLead(nextGesture)) {
-    handCue = nextGesture.kind === "cue" || nextGesture.kind === "dynamics"
+    handCue = nextGesture.kind === "cue" || nextGesture.kind === "dynamics" || nextGesture.kind === "circle" || nextGesture.kind === "cut"
     if (nextGesture.kind === "cue") hint = `指向${PART_INFO[nextGesture.part].name}`
-    else if (nextGesture.kind === "circle") hint = `圈住${names(nextGesture.parts)}`
-    else if (nextGesture.kind === "cut") hint = "握拳 · 收束"
+    else if (nextGesture.kind === "circle") {
+      const action = leftRing ? "左手画一整圈" : "鼠标画圈"
+      const prepare = now - settings.latency < nextGesture.time - 0.15
+      hint = `${prepare ? "准备 · " : ""}${action} · ${names(nextGesture.parts)}`
+    } else if (nextGesture.kind === "cut") hint = leftRing || rightRing ? "握拳 · 收束" : "按 G · 收束"
     else if (nextGesture.direction === "up") hint = "抬掌 · 渐强"
     else hint = "压掌 · 渐弱"
   } else if (chart.musicEnd !== undefined && now >= chart.musicEnd) hint = "余音"
@@ -1043,8 +1065,8 @@ function swipe(fromLeft, dx, dy) {
 }
 
 view.addEventListener("pointermove", (event) => {
+  if (pointer || mode === "free") mouseX = event.offsetX
   if (!pointer) return
-  mouseX = event.offsetX
   if (pointer.trail) {
     pointer.trail.push(local(event))
     if (pathLength(pointer.trail) > 36) {

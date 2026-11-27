@@ -52,7 +52,8 @@ export function buildPieceChart(piece = PIECES[0]) {
       const [bar, inBar] = cue.at.split(":").map(Number)
       const time = at(bar, inBar)
       if (cue.kind === "point") cues.push({ kind: "cue", hand: "left", part: cue.part, time, until: time + beat * 2 })
-      if (cue.kind === "circle") cues.push({ kind: "circle", hand: "left", parts: cue.parts, time, until: time + beat * 2 })
+      // Leave time for a complete loop even in the faster excerpts.
+      if (cue.kind === "circle") cues.push({ kind: "circle", hand: "left", parts: cue.parts, time, until: time + Math.max(beat * 2, 2.8) })
       if (cue.kind === "swell") cues.push({ kind: "dynamics", hand: "both", direction: cue.dir, parts: cue.parts, time, until: time + cue.beats * beat })
     }
   }

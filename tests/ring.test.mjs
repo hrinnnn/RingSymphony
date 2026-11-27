@@ -5,7 +5,7 @@ import net from 'node:net'
 import { once } from 'node:events'
 import { WebSocket } from 'ws'
 import { startBridge } from '../bridge/server.mjs'
-import { createBeatDetector, createHandDetector, createGravity } from '../src/ring/detectors.js'
+import { createBeatDetector, createFistDetector, createHandDetector, createGravity } from '../src/ring/detectors.js'
 import { createRingInput } from '../src/ring/input.js'
 
 const recording = async (cls, person) => {
@@ -89,6 +89,43 @@ for (const person of people) {
   }
 }
 console.log('Fist: found in the fist recordings, never in beats, palms, circles or walking: pass')
+
+{
+  const detector = createFistDetector()
+  const pulse = (start, confirm) => [1, 1, 4, 8].map((w, i) =>
+    detector.push(start + i * 0.005, [w, 0, 0], () => confirm)).filter(Boolean)
+  assert.equal(pulse(1, false).length, 0, 'a short impulse outside a cutoff cannot become a fist')
+  assert.equal(pulse(1.2, true).at(-1)?.tier, 'short', 'a short impulse can answer the indicated cutoff')
+}
+
+{
+  const directory = new URL('../recordings/captures-2026-11-27/', import.meta.url)
+  const manifest = JSON.parse(await readFile(new URL('manifest.json', directory), 'utf8'))
+  for (const exercise of ['circle-cw', 'circle-ccw', 'arc', 'ordinary']) {
+    const item = manifest.groups.find(group => group.exercise === exercise && group.finishReason === 'complete')
+    const group = JSON.parse(await readFile(new URL(item.file, directory), 'utf8'))
+    const stream = group.streams.left
+    const events = []
+    let arrival = 1
+    const input = createRingInput({
+      boundHands: { left: stream.device },
+      WebSocketImpl: null,
+      now: () => arrival,
+      onEvent: event => {
+        if (event.type === 'circle') events.push((arrival - event.age - 1) * 1000)
+      },
+    })
+    input.feed({ type: 'status', rings: [{ address: stream.device, connected: true }] })
+    for (let i = 0; i < stream.samples; i++) {
+      arrival = 1 + stream.receivedMs[i] / 1000
+      input.feed({ type: 'imu', address: stream.device, timestamp: stream.t[i], sequence: stream.sequence[i],
+        acc: stream.acc[i], gyr: stream.gyr[i] })
+    }
+    const hits = group.trials.filter(trial => events.some(at => at >= trial.shownAtMs && at <= trial.endedAtMs)).length
+    if (exercise.startsWith('circle-')) assert.ok(hits >= 6, `${exercise}: ${hits}/10 loops recognized through ring input`)
+    else assert.equal(hits, 0, `${exercise}: the control samples do not select a section`)
+  }
+}
 
 // Palm: stroke direction decides, the preparatory lift and the return stroke are outvoted.
 for (const person of people) {
