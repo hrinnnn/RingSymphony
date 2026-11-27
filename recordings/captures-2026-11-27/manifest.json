@@ -1,0 +1,200 @@
+{
+  "schema": 1,
+  "groups": [
+    {
+      "file": "groups/01-arc.json",
+      "finishReason": "complete",
+      "frames": 9940,
+      "exercise": "arc",
+      "trials": 10
+    },
+    {
+      "file": "groups/02-beat-continuous.json",
+      "finishReason": "complete",
+      "frames": 6090,
+      "exercise": "beat-continuous",
+      "trials": 1
+    },
+    {
+      "file": "groups/03-beat-down.json",
+      "finishReason": "complete",
+      "frames": 9220,
+      "exercise": "beat-down",
+      "trials": 10
+    },
+    {
+      "file": "groups/04-beat-left.json",
+      "finishReason": "complete",
+      "frames": 6160,
+      "exercise": "beat-left",
+      "trials": 1
+    },
+    {
+      "file": "groups/05-beat-light.json",
+      "finishReason": "complete",
+      "frames": 9190,
+      "exercise": "beat-light",
+      "trials": 10
+    },
+    {
+      "file": "groups/06-beat-natural.json",
+      "finishReason": "complete",
+      "frames": 9220,
+      "exercise": "beat-natural",
+      "trials": 10
+    },
+    {
+      "file": "groups/07-beat-strong.json",
+      "finishReason": "complete",
+      "frames": 9550,
+      "exercise": "beat-strong",
+      "trials": 10
+    },
+    {
+      "file": "groups/08-beat-to-left.json",
+      "finishReason": "complete",
+      "frames": 9280,
+      "exercise": "beat-to-left",
+      "trials": 10
+    },
+    {
+      "file": "groups/09-beat-to-right.json",
+      "finishReason": "complete",
+      "frames": 9530,
+      "exercise": "beat-to-right",
+      "trials": 10
+    },
+    {
+      "file": "groups/10-beat-up.json",
+      "finishReason": "complete",
+      "frames": 9220,
+      "exercise": "beat-up",
+      "trials": 10
+    },
+    {
+      "file": "groups/11-circle-ccw.json",
+      "finishReason": "complete",
+      "frames": 13220,
+      "exercise": "circle-ccw",
+      "trials": 10
+    },
+    {
+      "file": "groups/12-circle-cw.json",
+      "finishReason": "complete",
+      "frames": 12400,
+      "exercise": "circle-cw",
+      "trials": 10
+    },
+    {
+      "file": "groups/13-fist-left.json",
+      "finishReason": "complete",
+      "frames": 9930,
+      "exercise": "fist-left",
+      "trials": 10
+    },
+    {
+      "file": "groups/14-fist-right.json",
+      "finishReason": "complete",
+      "frames": 9870,
+      "exercise": "fist-right",
+      "trials": 10
+    },
+    {
+      "file": "groups/15-left-beat-down.json",
+      "finishReason": "complete",
+      "frames": 9760,
+      "exercise": "left-beat-down",
+      "trials": 10
+    },
+    {
+      "file": "groups/16-left-beat-left.json",
+      "finishReason": "complete",
+      "frames": 9830,
+      "exercise": "left-beat-left",
+      "trials": 10
+    },
+    {
+      "file": "groups/17-left-beat-right.json",
+      "finishReason": "complete",
+      "frames": 9900,
+      "exercise": "left-beat-right",
+      "trials": 10
+    },
+    {
+      "file": "groups/18-left-beat-up.json",
+      "finishReason": "complete",
+      "frames": 9740,
+      "exercise": "left-beat-up",
+      "trials": 10
+    },
+    {
+      "file": "groups/19-ordinary.json",
+      "finishReason": "complete",
+      "frames": 6760,
+      "exercise": "ordinary",
+      "trials": 1
+    },
+    {
+      "file": "groups/20-palm-down.json",
+      "finishReason": "complete",
+      "frames": 9780,
+      "exercise": "palm-down",
+      "trials": 10
+    },
+    {
+      "file": "groups/21-palm-up.json",
+      "finishReason": "complete",
+      "frames": 9640,
+      "exercise": "palm-up",
+      "trials": 10
+    },
+    {
+      "file": "groups/22-point.json",
+      "finishReason": "complete",
+      "frames": 9460,
+      "exercise": "point",
+      "trials": 10
+    },
+    {
+      "file": "groups/23-rest.json",
+      "finishReason": "complete",
+      "frames": 5090,
+      "exercise": "rest",
+      "trials": 1
+    },
+    {
+      "file": "groups/24-rest.json",
+      "finishReason": "lost-ring",
+      "frames": 60,
+      "exercise": "rest",
+      "trials": 0
+    },
+    {
+      "file": "groups/25-rest.json",
+      "finishReason": "lost-ring",
+      "frames": 2520,
+      "exercise": "rest",
+      "trials": 1
+    }
+  ],
+  "games": [
+    {
+      "file": "games/01.json",
+      "finishReason": "complete",
+      "frames": 20610,
+      "title": "卡农"
+    },
+    {
+      "file": "games/02.json",
+      "finishReason": "complete",
+      "frames": 19680,
+      "title": "卡农"
+    },
+    {
+      "file": "games/03.json",
+      "finishReason": "complete",
+      "frames": 5040,
+      "title": "第二乐章 · 圆舞"
+    }
+  ]
+}
