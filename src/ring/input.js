@@ -2,7 +2,7 @@
 // Gesture events carry `age`: seconds between the gesture happening and "now", so the game can place it on its own clock.
 import { createBeatDetector, createGravity, createHandDetector } from "./detectors.js"
 import { DIRECTIONS, DIRECTION_NAMES, SAMPLES_PER_DIRECTION, MAX_SHORT_GAP, createDirectionCalibration, createReturnFilter, directionFeature, directionFeatureResult } from "./direction.js"
-import { classifyAbsolute, createReversalFilter, gravityFrame } from "./absolute.js"
+import { classifyAbsolute, classifyAbsoluteStroke, createReversalFilter, gravityFrame } from "./absolute.js"
 import { createFusion, fuseDirection } from "../camera/fuse.js"
 
 const ROLE_KEY = "ringsymphony.roles.v2"
@@ -20,6 +20,8 @@ const CAL_KEY = "ringsymphony.calibration.v1"
 // normally, which is what keeps the panel a working rollback.
 const MODE_KEY = "ringsymphony.direction-mode.v2"
 export const DIRECTION_MODES = ["template", "absolute"]
+const GRAVITY_GAP = 0.12
+const GRAVITY_STEP = 0.018
 
 function readJson(storage, key, fallback) {
   try {
@@ -227,6 +229,13 @@ export function createRingInput({
     }
   }
 
+  function createLiveDetector(hand, options) {
+    // About 8° of observed motion separates a deliberate low-speed stroke from a brief
+    // wrist correction. Template mode already filters returns using calibrated geometry.
+    const beatTravel = hand === "left" || directionMode === "absolute" ? 0.14 : 0
+    return createHandDetector(hand, { ...options, beatTravel })
+  }
+
   function assign(ring, hand) {
     if (ring.hand === hand) return
     if (automatic && (ring.hand === "right" || hand === "right")) stopAutomatic("右手指环改变，连续校准已停止")
@@ -236,7 +245,7 @@ export function createRingInput({
     if (ring.hand) lastByHand[ring.hand] = null
     if (hand) lastByHand[hand] = null
     ring.hand = hand
-    ring.detector = hand ? createHandDetector(hand) : null
+    ring.detector = hand ? createLiveDetector(hand) : null
     ring.calibrationDetector = null
     ring.calibrationStart = null
     ring.returnFilter.reset(); ring.reversalFilter.reset()
@@ -308,8 +317,10 @@ export function createRingInput({
     }
     if (ring.lastSeq !== null && message.sequence - ring.lastSeq > 1) ring.gaps += message.sequence - ring.lastSeq - 1
     ring.lastSeq = message.sequence
+    const gap = ring.lastT === null ? 0 : t - ring.lastT
+    const preserveGravity = ring.hand !== "right" || directionMode === "absolute"
     // A device restart rewinds the clock; start over instead of mixing two time bases.
-    if (ring.lastT !== null && (t <= ring.lastT || t - ring.lastT > (ring.hand === "right" ? MAX_SHORT_GAP : 0.05))) {
+    if (ring.lastT !== null && (gap <= 0 || gap > (ring.hand === "right" ? MAX_SHORT_GAP : 0.05))) {
       if (t <= ring.lastT) {
         ring.offset = null
         if (ring.hand === "right") {
@@ -327,19 +338,20 @@ export function createRingInput({
       if (automatic && automatic.address === ring.address && automatic.state === "settle" &&
           (t <= ring.lastT || t - ring.lastT > 0.12)) automatic.stillFrames = []
       if (restarted) {
-        ring.detector = ring.hand ? createHandDetector(ring.hand, ring.hand === "right" && calibration.ready ? { beatFloor: calibration.beatFloor } : {}) : null
+        ring.detector = ring.hand ? createLiveDetector(ring.hand, ring.hand === "right" && calibration.ready ? { beatFloor: calibration.beatFloor } : {}) : null
         if (ring.calibrationDetector) ring.calibrationDetector = createBeatDetector({ beatFloor: 0.65, adaptiveFloor: false })
       } else {
         ring.detector?.gap()
         ring.calibrationDetector?.gap()
       }
-      ring.history = []
-      // The gravity estimate is integrated from the gyroscope, so it is only as good as the frames
-      // behind it. After a clock reset or a dropped stretch those frames are gone and the estimate
-      // has drifted by an unknown amount; re-seeding from the next accelerometer reading is more
-      // honest than carrying a stale one into the classifier, which reads vertical off it.
-      ring.gravity.reset()
-      ring.lastGravityT = null
+      // Keep the pose reference across a short interruption in absolute mode. The gesture
+      // detectors still clear their partial strokes, and gravity integration below is bounded
+      // so the first returning gyro sample does not stand in for the whole missing interval.
+      if (!preserveGravity || restarted || gap > GRAVITY_GAP) {
+        ring.history = []
+        ring.gravity.reset()
+        ring.lastGravityT = null
+      }
     }
     ring.lastT = t
     if (!ring.hand || arrival - allocatedAt > 0.5) allocate()
@@ -362,7 +374,7 @@ export function createRingInput({
           if (automatic.estimateBias) {
             ring.gyroBias = mean
             ring.history = []
-            ring.detector = createHandDetector("right")
+            ring.detector = createLiveDetector("right")
             automatic.estimateBias = false
           }
           armRing(ring, DIRECTIONS[Math.floor(automatic.step / SAMPLES_PER_DIRECTION)], arrival)
@@ -378,7 +390,7 @@ export function createRingInput({
     if (ring.hand) {
       // Both hands keep a gravity history. The left hand has no calibration template — its beat
       // direction is read from this frame — and the filter needs every packet to stay converged.
-      const dt = ring.lastGravityT === null || ring.lastGravityT === undefined ? 0.005 : Math.min(0.05, Math.max(0.001, t - ring.lastGravityT))
+      const dt = ring.lastGravityT == null ? 0.005 : Math.min(preserveGravity ? GRAVITY_STEP : 0.05, Math.max(0.001, t - ring.lastGravityT))
       ring.lastGravityT = t
       const up = ring.gravity.update(message.acc, gyr, dt)
       ring.history.push({ t, gyr, acc: message.acc, up: up ? [...up] : null })
@@ -420,7 +432,7 @@ export function createRingInput({
         const calibration = direction.status(arrival)
         if (captured) { saveCalibration("right"); fusion.reset() }
         if (captured && calibration.ready) {
-          ring.detector = createHandDetector("right", { beatFloor: calibration.beatFloor })
+          ring.detector = createLiveDetector("right", { beatFloor: calibration.beatFloor })
         }
         if (automatic && automatic.address === ring.address) {
           if (!captured) {
@@ -474,7 +486,7 @@ export function createRingInput({
         // gravity frame, which does not depend on which hand is wearing the ring.
         const absolute = ring.hand === "left" || directionMode === "absolute"
         const classified = absolute
-          ? classifyAbsolute(gravityFrame(ring.history, event.t))
+          ? classifyAbsoluteStroke(ring.history, event.t)
           : direction.classifyDetailed(feature, ring.address)
         // The camera decides vertical direction when the template classifier is live, because
         // there the ring cannot: up and down sit about 166 degrees apart in its own axes
@@ -633,18 +645,19 @@ export function createRingInput({
     feed,
     setRole,
     get directionMode() { return directionMode },
-    // Switching mid-session is deliberate: comparing the two paths is the whole point of the flag,
-    // and making it cost a reload would mean comparing two different warmups as well. The filters
-    // are cleared because their histories are not interchangeable — a reversal the template path
-    // recorded is not a reference the absolute path can use, and vice versa.
+    // A mode change resets the short motion history and detector for the right hand, while
+    // keeping the saved calibration so the player can switch paths without re-recording.
     setDirectionMode(mode) {
       if (!DIRECTION_MODES.includes(mode)) throw new Error("无效的方向识别模式")
       if (mode === directionMode) return directionMode
       directionMode = mode
       try { storage?.setItem(MODE_KEY, mode) } catch { /* storage can be unavailable; the choice then lasts for the session */ }
+      const calibration = direction.status(now())
       for (const ring of rings.values()) {
         ring.returnFilter.reset()
         ring.reversalFilter.reset()
+        if (ring.hand === "right") ring.detector = createLiveDetector("right",
+          calibration.ready ? { beatFloor: calibration.beatFloor } : undefined)
       }
       fusion.reset()
       return directionMode
@@ -677,7 +690,7 @@ export function createRingInput({
       const status = direction.status(now())
       const step = nextAutomaticStep(status)
       if (step === DIRECTIONS.length * SAMPLES_PER_DIRECTION) throw new Error("方向样本已采满；请打开补录窗口或重新校准")
-      ring.detector = createHandDetector("right")
+      ring.detector = createLiveDetector("right")
       ring.returnFilter.reset(); ring.reversalFilter.reset()
       ring.calibrationDetector = null
       autoMessage = ""
@@ -691,7 +704,7 @@ export function createRingInput({
       direction.clearDirection(handDirection)
       saveCalibration("right")
       const step = nextAutomaticStep(direction.status(now()), handDirection)
-      ring.detector = createHandDetector("right")
+      ring.detector = createLiveDetector("right")
       ring.returnFilter.reset(); ring.reversalFilter.reset()
       ring.calibrationDetector = null
       autoMessage = ""
@@ -729,7 +742,7 @@ export function createRingInput({
       }
       for (const ring of rings.values()) {
         if (ring.hand === "right") {
-          ring.detector = createHandDetector("right")
+          ring.detector = createLiveDetector("right")
           ring.returnFilter.reset(); ring.reversalFilter.reset()
           ring.gyroBias = null
         }

@@ -39,6 +39,15 @@ const people = ['lry', 'yyh', 'zzw']
   assert.equal(stroke(1.5).length, 1, 'a subsequent beat outside the lockout still triggers')
 }
 
+{
+  const detector = createBeatDetector({ adaptiveFloor: false, beatTravel: 0.08 })
+  const stroke = (start, speeds) => speeds.map((speed, i) => detector.push(start + i * 0.005, speed)).filter(Boolean)
+  assert.equal(stroke(1, [0, 2, 3, 1, 0]).length, 0, 'a small, brief movement does not reserve the beat')
+  assert.equal(stroke(1.04, [0, 3, 5, 1, 0]).length, 1, 'a brisk deliberate stroke can still land right after it')
+  detector.gap()
+  assert.equal(stroke(1.5, [0, 2, 3, 1, 0]).length, 1, 'sparse data does not prove a small stroke')
+}
+
 // Gravity filter: a still ring reports 1 g along "up"; the gyroscope must carry that direction through a rotation.
 {
   const gravity = createGravity()

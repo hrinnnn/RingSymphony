@@ -154,6 +154,7 @@ canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: 
 .beat-dot.active { background: #ffde9e; border-color: #ffde9e; box-shadow: 0 0 0 1px #0b0804cc, 0 0 10px #ffcc7788; transform: scale(1.25); }
 .beat-dot:nth-child(1).active { background: #e6c98a; border-color: #e6c98a; box-shadow: 0 0 10px #e6c98a66; }
 #cue-hint { display: inline-block; background: transparent; border: 0; box-shadow: none; font-size: 12px; font-weight: 400; letter-spacing: .12em; color: #f0dfbc; white-space: nowrap; margin: 14px 0 0; padding: 0; text-shadow: 0 1px 0 #15100a, 0 2px 9px #000; }
+#cue-hint[data-hand-cue] { max-width: min(84vw, 420px); padding: 7px 14px; border: 1px solid #b79a62; background: #161820f2; color: #ffebc5; font-size: clamp(14px, 2vw, 19px); font-weight: 650; letter-spacing: .03em; white-space: normal; line-height: 1.4; }
 /* Unused: the live PERFECT/GOOD/MISS text is painted on #lane by lane.js.
    Colors mirror GRADE in src/lane.js so the two cannot drift. */
 #grade { position: absolute; left: 50%; top: 40%; z-index: 2; margin: 0; transform: translateX(-50%); font-size: 32px; font-style: italic; letter-spacing: .07em; pointer-events: none; text-shadow: 0 1px 0 #1a1206, 0 2px 12px #000; }

@@ -21,6 +21,8 @@ export const DEFAULTS = {
   beatDrop: 0.8,
   beatGap: 0.34,
   beatTau: 1.0,
+  beatTravel: 0,
+  sharpBeatSpeed: 4,
   // The floor tracks how hard this player actually conducts, so a gentle conductor is not
   // judged against an energetic one's bar. `floorRest` sets how far above the resting level
   // the floor sits; the clamp keeps it between a safe minimum and the old fixed value.
@@ -88,6 +90,8 @@ export function createBeatDetector(options = {}) {
   let rising = false
   let peak = 0
   let peakT = 0
+  let travel = 0
+  let sparseThrough = -Infinity
   let lastBeat = -Infinity
   let mutedUntil = -Infinity
   function floor() {
@@ -97,6 +101,8 @@ export function createBeatDetector(options = {}) {
   return {
     get floor() { return floor() },
     push(t, w) {
+      // Avoid measuring travel from a window with missing samples.
+      if (sparseThrough === null || (lastT !== null && t - lastT > 0.025)) sparseThrough = t + 0.18
       const dt = lastT === null ? 0.005 : Math.min(0.05, Math.max(0.001, t - lastT))
       lastT = t
       settled += dt
@@ -123,7 +129,8 @@ export function createBeatDetector(options = {}) {
       const strongLevel = Math.max(floor(), o.beatRise * mean)
       if (rising && (w < o.beatDrop * peak || w < level * 0.6)) {
         rising = false
-        const accepted = peakT - lastBeat >= o.beatGap
+        const enoughMotion = peak >= o.sharpBeatSpeed || travel >= o.beatTravel || peakT <= sparseThrough
+        const accepted = peakT - lastBeat >= o.beatGap && enoughMotion
         const strength = peak / Math.max(mean, 0.3)
         const tier = peak >= strongLevel ? "strong" : "weak"
         const p = peakT
@@ -134,6 +141,7 @@ export function createBeatDetector(options = {}) {
           return { type: "beat", t: p, strength, peakSpeed, tier }
         }
       } else if (w > level && t >= mutedUntil) {
+        travel = (rising ? travel : 0) + w * dt
         if (!rising || w > peak) { peak = w; peakT = t }
         rising = true
       }
@@ -145,6 +153,8 @@ export function createBeatDetector(options = {}) {
       peak = 0
     },
     gap() {
+      // With missing samples, the observed rotation only bounds the true travel from below.
+      sparseThrough = null
       mean = null
       rest = null
       lastT = null

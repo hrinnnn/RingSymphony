@@ -154,6 +154,47 @@ export function classifyAbsolute(frame) {
   return { direction: null, reason: "动作方向不明确", yaw, vertical }
 }
 
+// Judge the completed stroke from the motion before its peak. Measuring each frame
+// against its own up vector avoids mixing device axes as the wrist rotates. A clear
+// vertical impulse can resolve a moderate sideways component during an up/down stroke.
+export function classifyAbsoluteStroke(frames, peakTime) {
+  const base = classifyAbsolute(gravityFrame(frames, peakTime))
+  if (base.direction === "up" || base.direction === "down") return base
+  const approach = frames.filter(frame => frame.up && frame.t >= peakTime - 0.18 && frame.t <= peakTime)
+  if (approach.length < 5) return base
+  // Preserve the usual gravity-frame decision when the approach was captured continuously.
+  const sparse = approach.some((frame, i) => i > 0 && frame.t - approach[i - 1].t > 0.025)
+  if (base.direction && !sparse) return base
+
+  let yawRotation = 0
+  let rotation = 0
+  let drive = 0
+  let driveDirection = null
+  for (const [i, frame] of approach.entries()) {
+    yawRotation += dot(frame.gyr, frame.up)
+    rotation += norm(frame.gyr)
+    const first = approach[i - 2]
+    if (!first || frame.t - first.t > 0.03 || frame.t > peakTime - 0.025) continue
+    const middle = approach[i - 1]
+    const vertical = (dot(first.acc, first.up) + dot(middle.acc, middle.up) + dot(frame.acc, frame.up)) / 3 - G
+    // Keep the earlier of similarly strong impulses so braking does not replace the drive.
+    if (Math.abs(vertical) > Math.abs(drive) * 1.2) {
+      drive = vertical
+      const magnitude = [first, middle, frame].reduce((sum, sample) =>
+        sum + norm(sample.acc.map((value, axis) => value - G * sample.up[axis])), 0) / 3
+      driveDirection = magnitude > 1e-6 ? drive / magnitude : null
+    }
+  }
+  const yaw = rotation > 1e-6 ? yawRotation / rotation : 0
+  if (Math.abs(yaw) < 0.67 && Math.abs(drive) >= 1.25) {
+    return { direction: drive > 0 ? "up" : "down", reason: null, yaw, vertical: driveDirection }
+  }
+  if (!base.direction && Math.abs(yaw) > 0.48) {
+    return { ...base, direction: yaw > 0 ? "left" : "right", reason: null, yaw }
+  }
+  return base
+}
+
 // Rejects the arm coming back from a stroke, by the one fact that defines it: it is the reverse of
 // what just happened, and it happens soon.
 //

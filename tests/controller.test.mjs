@@ -6,6 +6,7 @@ import { createConductor, FREE_BARS, FREE_BPM, FREE_METER, FREE_SCORE } from '..
 import { buildPieceChart, PIECES } from '../src/repertoire.js'
 import { PART_INFO, PARTS } from '../src/mixer.js'
 import { createGestureLog } from '../src/ring/gesture-log.js'
+import { GOOD } from '../src/judge.js'
 import { lassoParts, pathLength } from '../src/lasso.js'
 import { LOOP_BARS } from '../src/score.js'
 const nodes = new Map()
@@ -252,6 +253,18 @@ gesture('beat', 'right', { dir: 'up' })
 assert.equal(ringErrors.length, previousErrors, 'a wrong-direction beat must not be used for latency compensation')
 assert.equal(node('#tally').textContent, '0050', 'a wrong direction on time is Good, not a miss')
 assert.equal(pageHits.at(-1)[3], '方向不符')
+await node('#retry').handlers.click()
+const openingRingBeat = ringStudy.cues[0]
+const hitCountBeforeStray = pageHits.length
+tick(openingRingBeat.time - GOOD - 0.01)
+gesture('beat', 'right', { dir: openingRingBeat.direction })
+assert.equal(pageHits.length, hitCountBeforeStray)
+assert.equal(node('#tally').textContent, '0000', 'an early ring movement cannot use up a note')
+tick(openingRingBeat.time)
+gesture('beat', 'right', { dir: 'up', tier: 'weak' })
+assert.equal(node('#tally').textContent, '0000', 'a weak wrong direction leaves the cue open')
+gesture('beat', 'right', { dir: openingRingBeat.direction })
+assert.equal(node('#tally').textContent, '0100', 'the intended beat can score after the stray input')
 ringLive.clear()
 await node('#back').handlers.click()
 
@@ -370,7 +383,14 @@ assert.deepEqual(poses.at(-1), ['left', 'circle'], 'a level lasso animates circl
 tick(circle.time + 0.02)
 assert.doesNotMatch(node('#cue-hint').textContent, /^圈住/, 'the prompt clears when the lasso scores')
 const swell = canon.cues.find(cue => cue.kind === 'dynamics')
-tick(swell.time); gesture('palm', 'right', { dir: swell.direction })
+const previousRightBeat = canon.cues.findLast(cue =>
+  cue.kind === 'beat' && cue.hand !== 'left' && cue.time < swell.time)
+tick(swell.time)
+const lateRightBeat = Math.min(swell.time - 0.1, previousRightBeat.time + GOOD * 0.9)
+gesture('beat', 'right', { dir: previousRightBeat.direction, age: swell.time - lateRightBeat })
+assert.equal(pageHits.at(-1)[0].time, previousRightBeat.time, 'the right hand scored a beat just before the swell')
+assert.match(node('#cue-hint').textContent, /^抬掌/)
+gesture('palm', 'right', { dir: swell.direction })
 assert.deepEqual(poses.at(-1), ['right', 'palm', 'up'], 'the right ring can answer a swell while the left hand conducts')
 assert.ok(Math.abs(audio.dynamicsDuration - (swell.until - swell.time)) < 1e-9, 'a written swell follows the full phrase')
 const cut = canon.cues.find(cue => cue.kind === 'cut')

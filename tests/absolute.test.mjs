@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { createBeatDetector, createGravity } from "../src/ring/detectors.js"
-import { AXIS_FLOOR, REVERSAL_WINDOW, classifyAbsolute, createReversalFilter, gravityFrame } from "../src/ring/absolute.js"
+import { AXIS_FLOOR, REVERSAL_WINDOW, classifyAbsolute, classifyAbsoluteStroke, createReversalFilter, gravityFrame } from "../src/ring/absolute.js"
 
 const G = 9.81
 
@@ -105,6 +105,7 @@ async function peaks(name) {
         t: beat.t,
         speed: beat.peakSpeed,
         frame: gravityFrame(history, beat.t),
+        strokeDirection: classifyAbsoluteStroke(history, beat.t).direction,
         axis: length > 1e-6 ? sum.map((v) => v / length) : null,
       })
     }
@@ -157,11 +158,13 @@ function strokesOnly(found) {
 let correct = 0
 let wrong = 0
 let declined = 0
+let strokeCorrect = 0
 const confusion = {}
 for (const [direction, names] of Object.entries(FILES)) {
   for (const name of names) {
     for (const peak of strokesOnly(await peaks(name))) {
       const got = classifyAbsolute(peak.frame).direction
+      if (peak.strokeDirection === direction) strokeCorrect += 1
       if (!got) declined += 1
       else if (got === direction) correct += 1
       else {
@@ -180,6 +183,7 @@ const total = correct + wrong + declined
 assert.ok(total > 140, `expected the recordings to yield a useful number of strokes, got ${total}`)
 assert.ok(correct / total >= 0.95,
   `absolute classification fell to ${(100 * correct / total).toFixed(0)}% (${correct}/${total}); confusion ${JSON.stringify(confusion)}`)
+assert.ok(strokeCorrect / total >= 0.95, `live stroke classifier fell to ${strokeCorrect}/${total}`)
 assert.ok(wrong / total <= 0.03,
   `too many strokes classified as the wrong direction: ${wrong}/${total}, ${JSON.stringify(confusion)}`)
 // Declines are the failure mode the drive window exists to remove, and the one the played sessions
@@ -194,4 +198,5 @@ assert.ok(vertical.every((key) => confusion[key] <= 2),
   `up and down are not separating: ${JSON.stringify(confusion)}`)
 
 console.log(`absolute: ${correct}/${total} correct (${(100 * correct / total).toFixed(0)}%), ${wrong} wrong, ${declined} declined`)
+console.log(`absolute live stroke classifier: ${strokeCorrect}/${total} correct`)
 console.log("ok - absolute direction")

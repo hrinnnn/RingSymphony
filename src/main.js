@@ -115,6 +115,7 @@ function setMode(next) {
   toolsEl.hidden = next !== "free"
   exitEl.hidden = next === "home"
   if (conductEl && next !== "playing" && next !== "count-in") conductEl.hidden = true
+  if (next !== "playing" && next !== "count-in") delete cueHintEl.dataset.handCue
   document.body.dataset.mode = next
   if (next === "home") { statusEl.textContent = "选关"; world.resize() }
 }
@@ -233,9 +234,9 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
   if (mode === "free") return freeBeat(direction, which)
   if (mode !== "playing" && mode !== "count-in") return
   const hand = which
+  const found = nearest(at, hand, "beat")
   if (!direction) {
-    const found = nearest(at, hand, "beat")
-    if (found && tier !== "weak") {
+    if (found && tier !== "weak" && (!fromRing || found.distance <= GOOD)) {
       const kind = gradeDistance(found.distance)
       scoreBeat(found, hand, kind, at, found.cue.direction && kind !== "miss" ? "方向未识别" : undefined)
     }
@@ -243,14 +244,16 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
       const now = inputNow()
       unclearRun = now - unclearAt < 6 ? unclearRun + 1 : 1
       unclearAt = now
-      if (unclearRun === 1) toast("方向不确定，这一拍按时间算")
+      if (unclearRun === 1) toast("这次没识别出打拍方向")
       else if (unclearRun === 4) toast("方向总是认不出，建议到「指环」面板补录该方向")
     }
     return
   }
-  const found = nearest(at, hand, "beat")
+  const wrongDirection = found?.cue.direction && found.cue.direction !== direction
+  // Give the real stroke a chance to score when a return movement is close to the same note.
+  // Misses from the ring are recorded on expiry, and weak conflicting strokes leave the note open.
+  if (fromRing && (found?.distance > GOOD || (tier === "weak" && (!found || wrongDirection)))) return
   world.pose(hand, "beat", direction)
-  if (tier === "weak" && !(found && found.distance <= GOOD * 2)) return
   if (!found) return
   if (fromRing && found.cue.direction === direction && found.distance <= GOOD) {
     ring?.reportError(at - found.cue.time)
@@ -258,7 +261,6 @@ function playBeat(direction, at = inputNow(), fromRing = false, tier = "strong",
   }
   let kind = gradeDistance(found.distance)
   // A wrong direction still counts when the time is right; it just cannot be Perfect.
-  const wrongDirection = found.cue.direction && found.cue.direction !== direction
   if (wrongDirection && kind === "perfect") kind = "good"
   scoreBeat(found, hand, kind, at, wrongDirection && kind !== "miss" ? "方向不符" : undefined)
 }
@@ -284,11 +286,14 @@ function resetHandInput() {
 }
 
 function playPalm(direction, at = inputNow(), hand = "left", fromRing = false) {
-  if (at < palmQuietUntil[hand]) return
-  if (mode === "free") return freeNudge(direction, hand)
+  if (mode === "free") {
+    if (at >= palmQuietUntil[hand]) freeNudge(direction, hand)
+    return
+  }
   if (mode !== "playing" && mode !== "count-in") return
   const found = nearest(at, hand, "dynamics")
   const matches = found && found.cue.direction === direction
+  if (at < palmQuietUntil[hand] && !(fromRing && matches && found.distance <= GOOD)) return
   if (matches || !fromRing) world.pose(hand, "palm", direction)
   if (matches) scoreCue(found.cue, gradeDistance(found.distance), found.delta)
 }
@@ -841,16 +846,20 @@ function loop() {
   const leftRing = !manual("left")
   const rightRing = !manual("right")
   let hint
+  let handCue = false
   const gestureLead = (cue) => cue.kind === "cut" ? chart.beat * 2 : cue.kind === "dynamics" ? chart.beat * 1.25 : warn
   if (now < chart.countIn) hint = `预备 · ${chart.meter - Math.min(chart.meter - 1, Math.floor(now / chart.beat))}`
   else if (nextGesture && nextGesture.time - now < gestureLead(nextGesture)) {
-    if (nextGesture.kind === "cue") hint = `指${PART_INFO[nextGesture.part].name}`
+    handCue = nextGesture.kind === "cue" || nextGesture.kind === "dynamics"
+    if (nextGesture.kind === "cue") hint = `指向${PART_INFO[nextGesture.part].name}`
     else if (nextGesture.kind === "circle") hint = `圈住${names(nextGesture.parts)}`
-    else if (nextGesture.kind === "cut") hint = "收束"
-    else if (nextGesture.direction === "up") hint = "渐强"
-    else hint = "渐弱"
+    else if (nextGesture.kind === "cut") hint = "握拳 · 收束"
+    else if (nextGesture.direction === "up") hint = "抬掌 · 渐强"
+    else hint = "压掌 · 渐弱"
   } else if (chart.musicEnd !== undefined && now >= chart.musicEnd) hint = "余音"
   else hint = rightRing ? "箭头落到判定线时，按箭头的方向打拍" : "箭头落到判定线时，按同方向打拍"
+  if (handCue) cueHintEl.dataset.handCue = ""
+  else delete cueHintEl.dataset.handCue
   if (cueHintEl.textContent !== hint) cueHintEl.textContent = hint
   if (mode === "playing") {
     const bar = Math.min(chart.bars, Math.floor((now - chart.countIn) / (chart.meter * chart.beat)) + 1)
