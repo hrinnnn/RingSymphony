@@ -946,6 +946,7 @@ function loop() {
     dir: soon.direction,
     progress: clock,
     lift: shownLift,
+    arrival: soon.kind === "cue" ? 1 - (soon.time - now) / gestureLead(soon) : undefined,
   }
   const scoreLine = conductLine(now)
   lane.update(now, chart, cues)

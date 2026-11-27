@@ -773,6 +773,39 @@ export function createWorld(canvas) {
   const swellSign = makeArrow()
   swellSign.removeFromParent()
   scene.add(swellSign)
+  const pointCue = new THREE.Group()
+  pointCue.name = "Point cue"
+  pointCue.visible = false
+  scene.add(pointCue)
+  const pointGem = mesh(pointCue, new THREE.OctahedronGeometry(0.16), glow(0xfff1cc), 0.675, 0.21)
+  const pointShaft = mesh(pointCue, new THREE.CylinderGeometry(0.035, 0.09, 1.4, 8), glow(0xffe3a8, 0.38), 0, -1.03)
+  const pointRail = box(pointCue, [1.35, 0.09, 0.03], glow(0x3a3124, 0.92))
+  const pointFill = box(pointCue, [1.35, 0.09, 0.04], glow(0xfff1cc), 0, 0, 0.012)
+  const pointHead = mesh(pointCue, new THREE.SphereGeometry(0.09, 12, 10), glow(0xfff6df), 0, 0, 0.06)
+  for (const piece of [pointGem, pointShaft, pointRail, pointFill, pointHead]) {
+    piece.castShadow = false
+    piece.receiveShadow = false
+  }
+  const pointCenter = new THREE.Vector3()
+  function updatePointCue(prompt, ensemble, t) {
+    pointCue.visible = false
+    if (prompt?.kind !== "point") return
+    const people = ensemble.filter(person => person.userData.part === prompt.part)
+    if (!people.length) return
+    pointCenter.set(0, 0, 0)
+    for (const person of people) pointCenter.add(person.position)
+    pointCenter.divideScalar(people.length)
+
+    pointCue.visible = true
+    pointCue.position.set(pointCenter.x, pointCenter.y + 2.58, pointCenter.z)
+    pointGem.position.y = 0.21 + Math.sin(t * 3) * 0.07
+    pointGem.scale.setScalar(1.5 + Math.sin(t * 4) * 0.12)
+    const arrival = clamp01(prompt.arrival ?? 0)
+    pointFill.scale.x = Math.max(0.02, arrival)
+    pointFill.position.x = -0.675 + 0.675 * pointFill.scale.x
+    pointHead.position.x = -0.675 + 1.35 * arrival
+    pointHead.scale.setScalar(arrival > 0.92 ? 1.45 : 1)
+  }
   function beatHands(cue) {
     if (cue.hand === "both") return ["left", "right"]
     return [cue.hand === "left" ? "left" : "right"]
@@ -900,6 +933,7 @@ export function createWorld(canvas) {
     })
     syncBeats(0, [], 1)
     swellSign.visible = false
+    pointCue.visible = false
   }
   const NO_SECTIONS = { pending: new Map() }
   function update(seconds, playing, sections = NO_SECTIONS) {
@@ -909,6 +943,7 @@ export function createWorld(canvas) {
     animatePlayers(ensemble, seconds, playing, sections, t)
     updateSectionOutline(t, dt, playing, sections)
     const asked = sections.prompt
+    updatePointCue(asked, ensemble, t)
     for (let i = notes.length - 1; i >= 0; i--) {
       const note = notes[i], data = note.userData
       data.age += dt

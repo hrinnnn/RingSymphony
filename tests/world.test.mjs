@@ -63,11 +63,21 @@ for (const [w, h] of [[1440, 900], [390, 844]]) {
 world.showChamber(false)
 width = 1440; height = 900; world.resize()
 console.log('Chamber placement: five pickable performers and clearance around the piano')
+const pointMarker = scene.getObjectByName('Point cue')
+const pointDiamond = pointMarker.children.find(child => child.geometry.type === 'OctahedronGeometry')
+const pointProgressHead = pointMarker.children.find(child => child.geometry.type === 'SphereGeometry')
 for (const part of ['violin', 'flute']) {
   world.update(5.5, new Set(), {
-    selected: new Set(), pending: new Map([[part, 'in']]), prompt: { kind: 'point', part },
+    selected: new Set(), pending: new Map([[part, 'in']]), prompt: { kind: 'point', part, arrival: part === 'violin' ? 0.25 : 1 },
   })
-  assert.deepEqual(globalThis.__outline.objects, world.players.filter(player => player.userData.part === part).map(player => player.userData.body))
+  const musicians = world.players.filter(player => player.userData.part === part)
+  assert.deepEqual(globalThis.__outline.objects, musicians.map(player => player.userData.body))
+  assert.ok(pointMarker.visible, 'the point cue has a marker in addition to the outline')
+  const centerX = musicians.reduce((sum, player) => sum + player.position.x, 0) / musicians.length
+  assert.ok(Math.abs(pointMarker.position.x - centerX) < 1e-8 && pointMarker.position.y > 2)
+  assert.ok(Math.abs(pointProgressHead.position.x - (part === 'violin' ? -0.3375 : 0.675)) < 1e-8)
+  const diamondScreen = pointDiamond.getWorldPosition(new Three.Vector3()).project(camera)
+  assert.ok(Math.abs(diamondScreen.x) < 1 && Math.abs(diamondScreen.y) < 1, 'the point cue stays in frame')
   const target = world.screenPositions().find(point => point.part === part)
   assert.equal(world.pick(target.x, target.y), part, 'point cues leave the musician selectable')
   assert.ok(scene.children.every(o => o.geometry?.type !== 'RingGeometry'), 'no stand-alone rings appear over the musicians')
@@ -75,6 +85,7 @@ for (const part of ['violin', 'flute']) {
 world.update(5.5, new Set(), {
   selected: new Set(), pending: new Map(), prompt: { kind: 'circle', parts: ['violin', 'flute'] },
 })
+assert.equal(pointMarker.visible, false, 'point markers disappear when the point cue ends')
 assert.deepEqual(globalThis.__outline.objects, world.players.filter(player => ['violin', 'flute'].includes(player.userData.part)).map(player => player.userData.body))
 world.update(7, new Set(), {
   selected: new Set(), pending: new Map(), prompt: { kind: 'swell', dir: 'up', parts: 'all', lift: 1 },
@@ -97,14 +108,18 @@ world.note('flute', { dur: 3 })
 const pointCue = { pending: new Map(), prompt: { kind: 'point', part: 'violin' } }
 visualTime += 1700
 world.update(5, new Set(['cello', 'piano']), pointCue)
+const diamondHeight = pointDiamond.position.y
 assert.deepEqual(new Set(globalThis.__outline.objects), new Set(world.players
   .filter(player => ['violin', 'cello', 'piano'].includes(player.userData.part))
   .map(player => player.userData.body)), 'sustained audible parts remain outlined together during a point cue')
 visualTime += 1700
 world.update(7, new Set(['cello', 'piano']), pointCue)
+assert.notEqual(pointDiamond.position.y, diamondHeight, 'the point cue diamond floats over time')
 assert.deepEqual(globalThis.__outline.objects, world.players
   .filter(player => player.userData.part === 'violin')
   .map(player => player.userData.body), 'finished notes leave only the point cue target outlined')
+world.reset()
+assert.equal(pointMarker.visible, false, 'reset clears the point cue immediately')
 const settle = () => { for (let i = 0; i < 12; i++) world.update(8, new Set()) }
 for (const [side, hand] of [['left', leftHand], ['right', rightHand]]) {
   for (const [direction, axis, sign] of [['up', 'y', 1], ['down', 'y', -1], ['left', 'x', -1], ['right', 'x', 1]]) {
